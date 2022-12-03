@@ -65,26 +65,26 @@ mod tests {
             1.0, 2.0, 3.0;
             4.0, 5.0, 6.0;
         ];
-        assert_eq!(m.data[0][0], 1.0);
-        assert_eq!(m.data[2][1], 6.0);
+        assert_eq!(m[(0, 0)], 1.0);
+        assert_eq!(m[(1, 2)], 6.0);
 
         let v = vector![1.0, 2.0, 3.0];
-        assert_eq!(v.data[0][0], 1.0);
-        assert_eq!(v.data[2][0], 3.0);
+        assert_eq!(v[0], 1.0);
+        assert_eq!(v[2], 3.0);
 
         let z = zeros!(2, 3);
-        assert_eq!(z.data[0][0], 0.0);
-        assert_eq!(z.data[2][1], 0.0);
+        assert_eq!(z[(0, 0)], 0.0);
+        assert_eq!(z[(1, 2)], 0.0);
 
         let z = zeros!(3);
-        assert_eq!(z.data[2][2], 0.0);
+        assert_eq!(z[(2, 2)], 0.0);
 
         let o = ones!(2, 3);
-        assert_eq!(o.data[0][0], 1.0);
-        assert_eq!(o.data[2][1], 1.0);
+        assert_eq!(o[(0, 0)], 1.0);
+        assert_eq!(o[(1, 2)], 1.0);
 
         let o = ones!(3);
-        assert_eq!(o.data[2][2], 1.0);
+        assert_eq!(o[(2, 2)], 1.0);
     }
 
     #[test]
