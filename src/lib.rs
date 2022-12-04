@@ -1,12 +1,15 @@
 #![no_std]
 
+mod fmt;
 mod index;
 mod new;
 mod num;
 mod ops;
 mod util;
+mod view;
 
 use core::slice;
+use view::{Column, Row};
 
 #[doc(hidden)]
 pub use vectrix_macro as proc_macro;
@@ -46,6 +49,42 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), M * N) }
+    }
+
+    /// Returns an iterator over the underlying data.
+    #[inline]
+    pub fn iter(&self) -> slice::Iter<'_, T> {
+        self.as_slice().iter()
+    }
+
+    /// Returns a mutable iterator over the underlying data.
+    #[inline]
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
+        self.as_mut_slice().iter_mut()
+    }
+
+    /// Returns a reference to the `i`-th row of this matrix.
+    #[inline]
+    pub fn row(&self, i: usize) -> &Row<M, N, T> {
+        Row::new(&self.as_slice()[i..])
+    }
+
+    /// Returns a mutable reference to the `i`-th row of this matrix.
+    #[inline]
+    pub fn row_mut(&mut self, i: usize) -> &mut Row<M, N, T> {
+        Row::new_mut(&mut self.as_mut_slice()[i..])
+    }
+
+    /// Returns a reference to the `i`-th column of this matrix.
+    #[inline]
+    pub fn column(&self, i: usize) -> &Column<M, N, T> {
+        Column::new(&self.data[i])
+    }
+
+    /// Returns a mutable reference to the `i`-th column of this matrix.
+    #[inline]
+    pub fn column_mut(&mut self, i: usize) -> &mut Column<M, N, T> {
+        Column::new_mut(&mut self.data[i])
     }
 }
 
