@@ -146,4 +146,51 @@ impl<T, const M: usize, const N: usize> Row<M, N, T> {
     {
         (0..N).map(|i| self[i] * other[i]).sum()
     }
+    #[inline]
+    pub fn dot_partial<const P: usize>(
+        &self,
+        other: &Column<N, P, T>,
+        range: core::ops::Range<usize>,
+    ) -> T
+    where
+        T: Copy + Mul<Output = T> + Sum,
+    {
+        // let f = range.start;
+        (0..N)
+            .skip(range.start)
+            .take(range.count())
+            .map(|i| self[i] * other[i])
+            .sum()
+    }
+}
+
+#[test]
+fn iter() {
+    use super::*;
+    let m = matrix![
+        1.0, 2.0, 3.0, 4.0;
+        5.0, 6.0, 7.0, 8.0;
+    ];
+    let mut r = m.row(1).get(1..3).unwrap().iter();
+    assert_eq!(r.next(), Some(&6.0));
+    assert_eq!(r.next(), Some(&7.0));
+    assert_eq!(r.next(), None);
+
+    let mut c = m.column(2).get(0..2).unwrap().iter();
+    assert_eq!(c.next(), Some(&3.0));
+    assert_eq!(c.next(), Some(&7.0));
+    assert_eq!(c.next(), None);
+}
+
+#[test]
+fn dot_partial() {
+    use super::*;
+    let m = matrix![
+         1.0,  2.0,  3.0,  4.0;
+         5.0,  6.0,  7.0,  8.0;
+         9.0, 10.0, 12.0, 13.0;
+        14.0, 15.0, 16.0, 17.0;
+    ];
+    let d = m.row(1).dot_partial(m.column(2), 1..3);
+    assert_eq!(d, 126.0);
 }

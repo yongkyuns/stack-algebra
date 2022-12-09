@@ -51,6 +51,18 @@ macro_rules! impl_abs {
     )+)
 }
 
+impl Abs for f32 {
+    fn abs(self) -> Self {
+        libm::fabsf(self)
+    }
+}
+
+impl Abs for f64 {
+    fn abs(self) -> Self {
+        libm::fabs(self)
+    }
+}
+
 macro_rules! impl_abs_self {
     ($($ty:ident)+) => ($(
         impl Abs for $ty {
@@ -72,5 +84,3 @@ impl_zero! { 0.0 f32 f64 }
 
 impl_abs_self! { usize u8 u16 u32 u64 u128 }
 impl_abs! { isize i8 i16 i32 i64 i128 }
-#[cfg(feature = "std")]
-impl_abs! { f32 f64 }

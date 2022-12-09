@@ -1,6 +1,7 @@
 use crate::Matrix;
 
 mod private {
+
     pub trait Sealed {}
     impl Sealed for usize {}
     impl Sealed for (usize, usize) {}
