@@ -269,6 +269,58 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     // }
 }
 
+#[cfg(test)]
+impl<const M: usize, const N: usize, T: approx::AbsDiffEq> approx::AbsDiffEq for Matrix<M, N, T>
+where
+    T::Epsilon: Copy,
+{
+    type Epsilon = T::Epsilon;
+    fn default_epsilon() -> Self::Epsilon {
+        T::default_epsilon()
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        let mut eq = true;
+        for j in 0..N {
+            for i in 0..M {
+                eq = eq && T::abs_diff_eq(&self[(i, j)], &other[(i, j)], epsilon);
+                if eq == false {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+impl<const M: usize, const N: usize, T: approx::RelativeEq> approx::RelativeEq for Matrix<M, N, T>
+where
+    T::Epsilon: Copy,
+{
+    fn default_max_relative() -> Self::Epsilon {
+        T::default_max_relative()
+    }
+
+    fn relative_eq(
+        &self,
+        other: &Self,
+        epsilon: Self::Epsilon,
+        max_relative: Self::Epsilon,
+    ) -> bool {
+        let mut eq = true;
+        for j in 0..N {
+            for i in 0..M {
+                eq = eq && T::relative_eq(&self[(i, j)], &other[(i, j)], epsilon, max_relative);
+                if eq == false {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
 /// A matrix with one row and `N` columns.
 pub type RowVector<const N: usize, T> = Matrix<1, N, T>;
 
@@ -277,6 +329,8 @@ pub type Vector<const M: usize, T> = Matrix<M, 1, T>;
 
 #[cfg(test)]
 mod tests {
+    use approx::assert_relative_eq;
+
     use super::*;
 
     #[test]

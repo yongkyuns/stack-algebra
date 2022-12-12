@@ -154,6 +154,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use approx::{assert_abs_diff_eq, assert_relative_eq};
+
     use super::*;
     use crate::matrix;
 
@@ -192,25 +194,25 @@ mod tests {
             1.0, 1.0, 1.0;
             0.0, 4.0, 9.0;
         ];
-        assert_eq!(A.det(), 24.000000000000007);
+        assert_abs_diff_eq!(A.det(), 24.0, epsilon = 1e-10);
 
         let A = matrix![
             3.0, 7.0;
             1.0, -4.0;
         ];
-        assert_eq!(A.det(), -19.0);
+        assert_abs_diff_eq!(A.det(), -19.0, epsilon = 1e-10);
 
         let A = matrix![
             1.0, 2.0;
             4.0, 8.0;
         ];
-        assert_eq!(A.det(), 0.0);
+        assert_abs_diff_eq!(A.det(), 0.0, epsilon = 1e-10);
 
         let A = matrix![
             1.0, 1.0;
             2.0, 2.0;
         ];
-        assert_eq!(A.det(), 0.0);
+        assert_abs_diff_eq!(A.det(), 0.0, epsilon = 1e-10);
 
         let A = matrix![
             1.0, 2.0, 3.0, 4.0;
@@ -218,7 +220,7 @@ mod tests {
             4.0, 10.0, 14.0, 6.0;
             3.0, 4.0, 2.0, 7.0;
         ];
-        assert_eq!(A.det(), 0.0);
+        assert_abs_diff_eq!(A.det(), 0.0, epsilon = 1e-10);
 
         let A = matrix![
             1.0, 2.0, 3.0, 4.0;
@@ -226,7 +228,7 @@ mod tests {
             4.0, 10.0, 14.0, 6.0;
             3.0, 4.0, 2.0, 7.0;
         ];
-        assert_eq!(A.det(), 0.0);
+        assert_abs_diff_eq!(A.det(), 0.0, epsilon = 1e-10);
 
         let A = matrix![
             11.0, 9.0, 24.0, 2.0;
@@ -234,7 +236,7 @@ mod tests {
             3.0, 17.0, 18.0, 1.0;
             2.0, 5.0, 7.0, 1.0;
         ];
-        assert_eq!(A.det(), -284.0000000000006);
+        assert_abs_diff_eq!(A.det(), -284.0, epsilon = 1e-10);
 
         let A = matrix![
               2.0, 3.0, 0.0, 9.0, 0.0, 1.0, 0.0, 1.0, 1.0, 2.0, 1.0;
@@ -249,7 +251,7 @@ mod tests {
               2.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0;
               2.0, 6.0, 0.0, 1.0, 0.0,30.0, 0.0, 2.0, 3.0, 2.0, 1.0;
         ];
-        assert_eq!(A.det(), -5.195843755245731e-13);
+        assert_abs_diff_eq!(A.det(), 0.0, epsilon = 1e-10);
     }
 
     #[test]
@@ -259,7 +261,13 @@ mod tests {
             0.0,-1.0,-8.0;
             0.0, 0.0,96.0;
         ];
-        let I = Matrix::invert_upper_triangular(&mut A);
+        let I = Matrix::invert_upper_triangular(&mut A).unwrap();
+        let E = matrix![
+            0.5, 2.0, 0.13541667;
+            0.0,-1.0,-0.08333333;
+            0.0, 0.0, 0.01041667;
+        ];
+        assert_relative_eq!(I, E, max_relative = 1e-6);
     }
 
     #[test]
@@ -269,7 +277,13 @@ mod tests {
             8.0, 1.0, 0.0;
             4.0, 9.0, 1.0;
         ];
-        let I = Matrix::invert_lower_triangular(&mut A);
+        let I = Matrix::invert_lower_triangular(&mut A).unwrap();
+        let E = matrix![
+            1.0, 0.0, 0.0;
+            -8.0, 1.0, 0.0;
+            68.0, -9.0, 1.0;
+        ];
+        assert_relative_eq!(I, E, max_relative = 1e-6);
     }
 
     #[test]
@@ -279,30 +293,25 @@ mod tests {
             1.0, 1.0, 1.0;
             0.0, 4.0, 9.0;
         ];
-        // assert_eq!(A.det(), 24.000000000000007);
-        // let (L, U, P) = A.lu();
-        // println!("{}", &L);
-        // println!("{}", &U);
-        // println!("{}", &P);
-        // println!("{}", L.inv().unwrap());
-        // println!("{}", U.inv().unwrap());
-        // println!("{}", U.inv().unwrap() * L.inv().unwrap());
-        // println!("{}", A.inv().unwrap());
-        // println!("{}", A.inv().unwrap() * P.inv().unwrap());
-        // println!("{}", P.inv().unwrap() * A.inv().unwrap());
+        let exp = matrix![
+            0.20833333, -0.25, -0.04166667;
+                -0.375,  2.25, -0.125;
+            0.16666667,  -1.0,  0.16666667;
+        ];
+        assert_relative_eq!(A.inv().unwrap(), exp, max_relative = 1e-6);
 
-        // let A = matrix![
-        //     1.0, 2.0, 3.0, 4.0;
-        //     2.0, 5.0, 7.0, 3.0;
-        //     4.0, 10.0, 14.0, 6.0;
-        //     3.0, 4.0, 2.0, 7.0;
-        // ];
         let A = matrix![
             11.0, 9.0, 24.0, 2.0;
             1.0, 5.0, 2.0, 6.0;
             3.0, 17.0, 18.0, 1.0;
             2.0, 5.0, 7.0, 1.0;
         ];
-        println!("{}", A.inv().unwrap());
+        let exp = matrix![
+         0.72183099,  0.46126761,  1.02112676, -5.23239437;
+         0.28521127,  0.23591549,  0.59859155, -2.58450704;
+         -0.37676056, -0.29929577, -0.65492958,  3.20422535;
+         -0.23239437, -0.00704225, -0.45070423,  1.95774648;
+        ];
+        assert_relative_eq!(A.inv().unwrap(), exp, max_relative = 1e-6);
     }
 }
