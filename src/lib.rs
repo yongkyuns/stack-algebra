@@ -11,6 +11,7 @@ mod ops;
 mod util;
 mod view;
 
+use core::mem::MaybeUninit;
 pub use core::slice;
 pub use index::MatrixIndex;
 // pub use iter::{IntoIter, IterColumns, IterColumnsMut, IterRows, IterRowsMut};
@@ -179,11 +180,12 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
 
     /// Clone the current matrix.
     #[inline]
-    pub fn clone(&self) -> Matrix<N, M, T>
+    pub fn clone(&self) -> Matrix<M, N, T>
     where
-        T: Copy + Zero,
+        T: Copy,
     {
-        let mut clone = zeros!(N, M, T);
+        // let mut clone = zeros!(M, N, T);
+        let mut clone = unsafe { Matrix::<M, N, MaybeUninit<T>>::uninit().assume_init() };
         for c in 0..N {
             for r in 0..M {
                 clone[(r, c)] = self[(r, c)];
@@ -196,12 +198,13 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     #[inline]
     pub fn transpose(&self) -> Matrix<N, M, T>
     where
-        T: Copy + Zero,
+        T: Clone,
     {
-        let mut transpose = zeros!(N, M, T);
+        // let mut transpose = zeros!(N, M, T);
+        let mut transpose = unsafe { Matrix::<N, M, MaybeUninit<T>>::uninit().assume_init() };
         for c in 0..N {
             for r in 0..M {
-                transpose[(c, r)] = self[(r, c)];
+                transpose[(c, r)] = self[(r, c)].clone();
             }
         }
         transpose
@@ -211,7 +214,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     #[inline]
     pub fn T(&self) -> Matrix<N, M, T>
     where
-        T: Copy + Zero,
+        T: Clone,
     {
         self.transpose()
     }
@@ -356,5 +359,13 @@ mod tests {
             3.0, 6.0;
         ];
         assert_eq!(m.transpose(), t);
+    }
+    #[test]
+    fn clone() {
+        let a = matrix![
+            1.0, 2.0, 3.0;
+            5.0, 6.0, 4.0;
+        ];
+        assert_eq!(a.clone(), a);
     }
 }

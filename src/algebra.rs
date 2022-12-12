@@ -3,7 +3,7 @@
 use core::{
     fmt,
     iter::Sum,
-    ops::{Div, Mul, Neg, Sub},
+    ops::{Add, Div, Mul, Neg, Sub},
 };
 
 use crate::{
@@ -21,13 +21,26 @@ where
         + One
         + fmt::Display
         + Sum
+        + Add<Output = T>
         + Neg<Output = T>
         + Mul<Output = T>
         + Sub<Output = T>
         + Div<Output = T>,
 {
-    pub fn determinant(&self) -> T {
-        let (L, U, _) = self.lu_decomp();
+    pub fn inv(&self) -> Option<Self> {
+        let (mut L, mut U, P) = self.lu();
+        if let (Some(L_inv), Some(U_inv)) = (
+            Self::invert_lower_triangular(&mut L),
+            Self::invert_upper_triangular(&mut U),
+        ) {
+            Some(U_inv * L_inv * P)
+        } else {
+            None
+        }
+    }
+
+    pub fn det(&self) -> T {
+        let (L, U, _) = self.lu();
         let mut det = T::one();
         for i in 0..D {
             det = det * L[(i, i)] * U[(i, i)];
@@ -38,7 +51,7 @@ where
         det
     }
 
-    pub fn lu_decomp(&self) -> (Matrix<D, D, T>, Matrix<D, D, T>, Matrix<D, D, T>) {
+    pub fn lu(&self) -> (Matrix<D, D, T>, Matrix<D, D, T>, Matrix<D, D, T>) {
         let mut P = eye!(D, T);
         let mut L = eye!(D, T);
         let mut U = self.clone();
@@ -52,6 +65,53 @@ where
             Self::gauss_eliminate(&mut L, &mut U, d);
         }
         (L, U, P)
+    }
+
+    fn invert_upper_triangular(U: &mut Matrix<D, D, T>) -> Option<Matrix<D, D, T>> {
+        let mut I = eye!(D, T);
+        for i in (0..D).rev() {
+            let diag = U[(i, i)];
+            if diag == T::zero() {
+                return None;
+            }
+            let coeff = T::one() / diag;
+
+            // Make current diagonal identity and scale by same in the row of `I`
+            U[(i, i)] = U[(i, i)] * coeff;
+            for c in i..D {
+                I[(i, c)] = I[(i, c)] * coeff;
+            }
+
+            // Perform gaussian elimination on upper rows of current diagonal
+            for r in 0..i {
+                let coeff = -U[(r, i)];
+                U[(r, i)] = T::zero();
+                for c in i..D {
+                    I[(r, c)] = I[(r, c)] + coeff * I[(i, c)];
+                }
+            }
+        }
+        Some(I)
+    }
+
+    fn invert_lower_triangular(L: &mut Matrix<D, D, T>) -> Option<Matrix<D, D, T>> {
+        let mut I = eye!(D, T);
+        for i in 0..D {
+            let diag = L[(i, i)];
+            if diag != T::one() {
+                return None;
+            }
+            for r in (i + 1)..D {
+                let coeff = -L[(r, i)];
+                L[(r, i)] = T::zero();
+                for c in 0..(i + 1) {
+                    I[(r, c)] = I[(r, c)] + coeff * I[(i, c)];
+                }
+            }
+        }
+        // println!("{}", L);
+        // println!("{}", I);
+        Some(I)
     }
 
     fn gauss_eliminate(L: &mut Matrix<D, D, T>, U: &mut Matrix<D, D, T>, diag: usize) {
@@ -94,6 +154,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::matrix;
 
     #[test]
@@ -103,7 +164,7 @@ mod tests {
             2.0, 4.0, 7.0;
             1.0, 1.0, 0.0;
         ];
-        let (L, U, P) = A.lu_decomp();
+        let (L, U, P) = A.lu();
         let L_exp = matrix![
             1.0,  0.0, 0.0;
             0.5,  1.0, 0.0;
@@ -131,25 +192,25 @@ mod tests {
             1.0, 1.0, 1.0;
             0.0, 4.0, 9.0;
         ];
-        assert_eq!(A.determinant(), 24.000000000000007);
+        assert_eq!(A.det(), 24.000000000000007);
 
         let A = matrix![
             3.0, 7.0;
             1.0, -4.0;
         ];
-        assert_eq!(A.determinant(), -19.0);
+        assert_eq!(A.det(), -19.0);
 
         let A = matrix![
             1.0, 2.0;
             4.0, 8.0;
         ];
-        assert_eq!(A.determinant(), 0.0);
+        assert_eq!(A.det(), 0.0);
 
         let A = matrix![
             1.0, 1.0;
             2.0, 2.0;
         ];
-        assert_eq!(A.determinant(), 0.0);
+        assert_eq!(A.det(), 0.0);
 
         let A = matrix![
             1.0, 2.0, 3.0, 4.0;
@@ -157,7 +218,7 @@ mod tests {
             4.0, 10.0, 14.0, 6.0;
             3.0, 4.0, 2.0, 7.0;
         ];
-        assert_eq!(A.determinant(), 0.0);
+        assert_eq!(A.det(), 0.0);
 
         let A = matrix![
             1.0, 2.0, 3.0, 4.0;
@@ -165,7 +226,7 @@ mod tests {
             4.0, 10.0, 14.0, 6.0;
             3.0, 4.0, 2.0, 7.0;
         ];
-        assert_eq!(A.determinant(), 0.0);
+        assert_eq!(A.det(), 0.0);
 
         let A = matrix![
             11.0, 9.0, 24.0, 2.0;
@@ -173,7 +234,7 @@ mod tests {
             3.0, 17.0, 18.0, 1.0;
             2.0, 5.0, 7.0, 1.0;
         ];
-        assert_eq!(A.determinant(), -284.0000000000006);
+        assert_eq!(A.det(), -284.0000000000006);
 
         let A = matrix![
               2.0, 3.0, 0.0, 9.0, 0.0, 1.0, 0.0, 1.0, 1.0, 2.0, 1.0;
@@ -188,6 +249,60 @@ mod tests {
               2.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0;
               2.0, 6.0, 0.0, 1.0, 0.0,30.0, 0.0, 2.0, 3.0, 2.0, 1.0;
         ];
-        assert_eq!(A.determinant(), -5.195843755245731e-13);
+        assert_eq!(A.det(), -5.195843755245731e-13);
+    }
+
+    #[test]
+    fn upper_inverse() {
+        let mut A = matrix![
+            2.0, 4.0, 6.0;
+            0.0,-1.0,-8.0;
+            0.0, 0.0,96.0;
+        ];
+        let I = Matrix::invert_upper_triangular(&mut A);
+    }
+
+    #[test]
+    fn lower_inverse() {
+        let mut A = matrix![
+            1.0, 0.0, 0.0;
+            8.0, 1.0, 0.0;
+            4.0, 9.0, 1.0;
+        ];
+        let I = Matrix::invert_lower_triangular(&mut A);
+    }
+
+    #[test]
+    fn inverse() {
+        let A = matrix![
+            6.0, 2.0, 3.0;
+            1.0, 1.0, 1.0;
+            0.0, 4.0, 9.0;
+        ];
+        // assert_eq!(A.det(), 24.000000000000007);
+        // let (L, U, P) = A.lu();
+        // println!("{}", &L);
+        // println!("{}", &U);
+        // println!("{}", &P);
+        // println!("{}", L.inv().unwrap());
+        // println!("{}", U.inv().unwrap());
+        // println!("{}", U.inv().unwrap() * L.inv().unwrap());
+        // println!("{}", A.inv().unwrap());
+        // println!("{}", A.inv().unwrap() * P.inv().unwrap());
+        // println!("{}", P.inv().unwrap() * A.inv().unwrap());
+
+        // let A = matrix![
+        //     1.0, 2.0, 3.0, 4.0;
+        //     2.0, 5.0, 7.0, 3.0;
+        //     4.0, 10.0, 14.0, 6.0;
+        //     3.0, 4.0, 2.0, 7.0;
+        // ];
+        let A = matrix![
+            11.0, 9.0, 24.0, 2.0;
+            1.0, 5.0, 2.0, 6.0;
+            3.0, 17.0, 18.0, 1.0;
+            2.0, 5.0, 7.0, 1.0;
+        ];
+        println!("{}", A.inv().unwrap());
     }
 }
