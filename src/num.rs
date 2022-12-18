@@ -6,6 +6,12 @@ pub trait Abs {
     fn abs(self) -> Self;
 }
 
+/// Defines the square-root value for a type.
+pub trait Sqrt {
+    /// Returns the square-root value of this type.
+    fn sqrt(self) -> Self;
+}
+
 /// Defines a multiplicative identity element for a type.
 pub trait One {
     /// Returns the multiplicative identity element of this type.
@@ -60,6 +66,18 @@ impl Abs for f32 {
 impl Abs for f64 {
     fn abs(self) -> Self {
         libm::fabs(self)
+    }
+}
+
+impl Sqrt for f32 {
+    fn sqrt(self) -> Self {
+        libm::sqrtf(self)
+    }
+}
+
+impl Sqrt for f64 {
+    fn sqrt(self) -> Self {
+        libm::sqrt(self)
     }
 }
 

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use core::{
-    fmt,
+    // fmt,
     iter::Sum,
     ops::{Add, Div, Mul, Neg, Sub},
 };
@@ -19,7 +19,7 @@ where
         + Copy
         + Zero
         + One
-        + fmt::Display
+        // + fmt::Display
         + Sum
         + Add<Output = T>
         + Neg<Output = T>

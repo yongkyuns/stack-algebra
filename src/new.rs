@@ -110,6 +110,90 @@ macro_rules! eye {
     }};
 }
 
+#[macro_export]
+macro_rules! diag {
+    ($d1:expr, $d2:expr) => {{
+        let mut m = $crate::Matrix::<2, 2>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m
+    }};
+    ($d1:expr, $d2:expr, $ty:ty) => {{
+        let mut m = $crate::Matrix::<2, 2, $ty>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m
+    }};
+    ($d1:expr, $d2:expr, $d3:expr) => {{
+        let mut m = $crate::Matrix::<3, 3>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m[(2, 2)] = $d3;
+        m
+    }};
+    ($d1:expr, $d2:expr, $d3:expr, $ty:ty) => {{
+        let mut m = $crate::Matrix::<3, 3, $ty>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m[(2, 2)] = $d3;
+        m
+    }};
+    ($d1:expr, $d2:expr, $d3:expr, $d4:expr) => {{
+        let mut m = $crate::Matrix::<4, 4>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m[(2, 2)] = $d3;
+        m[(3, 3)] = $d4;
+        m
+    }};
+    ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $ty:ty) => {{
+        let mut m = $crate::Matrix::<4, 4, $ty>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m[(2, 2)] = $d3;
+        m[(3, 3)] = $d4;
+        m
+    }};
+    ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $d5:expr) => {{
+        let mut m = $crate::Matrix::<5, 5>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m[(2, 2)] = $d3;
+        m[(3, 3)] = $d4;
+        m[(4, 4)] = $d5;
+        m
+    }};
+    ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $d5:expr, $ty:ty) => {{
+        let mut m = $crate::Matrix::<5, 5, $ty>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m[(2, 2)] = $d3;
+        m[(3, 3)] = $d4;
+        m[(4, 4)] = $d5;
+        m
+    }};
+    ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $d5:expr, $d6:expr) => {{
+        let mut m = $crate::Matrix::<6, 6>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m[(2, 2)] = $d3;
+        m[(3, 3)] = $d4;
+        m[(4, 4)] = $d5;
+        m[(5, 5)] = $d6;
+        m
+    }};
+    ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $d5:expr, $d6:expr, $ty:ty) => {{
+        let mut m = $crate::Matrix::<6, 6, $ty>::zeros();
+        m[(0, 0)] = $d1;
+        m[(1, 1)] = $d2;
+        m[(2, 2)] = $d3;
+        m[(3, 3)] = $d4;
+        m[(4, 4)] = $d5;
+        m[(5, 5)] = $d6;
+        m
+    }};
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Uninit related methods
 ////////////////////////////////////////////////////////////////////////////////
@@ -265,5 +349,67 @@ fn collect_panic<const M: usize, const N: usize>(len: usize) -> ! {
             "collect iterator of length {} into `Matrix<_, {}, {}>`",
             len, M, N
         );
+    }
+}
+
+#[cfg(test)]
+mod new_test {
+    use approx::assert_relative_eq;
+    #[test]
+    fn diag() {
+        let d = diag!(0.1, 0.2);
+        let e = matrix![
+        0.1, 0.0;
+        0.0, 0.2;
+        ];
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+        let d = diag!(0.1, 0.2, f32);
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+
+        let d = diag!(0.1, 0.2, 0.3);
+        let e = matrix![
+        0.1, 0.0, 0.0;
+        0.0, 0.2, 0.0;
+        0.0, 0.0, 0.3;
+        ];
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+        let d = diag!(0.1, 0.2, 0.3, f32);
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+
+        let d = diag!(0.1, 0.2, 0.3, 0.4);
+        let e = matrix![
+        0.1, 0.0, 0.0, 0.0;
+        0.0, 0.2, 0.0, 0.0;
+        0.0, 0.0, 0.3, 0.0;
+        0.0, 0.0, 0.0, 0.4;
+        ];
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+        let d = diag!(0.1, 0.2, 0.3, 0.4, f32);
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+
+        let d = diag!(0.1, 0.2, 0.3, 0.4, 0.5);
+        let e = matrix![
+        0.1, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.2, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.3, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.4, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.5;
+        ];
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+        let d = diag!(0.1, 0.2, 0.3, 0.4, 0.5, f32);
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+
+        let d = diag!(0.1, 0.2, 0.3, 0.4, 0.5, 0.6);
+        let e = matrix![
+        0.1, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.2, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.3, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.4, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.5, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.6;
+        ];
+        assert_relative_eq!(d, e, max_relative = 1e-6);
+        let d = diag!(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, f32);
+        assert_relative_eq!(d, e, max_relative = 1e-6);
     }
 }

@@ -1,4 +1,4 @@
-// #![no_std]
+#![no_std]
 #![allow(non_snake_case)]
 
 mod algebra;
@@ -11,9 +11,13 @@ mod ops;
 mod util;
 mod view;
 
-use core::mem::MaybeUninit;
 pub use core::slice;
+use core::{
+    mem::MaybeUninit,
+    ops::{Add, Mul},
+};
 pub use index::MatrixIndex;
+use num::{Abs, Sqrt};
 // pub use iter::{IntoIter, IterColumns, IterColumnsMut, IterRows, IterRowsMut};
 pub use num::{One, Zero};
 pub use view::{Column, Row};
@@ -219,6 +223,21 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         self.transpose()
     }
 
+    /// Compute the Frobenius norm
+    pub fn norm(&self) -> T
+    where
+        T: Copy + Zero + Abs + Add<Output = T> + Sqrt + Mul<Output = T>,
+    {
+        let mut tmp = T::zero();
+        for c in 0..N {
+            for r in 0..M {
+                let v = self[(r, c)].abs();
+                tmp = tmp + v * v;
+            }
+        }
+        tmp.sqrt()
+    }
+
     // /// Returns an iterator over the rows in this matrix.
     // #[inline]
     // pub fn iter_rows(&self) -> IterRows<'_, T, M, N> {
@@ -329,9 +348,8 @@ pub type Vector<const M: usize, T> = Matrix<M, 1, T>;
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_relative_eq;
-
     use super::*;
+    use approx::assert_relative_eq;
 
     #[test]
     fn create() {
@@ -421,5 +439,13 @@ mod tests {
             5.0, 6.0, 4.0;
         ];
         assert_eq!(a.clone(), a);
+    }
+    #[test]
+    fn norm() {
+        let m = matrix![
+            1.0,-2.0;
+           -3.0, 6.0;
+        ];
+        assert_relative_eq!(m.norm(), 7.0710678, max_relative = 1e-6);
     }
 }
