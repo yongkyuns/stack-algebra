@@ -14,7 +14,7 @@ mod view;
 pub use core::slice;
 use core::{
     mem::MaybeUninit,
-    ops::{Add, Mul},
+    ops::{Add, Div, Mul, Sub},
 };
 pub use index::MatrixIndex;
 use num::{Abs, Sqrt};
@@ -226,7 +226,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Compute the Frobenius norm
     pub fn norm(&self) -> T
     where
-        T: Copy + Zero + Abs + Add<Output = T> + Sqrt + Mul<Output = T>,
+        T: Copy + Zero + Abs + Sqrt + Add<Output = T> + Mul<Output = T>,
     {
         let mut tmp = T::zero();
         for c in 0..N {
@@ -236,6 +236,14 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
             }
         }
         tmp.sqrt()
+    }
+
+    /// Compute the Frobenius norm
+    pub fn normalize(self) -> Self
+    where
+        T: Copy + Zero + Abs + Sqrt + Add<Output = T> + Mul<Output = T> + Div<Output = T>,
+    {
+        self / self.norm()
     }
 
     // /// Returns an iterator over the rows in this matrix.
@@ -288,7 +296,154 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     // }
 }
 
-#[cfg(test)]
+////////////////////////////////////////////////////////////////////////////////
+// Square matrix functions
+////////////////////////////////////////////////////////////////////////////////
+impl<const N: usize, T> Matrix<N, N, T> {
+    /// Compute the sum of diagonal elements
+    pub fn trace(&self) -> T
+    where
+        T: Zero,
+        for<'a> &'a T: Add<&'a T, Output = T>,
+    {
+        let mut t = T::zero();
+        for i in 0..N {
+            t = &t + &self[(i, i)];
+        }
+        t
+    }
+}
+
+impl<T> Matrix<3, 1, T> {
+    pub fn cross(&self, other: &Self) -> Self
+    where
+        for<'a> &'a T: Mul<&'a T, Output = T> + Sub<&'a T, Output = T>,
+    {
+        let mut res = unsafe { Matrix::<3, 1, MaybeUninit<T>>::uninit().assume_init() };
+        res[0] = &(&self[1] * &other[2]) - &(&self[2] * &other[1]);
+        res[1] = &(&self[2] * &other[0]) - &(&self[0] * &other[2]);
+        res[2] = &(&self[0] * &other[1]) - &(&self[1] * &other[0]);
+        res
+    }
+}
+
+pub fn cross<T>(a: &Matrix<3, 1, T>, b: &Matrix<3, 1, T>) -> Matrix<3, 1, T>
+where
+    for<'a> &'a T: Mul<&'a T, Output = T> + Sub<&'a T, Output = T>,
+{
+    a.cross(b)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// 3D/4D Vector Type Conversion to Tuple
+////////////////////////////////////////////////////////////////////////////////
+
+impl<T: Copy> From<(T, T, T)> for Matrix<3, 1, T> {
+    fn from(src: (T, T, T)) -> Self {
+        matrix![src.0; src.1; src.2]
+    }
+}
+
+impl<T: Copy> From<(T, T, T)> for Matrix<1, 3, T> {
+    fn from(src: (T, T, T)) -> Self {
+        matrix![src.0, src.1, src.2]
+    }
+}
+
+impl<T: Copy> From<Matrix<3, 1, T>> for (T, T, T) {
+    fn from(src: Matrix<3, 1, T>) -> Self {
+        (src[0], src[1], src[2])
+    }
+}
+
+impl<T: Copy> From<Matrix<1, 3, T>> for (T, T, T) {
+    fn from(src: Matrix<1, 3, T>) -> Self {
+        (src[0], src[1], src[2])
+    }
+}
+
+impl<T: Copy> From<(T, T, T, T)> for Matrix<4, 1, T> {
+    fn from(src: (T, T, T, T)) -> Self {
+        matrix![src.0; src.1; src.2; src.3]
+    }
+}
+
+impl<T: Copy> From<(T, T, T, T)> for Matrix<1, 4, T> {
+    fn from(src: (T, T, T, T)) -> Self {
+        matrix![src.0, src.1, src.2, src.3]
+    }
+}
+
+impl<T: Copy> From<Matrix<4, 1, T>> for (T, T, T, T) {
+    fn from(src: Matrix<4, 1, T>) -> Self {
+        (src[0], src[1], src[2], src[3])
+    }
+}
+
+impl<T: Copy> From<Matrix<1, 4, T>> for (T, T, T, T) {
+    fn from(src: Matrix<1, 4, T>) -> Self {
+        (src[0], src[1], src[2], src[3])
+    }
+}
+
+// impl<T: Copy> Into<Matrix<3, 1, T>> for (T, T, T) {
+//     fn into(self) -> Matrix<3, 1, T> {
+//         matrix![
+//             self.0;
+//             self.1;
+//             self.2;
+//         ]
+//     }
+// }
+
+// impl<T: Copy> Into<Matrix<1, 3, T>> for (T, T, T) {
+//     fn into(self) -> Matrix<1, 3, T> {
+//         matrix![self.0, self.1, self.2]
+//     }
+// }
+
+// impl<T: Copy> Into<(T, T, T)> for Matrix<3, 1, T> {
+//     fn into(self) -> (T, T, T) {
+//         (self[0], self[1], self[2])
+//     }
+// }
+
+// impl<T: Copy> Into<(T, T, T)> for Matrix<1, 3, T> {
+//     fn into(self) -> (T, T, T) {
+//         (self[0], self[1], self[2])
+//     }
+// }
+
+// impl<T: Copy> Into<Matrix<4, 1, T>> for (T, T, T, T) {
+//     fn into(self) -> Matrix<4, 1, T> {
+//         matrix![
+//             self.0;
+//             self.1;
+//             self.2;
+//             self.3;
+//         ]
+//     }
+// }
+
+// impl<T: Copy> Into<Matrix<1, 4, T>> for (T, T, T, T) {
+//     fn into(self) -> Matrix<1, 4, T> {
+//         matrix![self.0, self.1, self.2, self.3]
+//     }
+// }
+
+// impl<T: Copy> Into<(T, T, T, T)> for Matrix<4, 1, T> {
+//     fn into(self) -> (T, T, T, T) {
+//         (self[0], self[1], self[2], self[3])
+//     }
+// }
+
+// impl<T: Copy> Into<(T, T, T, T)> for Matrix<1, 4, T> {
+//     fn into(self) -> (T, T, T, T) {
+//         (self[0], self[1], self[2], self[3])
+//     }
+// }
+
+// #[cfg(test)]
 impl<const M: usize, const N: usize, T: approx::AbsDiffEq> approx::AbsDiffEq for Matrix<M, N, T>
 where
     T::Epsilon: Copy,
@@ -312,7 +467,7 @@ where
     }
 }
 
-#[cfg(test)]
+// #[cfg(test)]
 impl<const M: usize, const N: usize, T: approx::RelativeEq> approx::RelativeEq for Matrix<M, N, T>
 where
     T::Epsilon: Copy,
@@ -447,5 +602,23 @@ mod tests {
            -3.0, 6.0;
         ];
         assert_relative_eq!(m.norm(), 7.0710678, max_relative = 1e-6);
+    }
+
+    #[test]
+    fn cross() {
+        let a = vector![3.0;-3.0; 1.0];
+        let b = vector![4.0; 9.0; 2.0];
+        let exp = vector![-15.0; -2.0; 39.0];
+        assert_relative_eq!(a.cross(&b), exp, max_relative = 1e-6);
+    }
+
+    #[test]
+    fn trace() {
+        let m = matrix![
+            9.0, 8.0, 7.0;
+            6.0, 5.0, 4.0;
+            3.0, 2.0, 1.0;
+        ];
+        assert_eq!(m.trace(), 15.0);
     }
 }

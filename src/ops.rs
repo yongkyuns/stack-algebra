@@ -319,6 +319,51 @@ impl_op_unary! { Not, not }
 mod tests {
     // use super::*;
     use crate::*;
+    extern crate std;
+    #[test]
+    fn time() {
+        use std::println;
+        use std::time::Instant;
+
+        // let m = matrix![
+        //     1.0_f32, -2.0;
+        //     -3.0, 6.0;
+        // ];
+        let m = matrix![
+              2.0_f32, 3.0, 0.0, 9.0, 0.0, 1.0, 0.0, 1.0, 1.0, 2.0, 1.0;
+              1.0, 1.0, 0.0, 3.0, 0.0, 0.0, 0.0, 9.0, 2.0, 3.0, 1.0;
+              1.0, 4.0, 0.0, 2.0, 8.0, 5.0, 0.0, 3.0, 6.0, 1.0, 9.0;
+              0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+              2.0, 2.0, 4.0, 1.0, 1.0, 2.0, 1.0, 6.0, 9.0, 0.0, 7.0;
+              0.0, 0.0, 0.0, 6.0, 0.0, 7.0, 0.0, 1.0, 0.0, 0.0, 0.0;
+              2.0, 5.0, 0.0, 7.0, 0.0, 4.0, 6.0, 8.0, 5.0, 1.0, 3.0;
+              0.0, 0.0, 0.0, 1.0, 0.0, 4.0, 0.0, 1.0, 0.0, 0.0, 0.0;
+              0.0, 0.0, 0.0, 8.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+              2.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0;
+              2.0, 6.0, 0.0, 1.0, 0.0,30.0, 0.0, 2.0, 3.0, 2.0, 1.0;
+        ];
+
+        let begin = Instant::now();
+        const N: usize = 1000000;
+        for _ in 0..N {
+            let _ = m * m;
+        }
+        let elapsed = (Instant::now() - begin).as_nanos();
+        println!(
+            "11x11 Matrix Multiplication: {} ns/call",
+            elapsed as f32 / N as f32
+        );
+
+        let begin = Instant::now();
+        for _ in 0..N {
+            let _ = m.inv();
+        }
+        let elapsed = (Instant::now() - begin).as_nanos();
+        println!(
+            "11x11 Matrix Inverse: {} ns/call",
+            elapsed as f32 / N as f32
+        );
+    }
     #[test]
     fn scalar() {
         let m = matrix![

@@ -1,7 +1,6 @@
 use crate::num::{One, Zero};
 use crate::Matrix;
 
-use core::hint;
 use core::mem;
 use core::mem::MaybeUninit;
 use core::ptr;
@@ -118,12 +117,6 @@ macro_rules! diag {
         m[(1, 1)] = $d2;
         m
     }};
-    ($d1:expr, $d2:expr, $ty:ty) => {{
-        let mut m = $crate::Matrix::<2, 2, $ty>::zeros();
-        m[(0, 0)] = $d1;
-        m[(1, 1)] = $d2;
-        m
-    }};
     ($d1:expr, $d2:expr, $d3:expr) => {{
         let mut m = $crate::Matrix::<3, 3>::zeros();
         m[(0, 0)] = $d1;
@@ -131,23 +124,8 @@ macro_rules! diag {
         m[(2, 2)] = $d3;
         m
     }};
-    ($d1:expr, $d2:expr, $d3:expr, $ty:ty) => {{
-        let mut m = $crate::Matrix::<3, 3, $ty>::zeros();
-        m[(0, 0)] = $d1;
-        m[(1, 1)] = $d2;
-        m[(2, 2)] = $d3;
-        m
-    }};
     ($d1:expr, $d2:expr, $d3:expr, $d4:expr) => {{
         let mut m = $crate::Matrix::<4, 4>::zeros();
-        m[(0, 0)] = $d1;
-        m[(1, 1)] = $d2;
-        m[(2, 2)] = $d3;
-        m[(3, 3)] = $d4;
-        m
-    }};
-    ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $ty:ty) => {{
-        let mut m = $crate::Matrix::<4, 4, $ty>::zeros();
         m[(0, 0)] = $d1;
         m[(1, 1)] = $d2;
         m[(2, 2)] = $d3;
@@ -163,27 +141,8 @@ macro_rules! diag {
         m[(4, 4)] = $d5;
         m
     }};
-    ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $d5:expr, $ty:ty) => {{
-        let mut m = $crate::Matrix::<5, 5, $ty>::zeros();
-        m[(0, 0)] = $d1;
-        m[(1, 1)] = $d2;
-        m[(2, 2)] = $d3;
-        m[(3, 3)] = $d4;
-        m[(4, 4)] = $d5;
-        m
-    }};
     ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $d5:expr, $d6:expr) => {{
         let mut m = $crate::Matrix::<6, 6>::zeros();
-        m[(0, 0)] = $d1;
-        m[(1, 1)] = $d2;
-        m[(2, 2)] = $d3;
-        m[(3, 3)] = $d4;
-        m[(4, 4)] = $d5;
-        m[(5, 5)] = $d6;
-        m
-    }};
-    ($d1:expr, $d2:expr, $d3:expr, $d4:expr, $d5:expr, $d6:expr, $ty:ty) => {{
-        let mut m = $crate::Matrix::<6, 6, $ty>::zeros();
         m[(0, 0)] = $d1;
         m[(1, 1)] = $d2;
         m[(2, 2)] = $d3;
@@ -302,21 +261,21 @@ where
     Ok(unsafe { matrix.assume_init() })
 }
 
-/// Like [`collect()`] except the caller must guarantee that the iterator will
-/// yield enough elements to fill the matrix.
-pub unsafe fn collect_unchecked<I, T, const M: usize, const N: usize>(iter: I) -> Matrix<M, N, T>
-where
-    I: IntoIterator<Item = T>,
-{
-    match collect(iter.into_iter()) {
-        Ok(matrix) => matrix,
-        Err(_) => {
-            // SAFETY: the caller guarantees the iterator will yield enough
-            // elements, so this error case can never be reached.
-            unsafe { hint::unreachable_unchecked() }
-        }
-    }
-}
+// /// Like [`collect()`] except the caller must guarantee that the iterator will
+// /// yield enough elements to fill the matrix.
+// pub unsafe fn collect_unchecked<I, T, const M: usize, const N: usize>(iter: I) -> Matrix<M, N, T>
+// where
+//     I: IntoIterator<Item = T>,
+// {
+//     match collect(iter.into_iter()) {
+//         Ok(matrix) => matrix,
+//         Err(_) => {
+//             // SAFETY: the caller guarantees the iterator will yield enough
+//             // elements, so this error case can never be reached.
+//             unsafe { hint::unreachable_unchecked() }
+//         }
+//     }
+// }
 
 impl<T, const M: usize, const N: usize> FromIterator<T> for Matrix<M, N, T> {
     /// Create a new matrix from an iterator.
@@ -363,8 +322,6 @@ mod new_test {
         0.0, 0.2;
         ];
         assert_relative_eq!(d, e, max_relative = 1e-6);
-        let d = diag!(0.1, 0.2, f32);
-        assert_relative_eq!(d, e, max_relative = 1e-6);
 
         let d = diag!(0.1, 0.2, 0.3);
         let e = matrix![
@@ -372,8 +329,6 @@ mod new_test {
         0.0, 0.2, 0.0;
         0.0, 0.0, 0.3;
         ];
-        assert_relative_eq!(d, e, max_relative = 1e-6);
-        let d = diag!(0.1, 0.2, 0.3, f32);
         assert_relative_eq!(d, e, max_relative = 1e-6);
 
         let d = diag!(0.1, 0.2, 0.3, 0.4);
@@ -383,8 +338,6 @@ mod new_test {
         0.0, 0.0, 0.3, 0.0;
         0.0, 0.0, 0.0, 0.4;
         ];
-        assert_relative_eq!(d, e, max_relative = 1e-6);
-        let d = diag!(0.1, 0.2, 0.3, 0.4, f32);
         assert_relative_eq!(d, e, max_relative = 1e-6);
 
         let d = diag!(0.1, 0.2, 0.3, 0.4, 0.5);
@@ -396,8 +349,6 @@ mod new_test {
         0.0, 0.0, 0.0, 0.0, 0.5;
         ];
         assert_relative_eq!(d, e, max_relative = 1e-6);
-        let d = diag!(0.1, 0.2, 0.3, 0.4, 0.5, f32);
-        assert_relative_eq!(d, e, max_relative = 1e-6);
 
         let d = diag!(0.1, 0.2, 0.3, 0.4, 0.5, 0.6);
         let e = matrix![
@@ -408,8 +359,6 @@ mod new_test {
         0.0, 0.0, 0.0, 0.0, 0.5, 0.0;
         0.0, 0.0, 0.0, 0.0, 0.0, 0.6;
         ];
-        assert_relative_eq!(d, e, max_relative = 1e-6);
-        let d = diag!(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, f32);
         assert_relative_eq!(d, e, max_relative = 1e-6);
     }
 }

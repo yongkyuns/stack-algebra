@@ -10,6 +10,7 @@ edition = "2021"
 vectrix-macro = { version = "0.3.0"}
 stride = { version = "0.3.0"}
 libm = "0.2.6"
-
-[dev-dependencies]
 approx = "0.5"
+
+# [dev-dependencies]
+# approx = "0.5"

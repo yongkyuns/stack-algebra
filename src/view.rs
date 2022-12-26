@@ -146,6 +146,8 @@ impl<T, const M: usize, const N: usize> Row<M, N, T> {
     {
         (0..N).map(|i| self[i] * other[i]).sum()
     }
+
+    /// Compute the dot product, but only with elements specified by the range
     #[inline]
     pub fn dot_partial<const P: usize>(
         &self,
@@ -155,7 +157,6 @@ impl<T, const M: usize, const N: usize> Row<M, N, T> {
     where
         T: Copy + Mul<Output = T> + Sum,
     {
-        // let f = range.start;
         (0..N)
             .skip(range.start)
             .take(range.count())

@@ -21,7 +21,7 @@ impl<T: fmt::Display, const M: usize, const N: usize> fmt::Display for Matrix<M,
         write!(f, "\n")?;
         for r in 0..M {
             for c in 0..N {
-                write!(f, "{:2.2} ", self[(r, c)])?;
+                write!(f, "{:2.11} ", self[(r, c)])?;
             }
             write!(f, "\n")?;
         }
