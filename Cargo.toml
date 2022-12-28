@@ -1,12 +1,11 @@
 [package]
-name = "bare-matrix"
+name = "stack-algebra"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# vectrix = { version = "0.3.0", default-features = false, features = ["macro"] }
 vectrix-macro = { version = "0.3.0"}
 stride = { version = "0.3.0"}
 libm = "0.2.6"

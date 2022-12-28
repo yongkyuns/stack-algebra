@@ -11,15 +11,14 @@ mod ops;
 mod util;
 mod view;
 
-pub use core::slice;
 use core::{
     mem::MaybeUninit,
     ops::{Add, Div, Mul, Sub},
+    slice,
 };
 pub use index::MatrixIndex;
-use num::{Abs, Sqrt};
+use num::{Abs, Sqrt, Zero};
 // pub use iter::{IntoIter, IterColumns, IterColumnsMut, IterRows, IterRowsMut};
-pub use num::{One, Zero};
 pub use view::{Column, Row};
 
 #[doc(hidden)]
@@ -32,7 +31,7 @@ pub use vectrix_macro as proc_macro;
 ///
 /// See the [crate root][crate] for usage examples.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(transparent)]
+#[repr(C)]
 pub struct Matrix<const M: usize, const N: usize, T = f32> {
     data: [[T; M]; N],
 }
