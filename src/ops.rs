@@ -330,18 +330,15 @@ impl_op_unary! { Not, not }
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
     use crate::*;
     extern crate std;
+
+    #[ignore]
     #[test]
     fn time() {
         use std::println;
         use std::time::Instant;
 
-        // let m = matrix![
-        //     1.0_f32, -2.0;
-        //     -3.0, 6.0;
-        // ];
         let m = matrix![
               2.0_f32, 3.0, 0.0, 9.0, 0.0, 1.0, 0.0, 1.0, 1.0, 2.0, 1.0;
               1.0, 1.0, 0.0, 3.0, 0.0, 0.0, 0.0, 9.0, 2.0, 3.0, 1.0;
