@@ -30,8 +30,8 @@ pub use vectrix_macro as proc_macro;
 /// column-major order.
 ///
 /// See the [crate root][crate] for usage examples.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Matrix<const M: usize, const N: usize, T = f32> {
     data: [[T; M]; N],
 }
@@ -181,21 +181,21 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         }
     }
 
-    /// Clone the current matrix.
-    #[inline]
-    pub fn clone(&self) -> Matrix<M, N, T>
-    where
-        T: Copy,
-    {
-        // let mut clone = zeros!(M, N, T);
-        let mut clone = unsafe { Matrix::<M, N, MaybeUninit<T>>::uninit().assume_init() };
-        for c in 0..N {
-            for r in 0..M {
-                clone[(r, c)] = self[(r, c)];
-            }
-        }
-        clone
-    }
+    // /// Clone the current matrix.
+    // #[inline]
+    // pub fn clone(&self) -> Matrix<M, N, T>
+    // where
+    //     T: Copy,
+    // {
+    //     // let mut clone = zeros!(M, N, T);
+    //     let mut clone = unsafe { Matrix::<M, N, MaybeUninit<T>>::uninit().assume_init() };
+    //     for c in 0..N {
+    //         for r in 0..M {
+    //             clone[(r, c)] = self[(r, c)];
+    //         }
+    //     }
+    //     clone
+    // }
 
     /// Transpose of the current matrix.
     #[inline]
@@ -294,6 +294,22 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     //         .unwrap_or_else(Zero::zero)
     // }
 }
+
+// impl<const M: usize, const N: usize, T> Clone for Matrix<M, N, T>
+// where
+//     for<'a> &'a T,
+// {
+//     fn clone(&self) -> Self {
+//         // let mut clone = zeros!(M, N, T);
+//         let mut clone = unsafe { Matrix::<M, N, MaybeUninit<T>>::uninit().assume_init() };
+//         for c in 0..N {
+//             for r in 0..M {
+//                 clone[(r, c)] = &self[(r, c)];
+//             }
+//         }
+//         clone
+//     }
+// }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Square matrix functions
@@ -457,7 +473,7 @@ where
         for j in 0..N {
             for i in 0..M {
                 eq = eq && T::abs_diff_eq(&self[(i, j)], &other[(i, j)], epsilon);
-                if eq == false {
+                if !eq {
                     return false;
                 }
             }
@@ -485,7 +501,7 @@ where
         for j in 0..N {
             for i in 0..M {
                 eq = eq && T::relative_eq(&self[(i, j)], &other[(i, j)], epsilon, max_relative);
-                if eq == false {
+                if !eq {
                     return false;
                 }
             }

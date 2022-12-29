@@ -48,6 +48,7 @@ macro_rules! impl_op_scalar {
             type Output = Matrix<M, N, T>;
 
             fn $meth(mut self, other: T) -> Self::Output {
+                #[allow(clippy::suspicious_arithmetic_impl)]
                 for i in 0..(M * N) {
                     self[i] = self[i].$meth(other);
                 }
@@ -63,6 +64,7 @@ macro_rules! impl_op_scalar {
             type Output = Matrix<M, N, T>;
 
             fn $meth(mut self, other: &T) -> Self::Output {
+                #[allow(clippy::suspicious_arithmetic_impl)]
                 for i in 0..(M * N) {
                     self[i] = self[i].$meth(*other);
                 }
@@ -79,6 +81,7 @@ macro_rules! impl_op_scalar {
 
             fn $meth(self, other: T) -> Self::Output {
                 let mut matrix = Self::Output::zeros();
+                #[allow(clippy::suspicious_arithmetic_impl)]
                 for i in 0..(M * N) {
                     matrix[i] = self[i].$meth(other);
                 }
@@ -95,6 +98,7 @@ macro_rules! impl_op_scalar {
 
             fn $meth(self, other: &T) -> Self::Output {
                 let mut matrix = Self::Output::zeros();
+                #[allow(clippy::suspicious_arithmetic_impl)]
                 for i in 0..(M * N) {
                     matrix[i] = self[i].$meth(*other);
                 }
@@ -122,6 +126,7 @@ macro_rules! impl_op_assign_scalar {
             T: Copy + $trt<T>,
         {
             fn $meth(&mut self, other: T) {
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     self[i].$meth(other);
                 }
@@ -134,6 +139,7 @@ macro_rules! impl_op_assign_scalar {
             T: Copy + $trt<T>,
         {
             fn $meth(&mut self, other: &T) {
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     self[i].$meth(*other);
                 }
@@ -162,6 +168,7 @@ macro_rules! impl_op {
             type Output = Matrix<M, N, T>;
 
             fn $meth(mut self, other: Matrix<M, N, T>) -> Self::Output {
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     self[i] = self[i].$meth(other[i]);
                 }
@@ -177,6 +184,7 @@ macro_rules! impl_op {
             type Output = Matrix<M, N, T>;
 
             fn $meth(mut self, other: &Matrix<M, N, T>) -> Self::Output {
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     self[i] = self[i].$meth(other[i]);
                 }
@@ -193,6 +201,7 @@ macro_rules! impl_op {
 
             fn $meth(self, other: Matrix<M, N, T>) -> Self::Output {
                 let mut matrix = *self;
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     matrix[i] = self[i].$meth(other[i]);
                 }
@@ -209,6 +218,7 @@ macro_rules! impl_op {
 
             fn $meth(self, other: &Matrix<M, N, T>) -> Self::Output {
                 let mut matrix = *self;
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     matrix[i] = self[i].$meth(other[i]);
                 }
@@ -262,6 +272,7 @@ macro_rules! impl_op_assign {
             T: Copy + $trt,
         {
             fn $meth(&mut self, other: $rhs) {
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     self[i].$meth(other[i]);
                 }
@@ -288,6 +299,7 @@ macro_rules! impl_op_unary {
             type Output = Matrix<M, N, T>;
 
             fn $meth(mut self) -> Self::Output {
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     self[i] = self[i].$meth();
                 }
@@ -303,6 +315,7 @@ macro_rules! impl_op_unary {
 
             fn $meth(self) -> Self::Output {
                 let mut matrix = Self::Output::zeros();
+                #[allow(clippy::suspicious_arithmetic_impl, clippy::suspicious_op_assign_impl)]
                 for i in 0..(M * N) {
                     matrix[i] = self[i].$meth();
                 }

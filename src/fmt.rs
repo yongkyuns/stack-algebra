@@ -18,12 +18,12 @@ impl<T: fmt::Debug, const M: usize, const N: usize> fmt::Debug for Matrix<M, N, 
 
 impl<T: fmt::Display, const M: usize, const N: usize> fmt::Display for Matrix<M, N, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "\n")?;
+        writeln!(f, "\n")?;
         for r in 0..M {
             for c in 0..N {
-                write!(f, "{:2.11} ", self[(r, c)])?;
+                writeln!(f, "{:2.11} ", self[(r, c)])?;
             }
-            write!(f, "\n")?;
+            writeln!(f, "\n")?;
         }
         Ok(())
     }

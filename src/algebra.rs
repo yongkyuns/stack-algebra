@@ -54,7 +54,7 @@ where
     pub fn lu(&self) -> (Matrix<D, D, T>, Matrix<D, D, T>, Matrix<D, D, T>) {
         let mut P = eye!(D, T);
         let mut L = eye!(D, T);
-        let mut U = self.clone();
+        let mut U = *self;
 
         for d in 0..D {
             // Find row index of maximum absolute value equal to or below given diagonal
