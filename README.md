@@ -34,6 +34,49 @@ a growing collection of addressing those needs. It is heavily based on
 
   // 3-by-1 column vector
   let c = vector![1.0; 2.0; 3.0]; 
+
+  // Vector to tuple conversion (for 3 or 4 element vectors)
+  let (x, y, z) = r.into();
+  ```
+
+- `eye!` for creating square identity matrix
+  ```rust
+  let m = eye!(2); 
+  let exp = matrix![
+    1.0, 0.0;
+	0.0, 1.0
+  ];
+  assert_eq!(m, exp);
+  ```
+
+- `zeros!` for creating zero-valued matrix
+  ```rust
+  let m = zeros!(2); // Square 2-by-2 matrix
+  let exp = matrix![
+    0.0, 0.0;
+	0.0, 0.0
+  ];
+  assert_eq!(m, exp);
+
+  let m = zeros!(2,3); // 2-by-3 matrix
+  let exp = matrix![
+    0.0, 0.0, 0.0;
+	0.0, 0.0, 0.0
+  ];
+  assert_eq!(m, exp);
+  ```
+
+- `ones!` for creating matrix with 1.0s (same as `zeros!` for usage)
+
+- `diag!` for creating a diagonal matrix with given entries (up to 6-by-6 size)
+  ```rust
+  let m = diag!(1.0, 2.0, 3.0);
+  let exp = matrix![
+    1.0, 0.0, 0.0;
+	0.0, 2.0, 0.0;
+	0.0, 0.0, 3.0
+  ];
+  assert_eq!(m, exp);
   ```
 
 - `[i]` or `[(r,c)]` to access individual elements
@@ -83,7 +126,26 @@ a growing collection of addressing those needs. It is heavily based on
 
   assert_eq!(m.T(), exp); 
 
-- `.det()` for determinant
+- `.norm()` for computing the [`Frobenius norm`][frobenius]
+  ```rust
+	let m = matrix![
+	  1.0,-2.0;
+	 -3.0, 6.0;
+	];
+	assert_relative_eq!(m.norm(), 7.0710678, max_relative = 1e-6);
+  ```
+
+- `.trace()` for sum of diagonal elements of a sqaure matrix
+  ```rust
+	let m = matrix![
+	  9.0, 8.0, 7.0;
+	  6.0, 5.0, 4.0;
+	  3.0, 2.0, 1.0;
+	];
+	assert_eq!(m.trace(), 15.0);
+  ```
+
+- `.det()` for determinant (only available for square matrix)
   ```rust
     let m = matrix![
 	  3.0, 7.0;
@@ -92,7 +154,7 @@ a growing collection of addressing those needs. It is heavily based on
     assert_eq!(m.det(), -19.0); 
   ```
 
-- `.inv()` for inverse of a matrix
+- `.inv()` for inverse of a matrix (for square invertible matrix)
   ```rust
 	let m = matrix![
 	  6.0, 2.0, 3.0;
@@ -101,7 +163,7 @@ a growing collection of addressing those needs. It is heavily based on
 	];
 	let exp = matrix![
 	  0.20833333, -0.25, -0.04166667;
-		  -0.375,  2.25,      -0.125;
+	      -0.375,  2.25,      -0.125;
 	  0.16666667,  -1.0,  0.16666667;
 	];
 	assert_relative_eq!(m.inv().unwrap(), exp, max_relative = 1e-6);
@@ -114,3 +176,4 @@ This project is distributed under the terms of both the MIT license and the Apac
 See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT) for details.
 
 [vectrix]: https://docs.rs/vectrix/latest/vectrix/
+[frobenius]: https://en.wikipedia.org/wiki/Matrix_norm#Frobenius_norm
