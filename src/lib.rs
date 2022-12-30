@@ -401,63 +401,6 @@ impl<T: Copy> From<Matrix<1, 4, T>> for (T, T, T, T) {
     }
 }
 
-// impl<T: Copy> Into<Matrix<3, 1, T>> for (T, T, T) {
-//     fn into(self) -> Matrix<3, 1, T> {
-//         matrix![
-//             self.0;
-//             self.1;
-//             self.2;
-//         ]
-//     }
-// }
-
-// impl<T: Copy> Into<Matrix<1, 3, T>> for (T, T, T) {
-//     fn into(self) -> Matrix<1, 3, T> {
-//         matrix![self.0, self.1, self.2]
-//     }
-// }
-
-// impl<T: Copy> Into<(T, T, T)> for Matrix<3, 1, T> {
-//     fn into(self) -> (T, T, T) {
-//         (self[0], self[1], self[2])
-//     }
-// }
-
-// impl<T: Copy> Into<(T, T, T)> for Matrix<1, 3, T> {
-//     fn into(self) -> (T, T, T) {
-//         (self[0], self[1], self[2])
-//     }
-// }
-
-// impl<T: Copy> Into<Matrix<4, 1, T>> for (T, T, T, T) {
-//     fn into(self) -> Matrix<4, 1, T> {
-//         matrix![
-//             self.0;
-//             self.1;
-//             self.2;
-//             self.3;
-//         ]
-//     }
-// }
-
-// impl<T: Copy> Into<Matrix<1, 4, T>> for (T, T, T, T) {
-//     fn into(self) -> Matrix<1, 4, T> {
-//         matrix![self.0, self.1, self.2, self.3]
-//     }
-// }
-
-// impl<T: Copy> Into<(T, T, T, T)> for Matrix<4, 1, T> {
-//     fn into(self) -> (T, T, T, T) {
-//         (self[0], self[1], self[2], self[3])
-//     }
-// }
-
-// impl<T: Copy> Into<(T, T, T, T)> for Matrix<1, 4, T> {
-//     fn into(self) -> (T, T, T, T) {
-//         (self[0], self[1], self[2], self[3])
-//     }
-// }
-
 // #[cfg(test)]
 impl<const M: usize, const N: usize, T: approx::AbsDiffEq> approx::AbsDiffEq for Matrix<M, N, T>
 where
