@@ -16,6 +16,16 @@ if simple abstractions and necessary algebra routines are available. This librar
 a growing collection of addressing those needs. It is heavily based on 
 [`vectrix`][vectrix] for core implementations.
 
+## Install
+Use cargo to add to your project (or add manually to your `Cargo.toml`)
+```sh
+cargo add stack-algebra
+```
+Then import to your module by using
+```rust
+use stack_algebra::*;
+```
+
 ## Usage
 
 - `matrix!` macro can be used to create a new matrix

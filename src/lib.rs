@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(non_snake_case)]
 
 mod algebra;
 mod fmt;
@@ -16,9 +15,9 @@ use core::{
     ops::{Add, Div, Mul, Sub},
     slice,
 };
+
 pub use index::MatrixIndex;
-use num::{Abs, Sqrt, Zero};
-// pub use iter::{IntoIter, IterColumns, IterColumnsMut, IterRows, IterRowsMut};
+pub use num::{Abs, Sqrt, Zero};
 pub use view::{Column, Row};
 
 #[doc(hidden)]
@@ -214,6 +213,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     }
 
     /// Transpose of the current matrix.
+    #[allow(non_snake_case)]
     #[inline]
     pub fn T(&self) -> Matrix<N, M, T>
     where
