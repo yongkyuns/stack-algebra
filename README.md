@@ -23,7 +23,7 @@ cargo add stack-algebra
 ```
 Then import to your module by using
 ```rust
-use stack_algebra::*;
+use stack_algebra::*; // or import just the items you need
 ```
 
 ## Usage
