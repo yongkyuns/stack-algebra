@@ -107,43 +107,10 @@ macro_rules! eye {
     ($dim:expr, $ty:ty) => {{
         $crate::Matrix::<$dim, $dim, $ty>::eye()
     }};
-    ($dim:expr, $off_diag:expr) => {{
-        let mut out = $crate::Matrix::<$dim, $dim>::zeros();
-        let offset = (($off_diag as isize).unsigned_abs()) as usize;
-        if $off_diag >= 0 {
-            for i in offset..$dim {
-                out[(i - offset, i)] = 1.0;
-            }
-        } else {
-            for i in 0..($dim - offset) {
-                out[(i + offset, i)] = 1.0;
-            }
-        }
-        out
-    }};
-    ($dim:expr, $off_diag:expr, $ty:ty) => {{
-        let mut out = $crate::Matrix::<$dim, $dim, $ty>::zeros();
-        let offset = (($off_diag as isize).unsigned_abs()) as usize;
-        if $off_diag >= 0 {
-            for i in offset..$dim {
-                out[(i - offset, i)] = 1 as $ty;
-            }
-        } else {
-            for i in 0..($dim - offset) {
-                out[(i + offset, i)] = 1 as $ty;
-            }
-        }
-        out
-    }};
 }
 
 #[macro_export]
 macro_rules! diag {
-    ($d1:expr) => {{
-        let mut m = $crate::Matrix::<1, 1>::zeros();
-        m[(0, 0)] = $d1;
-        m
-    }};
     ($d1:expr, $d2:expr) => {{
         let mut m = $crate::Matrix::<2, 2>::zeros();
         m[(0, 0)] = $d1;
@@ -347,43 +314,8 @@ fn collect_panic<const M: usize, const N: usize>(len: usize) -> ! {
 #[cfg(test)]
 mod new_test {
     use approx::assert_relative_eq;
-    use crate::Matrix;
-
-    #[test]
-    fn eye() {
-        let d = eye!(3);
-        let e = matrix![
-        1.0, 0.0, 0.0;
-        0.0, 1.0, 0.0;
-        0.0, 0.0, 1.0;
-        ];
-        assert_relative_eq!(d, e, max_relative = 1e-6);
-
-        let d = eye!(4, -1);
-        let e = matrix![
-        0.0, 0.0, 0.0, 0.0;
-        1.0, 0.0, 0.0, 0.0;
-        0.0, 1.0, 0.0, 0.0;
-        0.0, 0.0, 1.0, 0.0;
-        ];
-        assert_relative_eq!(d, e, max_relative = 1e-6);
-
-        let d = eye!(4, 1);
-        let e = matrix![
-        0.0, 1.0, 0.0, 0.0;
-        0.0, 0.0, 1.0, 0.0;
-        0.0, 0.0, 0.0, 1.0;
-        0.0, 0.0, 0.0, 0.0;
-        ];
-        assert_relative_eq!(d, e, max_relative = 1e-6);
-    }
-
     #[test]
     fn diag() {
-        let d = diag!(0.1);
-        let e = Matrix::from_column_major_order([[0.1]]);
-        assert_relative_eq!(d, e, max_relative = 1e-6);
-
         let d = diag!(0.1, 0.2);
         let e = matrix![
         0.1, 0.0;
