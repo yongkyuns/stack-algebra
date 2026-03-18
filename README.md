@@ -64,6 +64,18 @@ use stack_algebra::*; // or import just the items you need
   assert_eq!(m, exp);
   ```
 
+  It also supports shifted diagonals:
+  ```rust
+  let m = eye!(4, 1);
+  let exp = matrix![
+    0.0, 1.0, 0.0, 0.0;
+    0.0, 0.0, 1.0, 0.0;
+    0.0, 0.0, 0.0, 1.0;
+    0.0, 0.0, 0.0, 0.0
+  ];
+  assert_eq!(m, exp);
+  ```
+
 - `zeros!` for creating zero-valued matrix
   ```rust
   let m = zeros!(2); // Square 2-by-2 matrix
@@ -85,6 +97,12 @@ use stack_algebra::*; // or import just the items you need
 
 - `diag!` for creating a diagonal matrix with given entries (up to 6-by-6 size)
   ```rust
+  let m = diag!(1.0);
+  let exp = matrix![
+    1.0
+  ];
+  assert_eq!(m, exp);
+
   let m = diag!(1.0, 2.0, 3.0);
   let exp = matrix![
     1.0, 0.0, 0.0;
@@ -92,6 +110,18 @@ use stack_algebra::*; // or import just the items you need
 	0.0, 0.0, 3.0
   ];
   assert_eq!(m, exp);
+  ```
+
+- `join!` for concatenating displayable values into a `String`
+  ```rust
+  let s = join!("x=", 1, ", y=", 2);
+  assert_eq!(s, "x=1, y=2");
+  ```
+
+- `disp!` for printing one or more displayable values
+  ```rust
+  disp!("state", ": ", 1);
+  disp!("single line");
   ```
 
 - `[i]` or `[(r,c)]` to access individual elements
