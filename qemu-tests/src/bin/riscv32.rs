@@ -47,6 +47,29 @@ fn main() -> ! {
         assert!((reconstructed[index] - rhs[index]).abs() < 1e-5);
     }
 
+    let pivoted_matrix = Matrix::<2, 2, f32>::from_rows([[0.0, 1.0], [1.0, 2.0]]);
+    let pivoted_rhs = Vector::<2, f32>::from_columns([[1.0, 3.0]]);
+    let pivoted_solution = pivoted_matrix
+        .ldlt()
+        .expect("pivoted LDLT should handle zero leading diagonal")
+        .solve(&pivoted_rhs);
+    let pivoted_reconstructed = pivoted_matrix * pivoted_solution;
+    for index in 0..2 {
+        assert!((pivoted_reconstructed[index] - pivoted_rhs[index]).abs() < 1e-5);
+    }
+
+    let no_pivot_matrix =
+        Matrix::<3, 3, f32>::from_rows([[4.0, 1.0, 0.5], [1.0, 3.0, 0.25], [0.5, 0.25, 2.0]]);
+    let no_pivot_rhs = Vector::<3, f32>::from_columns([[1.0, 2.0, 3.0]]);
+    let no_pivot_solution = no_pivot_matrix
+        .ldlt_no_pivot()
+        .expect("stable system should factor without pivoting")
+        .solve(&no_pivot_rhs);
+    let no_pivot_reconstructed = no_pivot_matrix * no_pivot_solution;
+    for index in 0..3 {
+        assert!((no_pivot_reconstructed[index] - no_pivot_rhs[index]).abs() < 1e-5);
+    }
+
     write_str("stack-algebra qemu riscv32: PASS\n");
     exit_qemu(0x5555);
 }

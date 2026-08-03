@@ -293,8 +293,8 @@ dimensions to expose small-matrix overhead and larger fixed-size scaling.
 ## QEMU target validation
 
 The standalone Cortex-M harness builds the library for
-`thumbv7em-none-eabihf` and runs deterministic multiplication and LU-solve
-checks under QEMU's MPS2 Cortex-M4 machine:
+`thumbv7em-none-eabihf` and runs deterministic multiplication, LU-solve, and
+pivoted/no-pivot LDLT checks under QEMU's MPS2 Cortex-M4 machine:
 
 ```sh
 qemu-tests/run_cortex_m.sh
