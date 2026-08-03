@@ -34,7 +34,14 @@ unsafe extern "C" {
         columns: usize,
         output: *mut f64,
     );
+    fn sa_eigen_transpose_f32(input: *const f32, rows: usize, columns: usize, output: *mut f32);
+    fn sa_eigen_norm_f32(input: *const f32, rows: usize, columns: usize) -> f32;
+    fn sa_eigen_dot_f32(lhs: *const f32, rhs: *const f32, size: usize) -> f32;
+    fn sa_eigen_normalize_f32(input: *const f32, rows: usize, columns: usize, output: *mut f32);
     fn sa_eigen_transpose_f64(input: *const f64, rows: usize, columns: usize, output: *mut f64);
+    fn sa_eigen_norm_f64(input: *const f64, rows: usize, columns: usize) -> f64;
+    fn sa_eigen_dot_f64(lhs: *const f64, rhs: *const f64, size: usize) -> f64;
+    fn sa_eigen_normalize_f64(input: *const f64, rows: usize, columns: usize, output: *mut f64);
     fn sa_eigen_matmul_f64(
         lhs: *const f64,
         rhs: *const f64,
@@ -124,6 +131,70 @@ fn elementary_operations_match_eigen_bits() {
         );
     }
     assert_eq!(lhs.transpose().as_slice(), eigen_transpose.as_slice());
+
+    let lhs_f32 = lhs.cast::<f32>();
+    let mut eigen_transpose_f32 = Matrix::<3, 2, f32>::zeros();
+    unsafe {
+        sa_eigen_transpose_f32(
+            lhs_f32.as_slice().as_ptr(),
+            2,
+            3,
+            eigen_transpose_f32.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    assert_eq!(
+        lhs_f32.transpose().as_slice(),
+        eigen_transpose_f32.as_slice()
+    );
+}
+
+#[test]
+fn reductions_and_normalization_match_eigen() {
+    let input_f64 = Matrix::<3, 2, f64>::from_rows([[1.0, -2.0], [3.0, 4.0], [-5.0, 6.0]]);
+    let mut eigen_normalized_f64 = Matrix::<3, 2, f64>::zeros();
+    let eigen_norm_f64 = unsafe { sa_eigen_norm_f64(input_f64.as_slice().as_ptr(), 3, 2) };
+    unsafe {
+        sa_eigen_normalize_f64(
+            input_f64.as_slice().as_ptr(),
+            3,
+            2,
+            eigen_normalized_f64.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    assert_close_f64(&[input_f64.norm()], &[eigen_norm_f64]);
+    assert_close_f64(
+        input_f64.normalize().as_slice(),
+        eigen_normalized_f64.as_slice(),
+    );
+
+    let input_f32 = input_f64.cast::<f32>();
+    let mut eigen_normalized_f32 = Matrix::<3, 2, f32>::zeros();
+    let eigen_norm_f32 = unsafe { sa_eigen_norm_f32(input_f32.as_slice().as_ptr(), 3, 2) };
+    unsafe {
+        sa_eigen_normalize_f32(
+            input_f32.as_slice().as_ptr(),
+            3,
+            2,
+            eigen_normalized_f32.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    assert_close_f32(&[input_f32.norm()], &[eigen_norm_f32]);
+    assert_close_f32(
+        input_f32.normalize().as_slice(),
+        eigen_normalized_f32.as_slice(),
+    );
+
+    let lhs_f64 = Matrix::<1, 4, f64>::from_rows([[1.0, -2.0, 3.0, 4.0]]);
+    let rhs_f64 = Vector::<4, f64>::from_columns([[0.5, 2.0, -3.0, 6.0]]);
+    let eigen_dot_f64 =
+        unsafe { sa_eigen_dot_f64(lhs_f64.as_slice().as_ptr(), rhs_f64.as_slice().as_ptr(), 4) };
+    assert_close_f64(&[lhs_f64.row(0).dot(rhs_f64.column(0))], &[eigen_dot_f64]);
+
+    let lhs_f32 = lhs_f64.cast::<f32>();
+    let rhs_f32 = rhs_f64.cast::<f32>();
+    let eigen_dot_f32 =
+        unsafe { sa_eigen_dot_f32(lhs_f32.as_slice().as_ptr(), rhs_f32.as_slice().as_ptr(), 4) };
+    assert_close_f32(&[lhs_f32.row(0).dot(rhs_f32.column(0))], &[eigen_dot_f32]);
 }
 
 fn compare_square_matmul<const D: usize>() {

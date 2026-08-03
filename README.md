@@ -241,6 +241,25 @@ dimensions, and 64-operation batch. Compare its `ns/batch` median with
 Criterion's reported time; its `ns/op` column is the batch time divided by 64.
 It uses no Rust-to-C++ calls in the timed region.
 
+## QEMU target validation
+
+The standalone Cortex-M harness builds the library for
+`thumbv7em-none-eabihf` and runs deterministic multiplication and LU-solve
+checks under QEMU's MPS2 Cortex-M4 machine:
+
+```sh
+qemu-tests/run_cortex_m.sh
+```
+
+The RISC-V harness targets `riscv32imc-unknown-none-elf` and runs the same
+checks on QEMU's generic `virt` machine. This validates the scalar kernel path
+used by RISC-V microcontrollers such as ESP32-C-class devices:
+
+```sh
+rustup target add riscv32imc-unknown-none-elf
+qemu-tests/run_riscv32.sh
+```
+
 ## License
 
 This project is distributed under the terms of both the MIT license and the Apache License (Version 2.0).

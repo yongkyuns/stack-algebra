@@ -24,6 +24,26 @@ void transpose(const Scalar* input, std::size_t rows, std::size_t columns, Scala
 }
 
 template <typename Scalar>
+Scalar norm(const Scalar* input, std::size_t rows, std::size_t columns) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
+  return input_map.norm();
+}
+
+template <typename Scalar>
+Scalar dot(const Scalar* lhs, const Scalar* rhs, std::size_t size) {
+  Eigen::Map<const DynamicVector<Scalar>> lhs_map(lhs, size);
+  Eigen::Map<const DynamicVector<Scalar>> rhs_map(rhs, size);
+  return lhs_map.dot(rhs_map);
+}
+
+template <typename Scalar>
+void normalize(const Scalar* input, std::size_t rows, std::size_t columns, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, rows, columns);
+  output_map.noalias() = input_map / input_map.norm();
+}
+
+template <typename Scalar>
 void matmul(const Scalar* lhs, const Scalar* rhs, std::size_t rows, std::size_t shared,
             std::size_t columns, Scalar* output) {
   Eigen::Map<const DynamicMatrix<Scalar>> lhs_map(lhs, rows, shared);
@@ -62,6 +82,18 @@ void solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::s
   extern "C" void sa_eigen_transpose_##SUFFIX(const SCALAR* input, std::size_t rows,             \
                                                  std::size_t columns, SCALAR* output) {             \
     transpose(input, rows, columns, output);                                                      \
+  }                                                                                                \
+  extern "C" SCALAR sa_eigen_norm_##SUFFIX(const SCALAR* input, std::size_t rows,                \
+                                              std::size_t columns) {                                \
+    return norm(input, rows, columns);                                                            \
+  }                                                                                                \
+  extern "C" SCALAR sa_eigen_dot_##SUFFIX(const SCALAR* lhs, const SCALAR* rhs,                  \
+                                             std::size_t size) {                                   \
+    return dot(lhs, rhs, size);                                                                    \
+  }                                                                                                \
+  extern "C" void sa_eigen_normalize_##SUFFIX(const SCALAR* input, std::size_t rows,             \
+                                                 std::size_t columns, SCALAR* output) {            \
+    normalize(input, rows, columns, output);                                                       \
   }                                                                                                \
   extern "C" void sa_eigen_matmul_##SUFFIX(const SCALAR* lhs, const SCALAR* rhs,                 \
                                               std::size_t rows, std::size_t shared,                 \

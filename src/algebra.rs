@@ -84,7 +84,7 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
         for index in 0..D {
             determinant = determinant * self.upper[(index, index)];
         }
-        if self.row_swaps % 2 == 0 {
+        if self.row_swaps.is_multiple_of(2) {
             determinant
         } else {
             -determinant
