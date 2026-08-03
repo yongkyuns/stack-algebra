@@ -63,6 +63,16 @@ where
     ) {
         matmul_scalar(lhs, rhs, output);
     }
+
+    #[inline]
+    fn rank_update_sub(target: &mut [T], source: &[T], scale: T)
+    where
+        T: Copy + Mul<Output = T> + core::ops::Sub<Output = T>,
+    {
+        for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
+            *target_value = *target_value - *source_value * scale;
+        }
+    }
 }
 
 #[inline]

@@ -27,6 +27,20 @@ unsafe extern "C" {
         columns: usize,
         output: *mut f32,
     );
+    fn sa_eigen_llt_solve_f32(
+        input: *const f32,
+        rhs: *const f32,
+        dimension: usize,
+        columns: usize,
+        output: *mut f32,
+    ) -> i32;
+    fn sa_eigen_ldlt_solve_f32(
+        input: *const f32,
+        rhs: *const f32,
+        dimension: usize,
+        columns: usize,
+        output: *mut f32,
+    ) -> i32;
     fn sa_eigen_add_f64(
         lhs: *const f64,
         rhs: *const f64,
@@ -61,6 +75,20 @@ unsafe extern "C" {
         columns: usize,
         output: *mut f64,
     );
+    fn sa_eigen_llt_solve_f64(
+        input: *const f64,
+        rhs: *const f64,
+        dimension: usize,
+        columns: usize,
+        output: *mut f64,
+    ) -> i32;
+    fn sa_eigen_ldlt_solve_f64(
+        input: *const f64,
+        rhs: *const f64,
+        dimension: usize,
+        columns: usize,
+        output: *mut f64,
+    ) -> i32;
 }
 
 fn matrix<const R: usize, const C: usize>() -> Matrix<R, C, f64> {
@@ -275,6 +303,90 @@ fn reductions_and_normalization_match_eigen() {
     let eigen_dot_f32 =
         unsafe { sa_eigen_dot_f32(lhs_f32.as_slice().as_ptr(), rhs_f32.as_slice().as_ptr(), 4) };
     assert_close_f32(&[lhs_f32.dot(&rhs_f32)], &[eigen_dot_f32]);
+}
+
+#[test]
+fn cholesky_solves_match_eigen() {
+    let matrix_f64 =
+        Matrix::<3, 3, f64>::from_rows([[4.0, 1.0, 1.0], [1.0, 3.0, 0.0], [1.0, 0.0, 2.0]]);
+    let rhs_f64 = Vector::<3, f64>::from_columns([[1.0, 2.0, 3.0]]);
+    let mut eigen_solution_f64 = Vector::<3, f64>::zeros();
+    let eigen_status_f64 = unsafe {
+        sa_eigen_llt_solve_f64(
+            matrix_f64.as_slice().as_ptr(),
+            rhs_f64.as_slice().as_ptr(),
+            3,
+            1,
+            eigen_solution_f64.as_mut_slice().as_mut_ptr(),
+        )
+    };
+    assert_eq!(eigen_status_f64, 1);
+    let solution_f64 = matrix_f64
+        .cholesky()
+        .expect("matrix is positive-definite")
+        .solve(&rhs_f64);
+    assert_close_f64(solution_f64.as_slice(), eigen_solution_f64.as_slice());
+
+    let matrix_f32 = matrix_f64.cast::<f32>();
+    let rhs_f32 = rhs_f64.cast::<f32>();
+    let mut eigen_solution_f32 = Vector::<3, f32>::zeros();
+    let eigen_status_f32 = unsafe {
+        sa_eigen_llt_solve_f32(
+            matrix_f32.as_slice().as_ptr(),
+            rhs_f32.as_slice().as_ptr(),
+            3,
+            1,
+            eigen_solution_f32.as_mut_slice().as_mut_ptr(),
+        )
+    };
+    assert_eq!(eigen_status_f32, 1);
+    let solution_f32 = matrix_f32
+        .cholesky()
+        .expect("matrix is positive-definite")
+        .solve(&rhs_f32);
+    assert_close_f32(solution_f32.as_slice(), eigen_solution_f32.as_slice());
+}
+
+#[test]
+fn ldlt_solves_match_eigen() {
+    let matrix_f64 =
+        Matrix::<3, 3, f64>::from_rows([[0.0, 2.0, 1.0], [2.0, 3.0, 4.0], [1.0, 4.0, 5.0]]);
+    let rhs_f64 = Vector::<3, f64>::from_columns([[1.0, 2.0, 3.0]]);
+    let mut eigen_solution_f64 = Vector::<3, f64>::zeros();
+    let eigen_status_f64 = unsafe {
+        sa_eigen_ldlt_solve_f64(
+            matrix_f64.as_slice().as_ptr(),
+            rhs_f64.as_slice().as_ptr(),
+            3,
+            1,
+            eigen_solution_f64.as_mut_slice().as_mut_ptr(),
+        )
+    };
+    assert_eq!(eigen_status_f64, 1);
+    let solution_f64 = matrix_f64
+        .ldlt()
+        .expect("matrix is nonsingular")
+        .solve(&rhs_f64);
+    assert_close_f64(solution_f64.as_slice(), eigen_solution_f64.as_slice());
+
+    let matrix_f32 = matrix_f64.cast::<f32>();
+    let rhs_f32 = rhs_f64.cast::<f32>();
+    let mut eigen_solution_f32 = Vector::<3, f32>::zeros();
+    let eigen_status_f32 = unsafe {
+        sa_eigen_ldlt_solve_f32(
+            matrix_f32.as_slice().as_ptr(),
+            rhs_f32.as_slice().as_ptr(),
+            3,
+            1,
+            eigen_solution_f32.as_mut_slice().as_mut_ptr(),
+        )
+    };
+    assert_eq!(eigen_status_f32, 1);
+    let solution_f32 = matrix_f32
+        .ldlt()
+        .expect("matrix is nonsingular")
+        .solve(&rhs_f32);
+    assert_close_f32(solution_f32.as_slice(), eigen_solution_f32.as_slice());
 }
 
 fn compare_matvec_f64<const M: usize, const N: usize>(seed: u64) {

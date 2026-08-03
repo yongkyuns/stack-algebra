@@ -407,6 +407,25 @@ impl MatmulBackend<f32> for X86Avx2FmaMatmul {
     ) {
         unsafe { super::avx2::matmul_f32(lhs, rhs, output) }
     }
+
+    #[inline]
+    fn rank_update_sub(target: &mut [f32], source: &[f32], scale: f32) {
+        unsafe { super::avx2::rank_update_sub_f32(target, source, scale) }
+    }
+
+    #[inline]
+    fn symmetric_rank_k_update<const D: usize>(
+        matrix: &mut Matrix<D, D, f32>,
+        block_start: usize,
+        block_end: usize,
+    ) {
+        unsafe { super::avx2::rank_k_update_f32(matrix, block_start, block_end) }
+    }
+
+    #[inline]
+    fn scale_divide(target: &mut [f32], divisor: f32) {
+        unsafe { super::avx2::scale_divide_f32(target, divisor) }
+    }
 }
 
 impl MatmulBackend<f64> for X86Avx2FmaMatmul {
@@ -417,5 +436,24 @@ impl MatmulBackend<f64> for X86Avx2FmaMatmul {
         output: &mut Matrix<M, P, f64>,
     ) {
         unsafe { super::avx2::matmul_f64(lhs, rhs, output) }
+    }
+
+    #[inline]
+    fn rank_update_sub(target: &mut [f64], source: &[f64], scale: f64) {
+        unsafe { super::avx2::rank_update_sub_f64(target, source, scale) }
+    }
+
+    #[inline]
+    fn symmetric_rank_k_update<const D: usize>(
+        matrix: &mut Matrix<D, D, f64>,
+        block_start: usize,
+        block_end: usize,
+    ) {
+        unsafe { super::avx2::rank_k_update_f64(matrix, block_start, block_end) }
+    }
+
+    #[inline]
+    fn scale_divide(target: &mut [f64], divisor: f64) {
+        unsafe { super::avx2::scale_divide_f64(target, divisor) }
     }
 }

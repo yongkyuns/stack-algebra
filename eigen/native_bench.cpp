@@ -62,6 +62,38 @@ Matrix<Scalar, Dimension, Dimension> make_system() {
   return matrix;
 }
 
+template <typename Scalar, int Dimension>
+Matrix<Scalar, Dimension, Dimension> make_spd_system() {
+  Matrix<Scalar, Dimension, Dimension> matrix;
+  for (int row = 0; row < Dimension; ++row) {
+    for (int column = 0; column < Dimension; ++column) {
+      Scalar value = Scalar(0);
+      for (int shared = 0; shared < Dimension; ++shared) {
+        const Scalar left = static_cast<Scalar>(shared + 3 * row + 1) / Scalar(23);
+        const Scalar right = static_cast<Scalar>(shared + 3 * column + 1) / Scalar(23);
+        value += left * right;
+      }
+      matrix(row, column) = value + (row == column ? Scalar(Dimension) : Scalar(0));
+    }
+  }
+  return matrix;
+}
+
+template <typename Scalar, int Dimension>
+Matrix<Scalar, Dimension, Dimension> make_ldlt_system() {
+  Matrix<Scalar, Dimension, Dimension> matrix;
+  for (int row = 0; row < Dimension; ++row) {
+    for (int column = 0; column < Dimension; ++column) {
+      if (row == column) {
+        matrix(row, column) = row % 2 == 0 ? Scalar(-Dimension) : Scalar(Dimension + 1);
+      } else {
+        matrix(row, column) = static_cast<Scalar>(row + column + 1) / Scalar(29);
+      }
+    }
+  }
+  return matrix;
+}
+
 template <typename Operation>
 double sample(Operation& operation, std::size_t batches) {
   const auto started = std::chrono::steady_clock::now();
@@ -128,6 +160,24 @@ void benchmark_lu_factor(const char* name) {
   });
 }
 
+template <typename Scalar, int Dimension>
+void benchmark_llt_factor(const char* name) {
+  auto input = make_spd_system<Scalar, Dimension>();
+  benchmark_case(name, [&] {
+    auto factor = opaque(&input)->llt();
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_ldlt_factor(const char* name) {
+  auto input = make_ldlt_system<Scalar, Dimension>();
+  benchmark_case(name, [&] {
+    auto factor = opaque(&input)->ldlt();
+    opaque(&factor);
+  });
+}
+
 template <typename Scalar, int Rows, int Columns>
 void benchmark_norm(const char* name) {
   auto input = make_matrix<Scalar, Rows, Columns>();
@@ -173,6 +223,36 @@ void benchmark_lu_solve(const char* name) {
   opaque(&solution);
 }
 
+template <typename Scalar, int Dimension>
+void benchmark_llt_solve(const char* name) {
+  auto input = make_spd_system<Scalar, Dimension>();
+  auto factor = input.llt();
+  auto rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    auto* factor_pointer = opaque(&factor);
+    auto* rhs_pointer = opaque(&rhs);
+    auto* solution_pointer = opaque(&solution);
+    *solution_pointer = factor_pointer->solve(*rhs_pointer);
+  });
+  opaque(&solution);
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_ldlt_solve(const char* name) {
+  auto input = make_ldlt_system<Scalar, Dimension>();
+  auto factor = input.ldlt();
+  auto rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    auto* factor_pointer = opaque(&factor);
+    auto* rhs_pointer = opaque(&rhs);
+    auto* solution_pointer = opaque(&solution);
+    *solution_pointer = factor_pointer->solve(*rhs_pointer);
+  });
+  opaque(&solution);
+}
+
 template <typename Scalar>
 void benchmark_scalar(const char* scalar_name) {
   std::cout << '\n' << scalar_name << " fixed-size operations\n"
@@ -200,9 +280,25 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_lu_factor<Scalar, 3>("LU factor 3x3");
   benchmark_lu_factor<Scalar, 6>("LU factor 6x6");
   benchmark_lu_factor<Scalar, 15>("LU factor 15x15");
+  benchmark_llt_factor<Scalar, 3>("LLT factor 3x3");
+  benchmark_llt_factor<Scalar, 6>("LLT factor 6x6");
+  benchmark_llt_factor<Scalar, 15>("LLT factor 15x15");
+  benchmark_llt_factor<Scalar, 32>("LLT factor 32x32");
+  benchmark_ldlt_factor<Scalar, 3>("LDLT factor 3x3");
+  benchmark_ldlt_factor<Scalar, 6>("LDLT factor 6x6");
+  benchmark_ldlt_factor<Scalar, 15>("LDLT factor 15x15");
+  benchmark_ldlt_factor<Scalar, 32>("LDLT factor 32x32");
   benchmark_lu_solve<Scalar, 3>("LU solve 3x3");
   benchmark_lu_solve<Scalar, 6>("LU solve 6x6");
   benchmark_lu_solve<Scalar, 15>("LU solve 15x15");
+  benchmark_llt_solve<Scalar, 3>("LLT solve 3x3");
+  benchmark_llt_solve<Scalar, 6>("LLT solve 6x6");
+  benchmark_llt_solve<Scalar, 15>("LLT solve 15x15");
+  benchmark_llt_solve<Scalar, 32>("LLT solve 32x32");
+  benchmark_ldlt_solve<Scalar, 3>("LDLT solve 3x3");
+  benchmark_ldlt_solve<Scalar, 6>("LDLT solve 6x6");
+  benchmark_ldlt_solve<Scalar, 15>("LDLT solve 15x15");
+  benchmark_ldlt_solve<Scalar, 32>("LDLT solve 32x32");
 }
 
 }

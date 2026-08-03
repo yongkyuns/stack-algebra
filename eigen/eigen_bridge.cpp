@@ -80,6 +80,34 @@ void solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::s
   output_map.noalias() = input_map.partialPivLu().solve(rhs_map);
 }
 
+template <typename Scalar>
+int llt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::size_t columns,
+              Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, dimension, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, dimension, columns);
+  auto factor = input_map.llt();
+  if (factor.info() != Eigen::Success) {
+    return 0;
+  }
+  output_map.noalias() = factor.solve(rhs_map);
+  return 1;
+}
+
+template <typename Scalar>
+int ldlt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::size_t columns,
+               Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, dimension, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, dimension, columns);
+  auto factor = input_map.ldlt();
+  if (factor.info() != Eigen::Success) {
+    return 0;
+  }
+  output_map.noalias() = factor.solve(rhs_map);
+  return 1;
+}
+
 #define DEFINE_ORACLE_WRAPPERS(SUFFIX, SCALAR)                                                   \
   extern "C" void sa_eigen_add_##SUFFIX(const SCALAR* lhs, const SCALAR* rhs, std::size_t rows, \
                                            std::size_t columns, SCALAR* output) {                 \
@@ -121,6 +149,16 @@ void solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::s
                                             std::size_t dimension, std::size_t columns,             \
                                             SCALAR* output) {                                       \
     solve(input, rhs, dimension, columns, output);                                                \
+  }                                                                                                \
+  extern "C" int sa_eigen_llt_solve_##SUFFIX(const SCALAR* input, const SCALAR* rhs,             \
+                                                std::size_t dimension, std::size_t columns,         \
+                                                SCALAR* output) {                                    \
+    return llt_solve(input, rhs, dimension, columns, output);                                     \
+  }                                                                                                \
+  extern "C" int sa_eigen_ldlt_solve_##SUFFIX(const SCALAR* input, const SCALAR* rhs,            \
+                                                 std::size_t dimension, std::size_t columns,        \
+                                                 SCALAR* output) {                                   \
+    return ldlt_solve(input, rhs, dimension, columns, output);                                    \
   }
 
 DEFINE_ORACLE_WRAPPERS(f32, float)

@@ -213,6 +213,25 @@ let vector64 = vector.cast::<f64>();
 	assert_relative_eq!(m.inverse(), exp, max_relative = 1e-6);
   ```
 
+- `.cholesky()` for symmetric positive-definite systems
+  ```rust
+  let matrix = Matrix::<3, 3, f64>::eye();
+  let factor = matrix.cholesky().expect("matrix is positive-definite");
+  let solution = factor.solve(&vector![1.0; 2.0; 3.0]);
+  ```
+
+- `.ldlt()` for symmetric indefinite systems with pivoting
+  ```rust
+  let matrix = matrix![0.0_f64, 2.0; 2.0, 3.0];
+  let factor = matrix.ldlt().expect("matrix is nonsingular");
+  let solution = factor.solve(&vector![1.0; 4.0]);
+  ```
+
+- `.ldlt_no_pivot()` for stable systems when pivot-search overhead is unnecessary
+  ```rust
+  let factor = matrix.ldlt_no_pivot().expect("matrix is nonsingular");
+  ```
+
 - `PartialPivLu` for allocation-free linear solves
   ```rust
   let matrix = Matrix::<3, 3, f64>::eye();
@@ -247,6 +266,8 @@ performance comparisons are opt-in and require Eigen headers discoverable via
 ```sh
 cargo test --features eigen-compare
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench robotics
+# Focus on decomposition cases:
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench robotics -- 'llt|ldlt'
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh
 ```
 
@@ -259,7 +280,15 @@ dot products, norms, and partial-pivot LU factorization and one-right-hand-side 
 Eigen runner uses the same static, column-major matrices, input values,
 dimensions, and 64-operation batch. Compare its `ns/batch` median with
 Criterion's reported time; its `ns/op` column is the batch time divided by 64.
-It uses no Rust-to-C++ calls in the timed region.
+It uses no Rust-to-C++ calls in the timed region. Criterion also includes faer
+dynamic-matrix LLT and LDLT factor/solve baselines. Those faer cases measure
+faer's normal heap-backed `Mat` API, while stack-algebra and Eigen use fixed-size
+stack storage, so they are algorithm comparisons rather than identical memory
+allocation models. Decomposition comparisons
+include partial-pivot LU, Cholesky LLT on generated SPD systems, and pivoted
+LDLT plus explicit no-pivot LDLT on generated symmetric-indefinite systems, each with factorization and
+one-right-hand-side solve cases. LLT and LDLT include 3, 6, 15, and 32 square
+dimensions to expose small-matrix overhead and larger fixed-size scaling.
 
 ## QEMU target validation
 

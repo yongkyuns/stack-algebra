@@ -205,6 +205,13 @@ impl MatmulBackend<f32> for X86Sse2Matmul {
     ) {
         unsafe { matmul_f32(lhs, rhs, output) }
     }
+
+    #[inline]
+    fn rank_update_sub(target: &mut [f32], source: &[f32], scale: f32) {
+        for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
+            *target_value -= *source_value * scale;
+        }
+    }
 }
 
 impl MatmulBackend<f64> for X86Sse2Matmul {
@@ -215,6 +222,13 @@ impl MatmulBackend<f64> for X86Sse2Matmul {
         output: &mut Matrix<M, P, f64>,
     ) {
         unsafe { matmul_f64(lhs, rhs, output) }
+    }
+
+    #[inline]
+    fn rank_update_sub(target: &mut [f64], source: &[f64], scale: f64) {
+        for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
+            *target_value -= *source_value * scale;
+        }
     }
 }
 

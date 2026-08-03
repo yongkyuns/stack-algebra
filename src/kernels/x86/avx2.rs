@@ -233,6 +233,20 @@ impl MatmulBackend<f32> for X86Avx2Matmul {
     ) {
         unsafe { matmul_f32(lhs, rhs, output) }
     }
+
+    #[inline]
+    fn symmetric_rank_k_update<const D: usize>(
+        matrix: &mut Matrix<D, D, f32>,
+        block_start: usize,
+        block_end: usize,
+    ) {
+        unsafe { rank_k_update_f32(matrix, block_start, block_end) }
+    }
+
+    #[inline]
+    fn scale_divide(target: &mut [f32], divisor: f32) {
+        unsafe { scale_divide_f32(target, divisor) }
+    }
 }
 
 #[cfg(not(target_feature = "fma"))]
@@ -244,6 +258,171 @@ impl MatmulBackend<f64> for X86Avx2Matmul {
         output: &mut Matrix<M, P, f64>,
     ) {
         unsafe { matmul_f64(lhs, rhs, output) }
+    }
+
+    #[inline]
+    fn symmetric_rank_k_update<const D: usize>(
+        matrix: &mut Matrix<D, D, f64>,
+        block_start: usize,
+        block_end: usize,
+    ) {
+        unsafe { rank_k_update_f64(matrix, block_start, block_end) }
+    }
+
+    #[inline]
+    fn scale_divide(target: &mut [f64], divisor: f64) {
+        unsafe { scale_divide_f64(target, divisor) }
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn scale_divide_f32(target: &mut [f32], divisor: f32) {
+    use core::arch::x86_64::{_mm256_div_ps, _mm256_loadu_ps, _mm256_set1_ps, _mm256_storeu_ps};
+    let mut index = 0;
+    let divisor_packet = _mm256_set1_ps(divisor);
+    while index + 8 <= target.len() {
+        let value = _mm256_loadu_ps(target.as_ptr().add(index));
+        _mm256_storeu_ps(
+            target.as_mut_ptr().add(index),
+            _mm256_div_ps(value, divisor_packet),
+        );
+        index += 8;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) = *target.get_unchecked(index) / divisor;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn scale_divide_f64(target: &mut [f64], divisor: f64) {
+    use core::arch::x86_64::{_mm256_div_pd, _mm256_loadu_pd, _mm256_set1_pd, _mm256_storeu_pd};
+    let mut index = 0;
+    let divisor_packet = _mm256_set1_pd(divisor);
+    while index + 4 <= target.len() {
+        let value = _mm256_loadu_pd(target.as_ptr().add(index));
+        _mm256_storeu_pd(
+            target.as_mut_ptr().add(index),
+            _mm256_div_pd(value, divisor_packet),
+        );
+        index += 4;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) = *target.get_unchecked(index) / divisor;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn rank_k_update_f32<const D: usize>(
+    matrix: &mut Matrix<D, D, f32>,
+    block_start: usize,
+    block_end: usize,
+) {
+    use core::arch::x86_64::{
+        _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps, _mm256_sub_ps,
+    };
+    let data = matrix.as_mut_slice();
+    for column in block_end..D {
+        let mut row = column;
+        while row + 8 <= D {
+            let output = data.as_ptr().add(column * D + row);
+            let mut accumulator = _mm256_loadu_ps(output);
+            for index in block_start..block_end {
+                let left = _mm256_loadu_ps(data.as_ptr().add(index * D + row));
+                let scale = _mm256_set1_ps(data[index * D + index] * data[index * D + column]);
+                accumulator = _mm256_sub_ps(accumulator, _mm256_mul_ps(left, scale));
+            }
+            _mm256_storeu_ps(data.as_mut_ptr().add(column * D + row), accumulator);
+            row += 8;
+        }
+        while row < D {
+            let mut value = data[column * D + row];
+            for index in block_start..block_end {
+                value -= data[index * D + row] * data[index * D + index] * data[index * D + column];
+            }
+            data[column * D + row] = value;
+            row += 1;
+        }
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn rank_k_update_f64<const D: usize>(
+    matrix: &mut Matrix<D, D, f64>,
+    block_start: usize,
+    block_end: usize,
+) {
+    use core::arch::x86_64::{
+        _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    let data = matrix.as_mut_slice();
+    for column in block_end..D {
+        let mut row = column;
+        while row + 4 <= D {
+            let mut accumulator = _mm256_loadu_pd(data.as_ptr().add(column * D + row));
+            for index in block_start..block_end {
+                let left = _mm256_loadu_pd(data.as_ptr().add(index * D + row));
+                let scale = _mm256_set1_pd(data[index * D + index] * data[index * D + column]);
+                accumulator = _mm256_sub_pd(accumulator, _mm256_mul_pd(left, scale));
+            }
+            _mm256_storeu_pd(data.as_mut_ptr().add(column * D + row), accumulator);
+            row += 4;
+        }
+        while row < D {
+            let mut value = data[column * D + row];
+            for index in block_start..block_end {
+                value -= data[index * D + row] * data[index * D + index] * data[index * D + column];
+            }
+            data[column * D + row] = value;
+            row += 1;
+        }
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn rank_update_sub_f32(target: &mut [f32], source: &[f32], scale: f32) {
+    use core::arch::x86_64::{
+        _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps, _mm256_sub_ps,
+    };
+    let mut index = 0;
+    let scale_packet = _mm256_set1_ps(scale);
+    while index + 8 <= target.len() {
+        let value = _mm256_loadu_ps(target.as_ptr().add(index));
+        let product = _mm256_mul_ps(_mm256_loadu_ps(source.as_ptr().add(index)), scale_packet);
+        _mm256_storeu_ps(
+            target.as_mut_ptr().add(index),
+            _mm256_sub_ps(value, product),
+        );
+        index += 8;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) =
+            *target.get_unchecked(index) - *source.get_unchecked(index) * scale;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn rank_update_sub_f64(target: &mut [f64], source: &[f64], scale: f64) {
+    use core::arch::x86_64::{
+        _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    let mut index = 0;
+    let scale_packet = _mm256_set1_pd(scale);
+    while index + 4 <= target.len() {
+        let value = _mm256_loadu_pd(target.as_ptr().add(index));
+        let product = _mm256_mul_pd(_mm256_loadu_pd(source.as_ptr().add(index)), scale_packet);
+        _mm256_storeu_pd(
+            target.as_mut_ptr().add(index),
+            _mm256_sub_pd(value, product),
+        );
+        index += 4;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) =
+            *target.get_unchecked(index) - *source.get_unchecked(index) * scale;
+        index += 1;
     }
 }
 

@@ -17,7 +17,7 @@ use core::{
     slice,
 };
 
-pub use algebra::PartialPivLu;
+pub use algebra::{Cholesky, Ldlt, PartialPivLu};
 pub use index::MatrixIndex;
 #[doc(hidden)]
 pub use kernels::{MatmulBackend, ReductionBackend, ScalarMatmul, ScalarReduction};

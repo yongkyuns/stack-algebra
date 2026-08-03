@@ -1,4 +1,4 @@
-use core::ops::{Add, Mul};
+use core::ops::{Add, Div, Mul, Sub};
 
 use crate::num::Zero;
 use crate::{Matrix, Vector};
@@ -15,6 +15,43 @@ pub trait MatmulBackend<T> {
         rhs: &Matrix<N, P, T>,
         output: &mut Matrix<M, P, T>,
     );
+
+    fn symmetric_rank_k_update<const D: usize>(
+        matrix: &mut Matrix<D, D, T>,
+        block_start: usize,
+        block_end: usize,
+    ) where
+        T: Copy + Mul<Output = T> + Sub<Output = T>,
+    {
+        for row in block_end..D {
+            for column in block_end..=row {
+                let mut value = matrix[(row, column)];
+                for index in block_start..block_end {
+                    value = value
+                        - matrix[(row, index)] * matrix[(index, index)] * matrix[(column, index)];
+                }
+                matrix[(row, column)] = value;
+            }
+        }
+    }
+
+    fn rank_update_sub(target: &mut [T], source: &[T], scale: T)
+    where
+        T: Copy + Mul<Output = T> + Sub<Output = T>,
+    {
+        for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
+            *target_value = *target_value - *source_value * scale;
+        }
+    }
+
+    fn scale_divide(target: &mut [T], divisor: T)
+    where
+        T: Copy + Div<Output = T>,
+    {
+        for value in target {
+            *value = *value / divisor;
+        }
+    }
 }
 
 #[doc(hidden)]
