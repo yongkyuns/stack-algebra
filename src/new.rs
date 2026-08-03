@@ -9,11 +9,40 @@ use core::ptr;
 // Matrix<M,N,T> methods
 ////////////////////////////////////////////////////////////////////////////////
 impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
-    /// Create a new matrix from an array of arrays in column-major order.
+    /// Creates a new matrix from its columns in column-major order.
+    #[inline]
+    pub const fn from_columns(data: [[T; M]; N]) -> Self {
+        Self { data }
+    }
+
+    /// Creates a new matrix by evaluating `f` for each `(row, column)` pair.
+    #[inline]
+    pub fn from_fn(mut f: impl FnMut(usize, usize) -> T) -> Self {
+        let mut matrix = Matrix::<M, N, MaybeUninit<T>>::uninit();
+        for column in 0..N {
+            for row in 0..M {
+                matrix[(row, column)].write(f(row, column));
+            }
+        }
+
+        // SAFETY: every matrix element is initialized exactly once above.
+        unsafe { matrix.assume_init() }
+    }
+
+    /// Creates a new matrix from rows in row-major order.
+    #[inline]
+    pub fn from_rows(data: [[T; N]; M]) -> Self
+    where
+        T: Copy,
+    {
+        Self::from_fn(|row, column| data[row][column])
+    }
+
+    /// Creates a new matrix from an array of arrays in column-major order.
     #[doc(hidden)]
     #[inline]
     pub const fn from_column_major_order(data: [[T; M]; N]) -> Self {
-        Self { data }
+        Self::from_columns(data)
     }
 }
 
@@ -25,7 +54,7 @@ where
     #[doc(hidden)]
     #[inline]
     pub fn zeros() -> Self {
-        Self::from_column_major_order([[T::zero(); M]; N])
+        Self::from_columns([[T::zero(); M]; N])
     }
 }
 
@@ -37,7 +66,7 @@ where
     #[doc(hidden)]
     #[inline]
     pub fn ones() -> Self {
-        Self::from_column_major_order([[T::one(); M]; N])
+        Self::from_columns([[T::one(); M]; N])
     }
 }
 
@@ -49,7 +78,7 @@ where
     #[doc(hidden)]
     #[inline]
     pub fn eye() -> Self {
-        let mut m = Self::from_column_major_order([[T::zero(); D]; D]);
+        let mut m = Self::from_columns([[T::zero(); D]; D]);
         for i in 0..D {
             m[(i, i)] = T::one();
         }
@@ -61,7 +90,7 @@ where
 #[macro_export]
 macro_rules! matrix {
     ($($data:tt)*) => {
-        $crate::Matrix::from_column_major_order($crate::proc_macro::matrix!($($data)*))
+        $crate::Matrix::from_columns($crate::proc_macro::matrix!($($data)*))
     };
 }
 
@@ -69,7 +98,7 @@ macro_rules! matrix {
 #[macro_export]
 macro_rules! vector {
     ($($data:tt)*) => {
-        $crate::Matrix::from_column_major_order($crate::proc_macro::matrix!($($data)*))
+        $crate::Matrix::from_columns($crate::proc_macro::matrix!($($data)*))
     };
 }
 

@@ -33,6 +33,19 @@ use stack_algebra::*; // or import just the items you need
 
 ## Usage
 
+### Fixed-size types
+
+`Matrix<R, C, T>` is always stack allocated and column major. `T` defaults to
+`f32`; use explicit casts when changing precision.
+
+```rust
+use stack_algebra::{Matrix3d, Vector3f};
+
+let rotation: Matrix3d = Matrix3d::eye();
+let vector: Vector3f = Vector3f::from_columns([[1.0, 2.0, 3.0]]);
+let vector64 = vector.cast::<f64>();
+```
+
 - `matrix!` macro can be used to create a new matrix
   ```rust
   // 2-by-3 matrix 
@@ -127,7 +140,7 @@ use stack_algebra::*; // or import just the items you need
   assert_eq!(m + 1.0, exp); // Add scalar to matrix (note scalar has to be behind the operator)
   ```
 
-- `.T()` for matrix transpose
+- `.transpose()` for matrix transpose
   ```rust
   let m = matrix![
       1.0, 2.0;
@@ -139,7 +152,8 @@ use stack_algebra::*; // or import just the items you need
 	  2.0, 4.0
   ];
 
-  assert_eq!(m.T(), exp); 
+  assert_eq!(m.transpose(), exp);
+  ```
 
 - `.norm()` for computing the [`Frobenius norm`][frobenius]
   ```rust
@@ -160,16 +174,16 @@ use stack_algebra::*; // or import just the items you need
 	assert_eq!(m.trace(), 15.0);
   ```
 
-- `.det()` for determinant (only available for square matrix)
+- `.determinant()` for determinant (only available for square matrix)
   ```rust
     let m = matrix![
 	  3.0, 7.0;
 	  1.0, -4.0;
 	];
-    assert_eq!(m.det(), -19.0); 
+    assert_eq!(m.determinant(), -19.0);
   ```
 
-- `.inv()` for inverse of a matrix (for square invertible matrix)
+- `.inverse()` for inverse of a square invertible matrix
   ```rust
 	let m = matrix![
 	  6.0, 2.0, 3.0;
@@ -181,8 +195,43 @@ use stack_algebra::*; // or import just the items you need
 	      -0.375,  2.25,      -0.125;
 	  0.16666667,  -1.0,  0.16666667;
 	];
-	assert_relative_eq!(m.inv().unwrap(), exp, max_relative = 1e-6);
+	assert_relative_eq!(m.inverse(), exp, max_relative = 1e-6);
   ```
+
+- `PartialPivLu` for allocation-free linear solves
+  ```rust
+  let matrix = Matrix::<3, 3, f64>::eye();
+  let factor = matrix.partial_piv_lu();
+  let solution = factor.solve(&vector![1.0; 2.0; 3.0]);
+  ```
+
+- `.mul_into()` for allocation-free matrix multiplication into a reusable output
+  ```rust
+  let matrix = Matrix::<3, 3, f64>::eye();
+  let mut output = Matrix::<3, 3, f64>::zeros();
+  matrix.mul_into(&matrix, &mut output);
+  ```
+
+## Eigen and faer comparison
+
+The published library has no C++ or faer dependency. Local correctness and
+performance comparisons are opt-in and require Eigen headers discoverable via
+`pkg-config eigen3` or `EIGEN3_INCLUDE_DIR`:
+
+```sh
+cargo test --features eigen-compare
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size
+CXXFLAGS="-march=native" ./eigen/run_native_bench.sh
+```
+
+The parity suite compares elementary operations bit-for-bit and compares
+floating-point reductions and decompositions with documented tolerances. The
+Criterion report includes `stack-algebra` and reusable-buffer faer baselines
+for `f32` and `f64` matrices from 2-by-2 through 15-by-15. The native Eigen
+runner uses the same static, column-major matrices, input values, dimensions,
+and 64-multiplication batch. Compare its `ns/batch` median with Criterion's
+reported time; its `ns/op` column is the batch time divided by 64. It uses no
+Rust-to-C++ calls in the timed region.
 
 ## License
 

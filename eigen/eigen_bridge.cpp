@@ -1,0 +1,85 @@
+#include <Eigen/Dense>
+
+#include <cstddef>
+
+template <typename Scalar>
+using DynamicMatrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>;
+
+template <typename Scalar>
+using DynamicVector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+
+template <typename Scalar>
+void add(const Scalar* lhs, const Scalar* rhs, std::size_t rows, std::size_t columns, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> lhs_map(lhs, rows, columns);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, rows, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, rows, columns);
+  output_map.noalias() = lhs_map + rhs_map;
+}
+
+template <typename Scalar>
+void transpose(const Scalar* input, std::size_t rows, std::size_t columns, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, columns, rows);
+  output_map.noalias() = input_map.transpose();
+}
+
+template <typename Scalar>
+void matmul(const Scalar* lhs, const Scalar* rhs, std::size_t rows, std::size_t shared,
+            std::size_t columns, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> lhs_map(lhs, rows, shared);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, shared, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, rows, columns);
+  output_map.noalias() = lhs_map * rhs_map;
+}
+
+template <typename Scalar>
+Scalar determinant(const Scalar* input, std::size_t dimension) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  return input_map.determinant();
+}
+
+template <typename Scalar>
+void inverse(const Scalar* input, std::size_t dimension, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, dimension, dimension);
+  output_map.noalias() = input_map.inverse();
+}
+
+template <typename Scalar>
+void solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::size_t columns,
+           Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, dimension, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, dimension, columns);
+  output_map.noalias() = input_map.partialPivLu().solve(rhs_map);
+}
+
+#define DEFINE_ORACLE_WRAPPERS(SUFFIX, SCALAR)                                                   \
+  extern "C" void sa_eigen_add_##SUFFIX(const SCALAR* lhs, const SCALAR* rhs, std::size_t rows, \
+                                           std::size_t columns, SCALAR* output) {                 \
+    add(lhs, rhs, rows, columns, output);                                                         \
+  }                                                                                                \
+  extern "C" void sa_eigen_transpose_##SUFFIX(const SCALAR* input, std::size_t rows,             \
+                                                 std::size_t columns, SCALAR* output) {             \
+    transpose(input, rows, columns, output);                                                      \
+  }                                                                                                \
+  extern "C" void sa_eigen_matmul_##SUFFIX(const SCALAR* lhs, const SCALAR* rhs,                 \
+                                              std::size_t rows, std::size_t shared,                 \
+                                              std::size_t columns, SCALAR* output) {                \
+    matmul(lhs, rhs, rows, shared, columns, output);                                               \
+  }                                                                                                \
+  extern "C" SCALAR sa_eigen_determinant_##SUFFIX(const SCALAR* input, std::size_t dimension) { \
+    return determinant(input, dimension);                                                         \
+  }                                                                                                \
+  extern "C" void sa_eigen_inverse_##SUFFIX(const SCALAR* input, std::size_t dimension,          \
+                                               SCALAR* output) {                                    \
+    inverse(input, dimension, output);                                                            \
+  }                                                                                                \
+  extern "C" void sa_eigen_solve_##SUFFIX(const SCALAR* input, const SCALAR* rhs,                \
+                                            std::size_t dimension, std::size_t columns,             \
+                                            SCALAR* output) {                                       \
+    solve(input, rhs, dimension, columns, output);                                                \
+  }
+
+DEFINE_ORACLE_WRAPPERS(f32, float)
+DEFINE_ORACLE_WRAPPERS(f64, double)

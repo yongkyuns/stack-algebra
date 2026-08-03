@@ -5,7 +5,7 @@ description = "Stack-allocated lightweight algebra for bare-metal rust"
 repository = "https://github.com/yongkyuns/stack-algebra"
 documentation = "https://docs.rs/stack-algebra"
 readme = "README.md"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 categories = ["mathematics", "science", "no-std"]
@@ -13,11 +13,23 @@ keywords = ["robotics", "math", "matrix", "vector", "linear-algebra"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+eigen-compare = []
+
 [dependencies]
+approx = "0.5"
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 vectrix-macro = { version = "0.3.0"}
 stride = { version = "0.3.0"}
-libm = "0.2.6"
-approx = "0.5"
 
-# [dev-dependencies]
-# approx = "0.5"
+[dev-dependencies]
+criterion = "0.8"
+faer = "0.24"
+
+[build-dependencies]
+cc = "1.4"
+
+[[bench]]
+name = "fixed_size"
+harness = false

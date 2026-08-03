@@ -12,12 +12,13 @@ mod view;
 
 use core::{
     mem::MaybeUninit,
-    ops::{Add, Div, Mul, Sub},
+    ops::{Add, Mul, Sub},
     slice,
 };
 
+pub use algebra::PartialPivLu;
 pub use index::MatrixIndex;
-pub use num::{Abs, Sqrt, Zero};
+pub use num::{AsPrimitive, Float, One, Real, Zero};
 pub use view::{Column, Row};
 
 #[doc(hidden)]
@@ -58,6 +59,16 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), M * N) }
+    }
+
+    /// Converts every matrix element to `U` using Rust's primitive cast semantics.
+    #[inline]
+    pub fn cast<U>(&self) -> Matrix<M, N, U>
+    where
+        T: Copy + AsPrimitive<U>,
+        U: 'static + Copy,
+    {
+        Matrix::from_fn(|row, column| self[(row, column)].as_())
     }
 
     /// Returns a reference to the `i`-th row of this matrix.
@@ -202,14 +213,20 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     where
         T: Clone,
     {
-        // let mut transpose = zeros!(N, M, T);
-        let mut transpose = unsafe { Matrix::<N, M, MaybeUninit<T>>::uninit().assume_init() };
-        for c in 0..N {
-            for r in 0..M {
-                transpose[(c, r)] = self[(r, c)].clone();
+        Matrix::from_fn(|row, column| self[(column, row)].clone())
+    }
+
+    /// Writes the transpose of this matrix into `output`.
+    #[inline]
+    pub fn transpose_into(&self, output: &mut Matrix<N, M, T>)
+    where
+        T: Clone,
+    {
+        for column in 0..N {
+            for row in 0..M {
+                output[(column, row)] = self[(row, column)].clone();
             }
         }
-        transpose
     }
 
     /// Transpose of the current matrix.
@@ -225,7 +242,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Compute the Frobenius norm
     pub fn norm(&self) -> T
     where
-        T: Copy + Zero + Abs + Sqrt + Add<Output = T> + Mul<Output = T>,
+        T: Real,
     {
         let mut tmp = T::zero();
         for c in 0..N {
@@ -240,7 +257,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Compute the Frobenius norm
     pub fn normalize(self) -> Self
     where
-        T: Copy + Zero + Abs + Sqrt + Add<Output = T> + Mul<Output = T> + Div<Output = T>,
+        T: Real,
     {
         self / self.norm()
     }
@@ -454,10 +471,33 @@ where
 }
 
 /// A matrix with one row and `N` columns.
-pub type RowVector<const N: usize, T> = Matrix<1, N, T>;
+pub type RowVector<const N: usize, T = f32> = Matrix<1, N, T>;
 
 /// A matrix with one column and `M` rows.
-pub type Vector<const M: usize, T> = Matrix<M, 1, T>;
+pub type Vector<const M: usize, T = f32> = Matrix<M, 1, T>;
+
+/// A 2-by-2 matrix.
+pub type Matrix2<T = f32> = Matrix<2, 2, T>;
+/// A 3-by-3 matrix.
+pub type Matrix3<T = f32> = Matrix<3, 3, T>;
+/// A 4-by-4 matrix.
+pub type Matrix4<T = f32> = Matrix<4, 4, T>;
+/// A 2-by-2 matrix of `f32` values.
+pub type Matrix2f = Matrix2<f32>;
+/// A 3-by-3 matrix of `f32` values.
+pub type Matrix3f = Matrix3<f32>;
+/// A 4-by-4 matrix of `f32` values.
+pub type Matrix4f = Matrix4<f32>;
+/// A 2-by-2 matrix of `f64` values.
+pub type Matrix2d = Matrix2<f64>;
+/// A 3-by-3 matrix of `f64` values.
+pub type Matrix3d = Matrix3<f64>;
+/// A 4-by-4 matrix of `f64` values.
+pub type Matrix4d = Matrix4<f64>;
+/// A 3-element vector of `f32` values.
+pub type Vector3f = Vector<3, f32>;
+/// A 3-element vector of `f64` values.
+pub type Vector3d = Vector<3, f64>;
 
 #[cfg(test)]
 mod tests {
@@ -490,6 +530,29 @@ mod tests {
 
         let o = ones!(3);
         assert_eq!(o[(2, 2)], 1.0);
+    }
+
+    #[test]
+    fn constructors_and_casts_preserve_layout() {
+        let matrix = Matrix::<2, 3, f32>::from_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+        assert_eq!(matrix.as_slice(), &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+
+        let generated = Matrix::<2, 3, i32>::from_fn(|row, column| (row * 10 + column) as i32);
+        assert_eq!(generated[(1, 2)], 12);
+
+        let widened: Matrix<2, 3, f64> = matrix.cast();
+        assert_eq!(widened[(1, 2)], 6.0);
+        let narrowed: Matrix<2, 3, f32> = widened.cast();
+        assert_eq!(narrowed, matrix);
+    }
+
+    #[test]
+    fn mul_into_matches_operator_for_rectangular_matrices() {
+        let lhs = Matrix::<2, 3, f64>::from_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+        let rhs = Matrix::<3, 2, f64>::from_rows([[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]]);
+        let mut output = Matrix::<2, 2, f64>::ones();
+        lhs.mul_into(&rhs, &mut output);
+        assert_eq!(output, lhs * rhs);
     }
 
     #[test]

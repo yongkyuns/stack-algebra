@@ -1,4 +1,3 @@
-use core::iter::Sum;
 use core::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Not, Rem, RemAssign, Sub,
     SubAssign,
@@ -239,17 +238,15 @@ macro_rules! impl_op_mul {
     ($lhs:ty, $rhs:ty) => {
         impl<T, const N: usize, const M: usize, const P: usize> Mul<$rhs> for $lhs
         where
-            T: Copy + Zero + Mul<Output = T> + Sum,
+            T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
         {
             type Output = Matrix<M, P, T>;
 
             fn mul(self, rhs: $rhs) -> Self::Output {
                 let mut matrix = Self::Output::zeros();
-                for i in 0..M {
-                    for j in 0..P {
-                        matrix[(i, j)] = self.row(i).dot(rhs.column(j));
-                    }
-                }
+                let lhs: &Matrix<M, N, T> = &self;
+                let rhs: &Matrix<N, P, T> = &rhs;
+                lhs.mul_into(rhs, &mut matrix);
                 matrix
             }
         }
@@ -260,6 +257,30 @@ impl_op_mul! {  Matrix<M,N,T>,  Matrix<N,P,T> }
 impl_op_mul! {  Matrix<M,N,T>, &Matrix<N,P,T> }
 impl_op_mul! { &Matrix<M,N,T>,  Matrix<N,P,T> }
 impl_op_mul! { &Matrix<M,N,T>, &Matrix<N,P,T> }
+
+impl<const M: usize, const N: usize, T> Matrix<M, N, T>
+where
+    T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
+{
+    /// Multiplies this matrix by `rhs` and writes the result into `output`.
+    ///
+    /// The inputs and output use column-major traversal and do not allocate.
+    #[inline]
+    pub fn mul_into<const P: usize>(&self, rhs: &Matrix<N, P, T>, output: &mut Matrix<M, P, T>) {
+        for column in 0..P {
+            for row in 0..M {
+                output[(row, column)] = T::zero();
+            }
+
+            for shared in 0..N {
+                let rhs_value = rhs[(shared, column)];
+                for row in 0..M {
+                    output[(row, column)] = output[(row, column)] + self[(row, shared)] * rhs_value;
+                }
+            }
+        }
+    }
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Matrix += Matrix
@@ -366,7 +387,7 @@ mod tests {
 
         let begin = Instant::now();
         for _ in 0..N {
-            let _ = m.inv();
+            let _ = m.inverse();
         }
         let elapsed = (Instant::now() - begin).as_nanos();
         println!(
