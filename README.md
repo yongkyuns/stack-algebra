@@ -245,6 +245,8 @@ let vector64 = vector.cast::<f64>();
       .solve_least_squares(&observations)
       .expect("design matrix is full rank");
   ```
+  QR factors also expose `apply_q`, `apply_q_transpose`, and in-place variants
+  for allocation-free orthogonal transforms.
 
 - `.col_piv_householder_qr()` for rank-aware least-squares systems
   ```rust

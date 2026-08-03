@@ -33,6 +33,60 @@ fn column_norm<const M: usize, const N: usize, T: Real>(
     max_abs * scaled_sum.sqrt()
 }
 
+#[inline]
+fn apply_q_transpose_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
+    factors: &Matrix<M, N, T>,
+    coefficients: &Vector<N, T>,
+    transformed: &mut Matrix<M, P, T>,
+) {
+    let limit = core::cmp::min(M, N);
+    for column in 0..limit {
+        let coefficient = coefficients[column];
+        if coefficient == T::zero() {
+            continue;
+        }
+        for rhs_column in 0..P {
+            let mut dot = transformed[(column, rhs_column)];
+            for row in (column + 1)..M {
+                dot = dot + factors[(row, column)] * transformed[(row, rhs_column)];
+            }
+            let scale = coefficient * dot;
+            transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
+            for row in (column + 1)..M {
+                transformed[(row, rhs_column)] =
+                    transformed[(row, rhs_column)] - scale * factors[(row, column)];
+            }
+        }
+    }
+}
+
+#[inline]
+fn apply_q_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
+    factors: &Matrix<M, N, T>,
+    coefficients: &Vector<N, T>,
+    transformed: &mut Matrix<M, P, T>,
+) {
+    let limit = core::cmp::min(M, N);
+    for column in (0..limit).rev() {
+        let coefficient = coefficients[column];
+        if coefficient == T::zero() {
+            continue;
+        }
+        for rhs_column in 0..P {
+            let mut dot = transformed[(column, rhs_column)];
+            for row in (column + 1)..M {
+                dot = dot + factors[(row, column)] * transformed[(row, rhs_column)];
+            }
+            let scale = coefficient * dot;
+            transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
+            for row in (column + 1)..M {
+                transformed[(row, rhs_column)] =
+                    transformed[(row, rhs_column)] - scale * factors[(row, column)];
+            }
+        }
+    }
+}
+
 /// Householder QR factorization of a fixed-size matrix.
 ///
 /// The factorization stores the upper-triangular `R` entries in the upper
@@ -127,26 +181,28 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
     #[inline]
     pub fn apply_q_transpose<const P: usize>(&self, rhs: &Matrix<M, P, T>) -> Matrix<M, P, T> {
         let mut transformed = *rhs;
-        let limit = core::cmp::min(M, N);
-        for column in 0..limit {
-            let coefficient = self.coefficients[column];
-            if coefficient == T::zero() {
-                continue;
-            }
-            for rhs_column in 0..P {
-                let mut dot = transformed[(column, rhs_column)];
-                for row in (column + 1)..M {
-                    dot = dot + self.factors[(row, column)] * transformed[(row, rhs_column)];
-                }
-                let scale = coefficient * dot;
-                transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
-                for row in (column + 1)..M {
-                    transformed[(row, rhs_column)] =
-                        transformed[(row, rhs_column)] - scale * self.factors[(row, column)];
-                }
-            }
-        }
+        self.apply_q_transpose_in_place(&mut transformed);
         transformed
+    }
+
+    /// Applies `Qᵀ` to a matrix in place without materializing `Q`.
+    #[inline]
+    pub fn apply_q_transpose_in_place<const P: usize>(&self, rhs: &mut Matrix<M, P, T>) {
+        apply_q_transpose_in_place(&self.factors, &self.coefficients, rhs);
+    }
+
+    /// Applies `Q` to a matrix without materializing `Q`.
+    #[inline]
+    pub fn apply_q<const P: usize>(&self, rhs: &Matrix<M, P, T>) -> Matrix<M, P, T> {
+        let mut transformed = *rhs;
+        self.apply_q_in_place(&mut transformed);
+        transformed
+    }
+
+    /// Applies `Q` to a matrix in place without materializing `Q`.
+    #[inline]
+    pub fn apply_q_in_place<const P: usize>(&self, rhs: &mut Matrix<M, P, T>) {
+        apply_q_in_place(&self.factors, &self.coefficients, rhs);
     }
 
     /// Solves the full-rank least-squares problem `min ||A X - B||₂`.
@@ -403,26 +459,28 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
     #[inline]
     pub fn apply_q_transpose<const P: usize>(&self, rhs: &Matrix<M, P, T>) -> Matrix<M, P, T> {
         let mut transformed = *rhs;
-        let limit = core::cmp::min(M, N);
-        for column in 0..limit {
-            let coefficient = self.coefficients[column];
-            if coefficient == T::zero() {
-                continue;
-            }
-            for rhs_column in 0..P {
-                let mut dot = transformed[(column, rhs_column)];
-                for row in (column + 1)..M {
-                    dot = dot + self.factors[(row, column)] * transformed[(row, rhs_column)];
-                }
-                let scale = coefficient * dot;
-                transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
-                for row in (column + 1)..M {
-                    transformed[(row, rhs_column)] =
-                        transformed[(row, rhs_column)] - scale * self.factors[(row, column)];
-                }
-            }
-        }
+        self.apply_q_transpose_in_place(&mut transformed);
         transformed
+    }
+
+    /// Applies `Qᵀ` to a matrix in place without materializing `Q`.
+    #[inline]
+    pub fn apply_q_transpose_in_place<const P: usize>(&self, rhs: &mut Matrix<M, P, T>) {
+        apply_q_transpose_in_place(&self.factors, &self.coefficients, rhs);
+    }
+
+    /// Applies `Q` to a matrix without materializing `Q`.
+    #[inline]
+    pub fn apply_q<const P: usize>(&self, rhs: &Matrix<M, P, T>) -> Matrix<M, P, T> {
+        let mut transformed = *rhs;
+        self.apply_q_in_place(&mut transformed);
+        transformed
+    }
+
+    /// Applies `Q` to a matrix in place without materializing `Q`.
+    #[inline]
+    pub fn apply_q_in_place<const P: usize>(&self, rhs: &mut Matrix<M, P, T>) {
+        apply_q_in_place(&self.factors, &self.coefficients, rhs);
     }
 
     /// Solves the full-rank least-squares problem `min ||A X - B||₂`.
@@ -500,6 +558,26 @@ mod tests {
     }
 
     #[test]
+    fn applies_q_and_q_transpose_in_place() {
+        let input = matrix![
+            12.0_f64, -51.0, 4.0;
+            6.0, 167.0, -68.0;
+            -4.0, 24.0, -41.0;
+        ];
+        let qr = input.householder_qr();
+        let r = qr.r();
+        assert_relative_eq!(qr.apply_q(&r), input, epsilon = 1e-12, max_relative = 1e-12);
+
+        let rhs = matrix![1.0_f64, 2.0; 3.0, 4.0; 5.0, 6.0];
+        let expected = qr.apply_q(&rhs);
+        let mut actual = rhs;
+        qr.apply_q_in_place(&mut actual);
+        assert_relative_eq!(actual, expected, epsilon = 1e-12, max_relative = 1e-12);
+        qr.apply_q_transpose_in_place(&mut actual);
+        assert_relative_eq!(actual, rhs, epsilon = 1e-12, max_relative = 1e-12);
+    }
+
+    #[test]
     fn householder_norm_avoids_overflow_and_underflow() {
         let large = Matrix::<2, 1, f64>::from_rows([[1.0e308], [1.0e308]]);
         let small = Matrix::<2, 1, f64>::from_rows([[1.0e-300], [1.0e-300]]);
@@ -561,6 +639,23 @@ mod tests {
             .expect("pivoted system is full rank");
         assert_relative_eq!(solution, matrix![2.0_f64; -1.0], max_relative = 1e-12);
         assert_relative_eq!(input * solution, rhs, epsilon = 1e-12, max_relative = 1e-12);
+    }
+
+    #[test]
+    fn reconstructs_pivoted_matrix_with_q() {
+        let input = matrix![
+            0.0_f64, 1.0, 2.0;
+            1.0, 2.0, 4.0;
+            2.0, 3.0, 8.0;
+        ];
+        let factor = input.col_piv_householder_qr();
+        let permuted = Matrix::from_fn(|row, column| input[(row, factor.permutation()[column])]);
+        assert_relative_eq!(
+            factor.apply_q(&factor.r()),
+            permuted,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
     }
 
     #[test]
