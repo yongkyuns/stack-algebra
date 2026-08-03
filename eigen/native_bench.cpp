@@ -15,6 +15,7 @@ namespace {
 constexpr std::size_t kBatchSize = 64;
 constexpr std::size_t kSamples = 15;
 constexpr auto kMinimumSampleDuration = std::chrono::milliseconds(25);
+std::string_view g_filter;
 
 template <typename Value>
 inline Value* opaque(Value* pointer) {
@@ -124,6 +125,9 @@ std::size_t calibrated_batches(Operation& operation) {
 
 template <typename Operation>
 void benchmark_case(const char* name, Operation operation) {
+  if (!g_filter.empty() && std::string_view(name).find(g_filter) == std::string_view::npos) {
+    return;
+  }
   const std::size_t batches = calibrated_batches(operation);
   std::array<double, kSamples> samples{};
   for (double& result : samples) {
@@ -224,6 +228,32 @@ void benchmark_lu_solve(const char* name) {
 }
 
 template <typename Scalar, int Dimension>
+void benchmark_qr_factor(const char* name) {
+  auto input = make_system<Scalar, Dimension>();
+  auto factor = input.householderQr();
+  benchmark_case(name, [&] {
+    auto* input_pointer = opaque(&input);
+    factor.compute(*input_pointer);
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_qr_solve(const char* name) {
+  auto input = make_system<Scalar, Dimension>();
+  auto factor = input.householderQr();
+  auto rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    auto* factor_pointer = opaque(&factor);
+    auto* rhs_pointer = opaque(&rhs);
+    auto* solution_pointer = opaque(&solution);
+    *solution_pointer = factor_pointer->solve(*rhs_pointer);
+  });
+  opaque(&solution);
+}
+
+template <typename Scalar, int Dimension>
 void benchmark_llt_solve(const char* name) {
   auto input = make_spd_system<Scalar, Dimension>();
   auto factor = input.llt();
@@ -291,6 +321,14 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_lu_solve<Scalar, 3>("LU solve 3x3");
   benchmark_lu_solve<Scalar, 6>("LU solve 6x6");
   benchmark_lu_solve<Scalar, 15>("LU solve 15x15");
+  benchmark_qr_factor<Scalar, 3>("QR factor 3x3");
+  benchmark_qr_factor<Scalar, 6>("QR factor 6x6");
+  benchmark_qr_factor<Scalar, 15>("QR factor 15x15");
+  benchmark_qr_factor<Scalar, 32>("QR factor 32x32");
+  benchmark_qr_solve<Scalar, 3>("QR solve 3x3");
+  benchmark_qr_solve<Scalar, 6>("QR solve 6x6");
+  benchmark_qr_solve<Scalar, 15>("QR solve 15x15");
+  benchmark_qr_solve<Scalar, 32>("QR solve 32x32");
   benchmark_llt_solve<Scalar, 3>("LLT solve 3x3");
   benchmark_llt_solve<Scalar, 6>("LLT solve 6x6");
   benchmark_llt_solve<Scalar, 15>("LLT solve 15x15");
@@ -304,10 +342,13 @@ void benchmark_scalar(const char* scalar_name) {
 }
 
 int main(int argc, char** argv) {
-  if (argc > 2 || (argc == 2 && std::string_view(argv[1]) != "f32" &&
+  if (argc > 3 || (argc >= 2 && std::string_view(argv[1]) != "f32" &&
                    std::string_view(argv[1]) != "f64")) {
-    std::cerr << "usage: eigen-native-bench [f32|f64]\n";
+    std::cerr << "usage: eigen-native-bench [f32|f64] [filter]\n";
     return 1;
+  }
+  if (argc == 3) {
+    g_filter = argv[2];
   }
 
   std::cout << "Eigen native benchmark: static column-major matrices; "

@@ -232,6 +232,20 @@ let vector64 = vector.cast::<f64>();
   let factor = matrix.ldlt_no_pivot().expect("matrix is nonsingular");
   ```
 
+- `.householder_qr()` for full-rank square or overdetermined least-squares systems
+  ```rust
+  let design = matrix![
+      1.0_f64, 1.0;
+      1.0, 2.0;
+      1.0, 3.0;
+  ];
+  let observations = vector![3.0; 5.0; 7.0];
+  let coefficients = design
+      .householder_qr()
+      .solve_least_squares(&observations)
+      .expect("design matrix is full rank");
+  ```
+
 - `PartialPivLu` for allocation-free linear solves
   ```rust
   let matrix = Matrix::<3, 3, f64>::eye();
@@ -269,7 +283,7 @@ cargo test --features eigen-compare
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench robotics
 # Focus on decomposition cases:
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench robotics -- 'llt|ldlt'
-CXXFLAGS="-march=native" ./eigen/run_native_bench.sh
+CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 QR
 ```
 
 The parity suite compares elementary operations bit-for-bit and compares
@@ -279,14 +293,16 @@ for `f32` and `f64` square products from 2-by-2 through 15-by-15, robotics
 shapes (`2x3 * 3x2`, `3x6 * 6x3`, and `6x15 * 15x6`), matrix-vector products,
 dot products, norms, and partial-pivot LU factorization and one-right-hand-side solves. The native
 Eigen runner uses the same static, column-major matrices, input values,
-dimensions, and 64-operation batch. Compare its `ns/batch` median with
+dimensions, and 64-operation batch. Pass `QR`, `LLT`, or another operation
+filter as the optional second argument to run only matching native cases.
+Compare its `ns/batch` median with
 Criterion's reported time; its `ns/op` column is the batch time divided by 64.
 It uses no Rust-to-C++ calls in the timed region. Criterion also includes faer
 dynamic-matrix LLT and LDLT factor/solve baselines. Those faer cases measure
 faer's normal heap-backed `Mat` API, while stack-algebra and Eigen use fixed-size
 stack storage, so they are algorithm comparisons rather than identical memory
 allocation models. Decomposition comparisons
-include partial-pivot LU, Cholesky LLT on generated SPD systems, and pivoted
+include partial-pivot LU, Householder QR, Cholesky LLT on generated SPD systems, and pivoted
 LDLT plus explicit no-pivot LDLT on generated symmetric-indefinite systems, each with factorization and
 one-right-hand-side solve cases. LLT and LDLT include 3, 6, 15, and 32 square
 dimensions to expose small-matrix overhead and larger fixed-size scaling.

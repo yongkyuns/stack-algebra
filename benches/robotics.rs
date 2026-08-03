@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use dyn_stack::{MemBuffer, MemStack};
-use faer::linalg::solvers::Solve;
+use faer::linalg::solvers::{Solve, SolveLstsq};
 use faer::{Accum, Mat, Par, Side};
 use stack_algebra::{Matrix, Vector};
 
@@ -351,6 +351,91 @@ macro_rules! scalar_benches {
                 group.finish();
             }
 
+            fn bench_stack_qr_factor<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let input = stack_system::<DIMENSION>();
+                let mut factor = input.householder_qr();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/qr-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input).householder_qr();
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_qr_factor<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let input = faer_system::<DIMENSION>();
+                let mut factor = input.qr();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/qr-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input).qr();
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_qr_solve<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let factor = stack_system::<DIMENSION>().householder_qr();
+                let rhs = stack_rhs::<DIMENSION>();
+                let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/qr-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution = black_box(&factor)
+                                    .solve_least_squares(black_box(&rhs))
+                                    .expect("benchmark system is full rank");
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_qr_solve<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let factor = faer_system::<DIMENSION>().qr();
+                let rhs = faer_rhs::<DIMENSION>();
+                let mut solution = faer_rhs::<DIMENSION>();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/qr-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution.copy_from(black_box(&rhs));
+                                black_box(&factor).solve_lstsq_in_place(black_box(&mut solution));
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
             fn bench_stack_llt_factor<const DIMENSION: usize>(criterion: &mut Criterion) {
                 let input = stack_spd_system::<DIMENSION>();
                 let mut factor = input.cholesky();
@@ -619,6 +704,10 @@ macro_rules! scalar_benches {
                     6,
                     15
                 );
+                for_stack_dimension!(criterion, bench_stack_qr_factor, 3, 6, 15, 32);
+                for_stack_dimension!(criterion, bench_faer_qr_factor, 3, 6, 15, 32);
+                for_stack_dimension!(criterion, bench_stack_qr_solve, 3, 6, 15, 32);
+                for_stack_dimension!(criterion, bench_faer_qr_solve, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_stack_llt_factor, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_stack_llt_solve, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_faer_llt_factor, 3, 6, 15, 32);
