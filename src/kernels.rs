@@ -8,6 +8,9 @@ mod portable;
 #[cfg(target_arch = "x86_64")]
 mod x86;
 
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+mod arm;
+
 #[doc(hidden)]
 pub trait MatmulBackend<T> {
     fn run<const M: usize, const N: usize, const P: usize>(
@@ -103,10 +106,16 @@ macro_rules! impl_scalar_reduction_scalar {
 impl_scalar_matrix_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_scalar_reduction_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(any(
+    target_arch = "x86_64",
+    all(target_arch = "aarch64", target_feature = "neon"),
+)))]
 impl_scalar_matrix_scalar!(f32, f64);
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(any(
+    target_arch = "x86_64",
+    all(target_arch = "aarch64", target_feature = "neon"),
+)))]
 impl_scalar_reduction_scalar!(f32, f64);
 
 #[inline]

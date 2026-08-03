@@ -248,9 +248,10 @@ let vector64 = vector.cast::<f64>();
 
 Fixed-size multiplication selects its kernel at compile time. On
 x86-64, `f32` and `f64` use AVX2 when enabled by the target and otherwise use
-an SSE2 kernel; reduction kernels use fused multiply-add when both AVX2 and
-FMA are enabled. AVX2-only targets retain a non-FMA packet path, and other
-targets use the portable scalar fallback. Use
+an SSE2 kernel; AArch64 targets with NEON use the ARM NEON packet kernel;
+reduction kernels use fused multiply-add when both AVX2 and FMA are enabled.
+AVX2-only targets retain a non-FMA packet path, and targets without a packet
+backend use the portable scalar fallback. Use
 `RUSTFLAGS="-C target-cpu=native"` only when the resulting binary will run on
 the same CPU feature set. Dot products, squared norms, and matrix-vector
 products use the same compile-time scalar/packet dispatch.
