@@ -1,7 +1,12 @@
 use core::ops::{Add, Mul};
 
 use crate::num::Zero;
-use crate::Matrix;
+use crate::{Matrix, Vector};
+
+mod portable;
+
+#[cfg(target_arch = "x86_64")]
+mod x86;
 
 #[doc(hidden)]
 pub trait MatmulBackend<T> {
@@ -13,21 +18,20 @@ pub trait MatmulBackend<T> {
 }
 
 #[doc(hidden)]
-pub struct ScalarMatmul;
+pub trait ReductionBackend<T> {
+    fn dot<const M: usize>(lhs: &Vector<M, T>, rhs: &Vector<M, T>) -> T;
 
-impl<T> MatmulBackend<T> for ScalarMatmul
-where
-    T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
-{
-    #[inline]
-    fn run<const M: usize, const N: usize, const P: usize>(
-        lhs: &Matrix<M, N, T>,
-        rhs: &Matrix<N, P, T>,
-        output: &mut Matrix<M, P, T>,
-    ) {
-        matmul_scalar(lhs, rhs, output);
-    }
+    fn squared_norm<const M: usize, const N: usize>(matrix: &Matrix<M, N, T>) -> T;
+
+    fn matvec<const M: usize, const N: usize>(
+        matrix: &Matrix<M, N, T>,
+        vector: &Vector<N, T>,
+        output: &mut Vector<M, T>,
+    );
 }
+
+#[doc(hidden)]
+pub use portable::{ScalarMatmul, ScalarReduction};
 
 /// Associates a scalar type with its compile-time matrix multiplication kernel.
 ///
@@ -38,6 +42,11 @@ pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
     type Matmul: MatmulBackend<Self>;
 }
 
+/// Associates a scalar type with its compile-time reduction kernels.
+pub trait ReductionScalar: MatrixScalar {
+    type Reduction: ReductionBackend<Self>;
+}
+
 macro_rules! impl_scalar_matrix_scalar {
     ($($scalar:ty),+ $(,)?) => {
         $(impl MatrixScalar for $scalar {
@@ -46,262 +55,23 @@ macro_rules! impl_scalar_matrix_scalar {
     };
 }
 
-impl_scalar_matrix_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+macro_rules! impl_scalar_reduction_scalar {
+    ($($scalar:ty),+ $(,)?) => {
+        $(impl ReductionScalar for $scalar {
+            type Reduction = ScalarReduction;
+        })+
+    };
+}
 
-#[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+impl_scalar_matrix_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+impl_scalar_reduction_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
+#[cfg(not(target_arch = "x86_64"))]
 impl_scalar_matrix_scalar!(f32, f64);
 
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
-impl MatrixScalar for f32 {
-    type Matmul = X86Avx2Matmul;
-}
+#[cfg(not(target_arch = "x86_64"))]
+impl_scalar_reduction_scalar!(f32, f64);
 
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
-impl MatrixScalar for f64 {
-    type Matmul = X86Avx2Matmul;
-}
-
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "sse2",
-    not(target_feature = "avx2")
-))]
-impl MatrixScalar for f32 {
-    type Matmul = X86Sse2Matmul;
-}
-
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "sse2",
-    not(target_feature = "avx2")
-))]
-impl MatrixScalar for f64 {
-    type Matmul = X86Sse2Matmul;
-}
-
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
-#[doc(hidden)]
-pub struct X86Avx2Matmul;
-
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
-impl MatmulBackend<f32> for X86Avx2Matmul {
-    #[inline]
-    fn run<const M: usize, const N: usize, const P: usize>(
-        lhs: &Matrix<M, N, f32>,
-        rhs: &Matrix<N, P, f32>,
-        output: &mut Matrix<M, P, f32>,
-    ) {
-        unsafe { matmul_avx2_f32(lhs, rhs, output) }
-    }
-}
-
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
-impl MatmulBackend<f64> for X86Avx2Matmul {
-    #[inline]
-    fn run<const M: usize, const N: usize, const P: usize>(
-        lhs: &Matrix<M, N, f64>,
-        rhs: &Matrix<N, P, f64>,
-        output: &mut Matrix<M, P, f64>,
-    ) {
-        unsafe { matmul_avx2_f64(lhs, rhs, output) }
-    }
-}
-
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
-#[target_feature(enable = "avx2")]
-unsafe fn matmul_avx2_f32<const M: usize, const N: usize, const P: usize>(
-    lhs: &Matrix<M, N, f32>,
-    rhs: &Matrix<N, P, f32>,
-    output: &mut Matrix<M, P, f32>,
-) {
-    use core::arch::x86_64::{
-        _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_setzero_ps,
-        _mm256_storeu_ps,
-    };
-
-    for column in 0..P {
-        let mut row = 0;
-        while row + 8 <= M {
-            let mut accumulator = _mm256_setzero_ps();
-            for shared in 0..N {
-                let lhs_ptr = lhs.as_slice().as_ptr().add(shared * M + row);
-                let lhs_packet = _mm256_loadu_ps(lhs_ptr);
-                let rhs_packet = _mm256_set1_ps(rhs[(shared, column)]);
-                accumulator = _mm256_add_ps(accumulator, _mm256_mul_ps(lhs_packet, rhs_packet));
-            }
-            let output_ptr = output.as_mut_slice().as_mut_ptr().add(column * M + row);
-            _mm256_storeu_ps(output_ptr, accumulator);
-            row += 8;
-        }
-
-        for row in row..M {
-            let mut accumulator = 0.0_f32;
-            for shared in 0..N {
-                accumulator += lhs[(row, shared)] * rhs[(shared, column)];
-            }
-            output[(row, column)] = accumulator;
-        }
-    }
-}
-
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
-#[target_feature(enable = "avx2")]
-unsafe fn matmul_avx2_f64<const M: usize, const N: usize, const P: usize>(
-    lhs: &Matrix<M, N, f64>,
-    rhs: &Matrix<N, P, f64>,
-    output: &mut Matrix<M, P, f64>,
-) {
-    use core::arch::x86_64::{
-        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_setzero_pd,
-        _mm256_storeu_pd,
-    };
-
-    for column in 0..P {
-        let mut row = 0;
-        while row + 4 <= M {
-            let mut accumulator = _mm256_setzero_pd();
-            for shared in 0..N {
-                let lhs_ptr = lhs.as_slice().as_ptr().add(shared * M + row);
-                let lhs_packet = _mm256_loadu_pd(lhs_ptr);
-                let rhs_packet = _mm256_set1_pd(rhs[(shared, column)]);
-                accumulator = _mm256_add_pd(accumulator, _mm256_mul_pd(lhs_packet, rhs_packet));
-            }
-            let output_ptr = output.as_mut_slice().as_mut_ptr().add(column * M + row);
-            _mm256_storeu_pd(output_ptr, accumulator);
-            row += 4;
-        }
-
-        for row in row..M {
-            let mut accumulator = 0.0_f64;
-            for shared in 0..N {
-                accumulator += lhs[(row, shared)] * rhs[(shared, column)];
-            }
-            output[(row, column)] = accumulator;
-        }
-    }
-}
-
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "sse2",
-    not(target_feature = "avx2")
-))]
-#[doc(hidden)]
-pub struct X86Sse2Matmul;
-
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "sse2",
-    not(target_feature = "avx2")
-))]
-impl MatmulBackend<f32> for X86Sse2Matmul {
-    #[inline]
-    fn run<const M: usize, const N: usize, const P: usize>(
-        lhs: &Matrix<M, N, f32>,
-        rhs: &Matrix<N, P, f32>,
-        output: &mut Matrix<M, P, f32>,
-    ) {
-        unsafe { matmul_sse2_f32(lhs, rhs, output) }
-    }
-}
-
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "sse2",
-    not(target_feature = "avx2")
-))]
-impl MatmulBackend<f64> for X86Sse2Matmul {
-    #[inline]
-    fn run<const M: usize, const N: usize, const P: usize>(
-        lhs: &Matrix<M, N, f64>,
-        rhs: &Matrix<N, P, f64>,
-        output: &mut Matrix<M, P, f64>,
-    ) {
-        unsafe { matmul_sse2_f64(lhs, rhs, output) }
-    }
-}
-
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "sse2",
-    not(target_feature = "avx2")
-))]
-#[target_feature(enable = "sse2")]
-unsafe fn matmul_sse2_f32<const M: usize, const N: usize, const P: usize>(
-    lhs: &Matrix<M, N, f32>,
-    rhs: &Matrix<N, P, f32>,
-    output: &mut Matrix<M, P, f32>,
-) {
-    use core::arch::x86_64::{
-        _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_set1_ps, _mm_setzero_ps, _mm_storeu_ps,
-    };
-
-    for column in 0..P {
-        let mut row = 0;
-        while row + 4 <= M {
-            let mut accumulator = _mm_setzero_ps();
-            for shared in 0..N {
-                let lhs_ptr = lhs.as_slice().as_ptr().add(shared * M + row);
-                let lhs_packet = _mm_loadu_ps(lhs_ptr);
-                let rhs_packet = _mm_set1_ps(rhs[(shared, column)]);
-                accumulator = _mm_add_ps(accumulator, _mm_mul_ps(lhs_packet, rhs_packet));
-            }
-            let output_ptr = output.as_mut_slice().as_mut_ptr().add(column * M + row);
-            _mm_storeu_ps(output_ptr, accumulator);
-            row += 4;
-        }
-
-        for row in row..M {
-            let mut accumulator = 0.0_f32;
-            for shared in 0..N {
-                accumulator += lhs[(row, shared)] * rhs[(shared, column)];
-            }
-            output[(row, column)] = accumulator;
-        }
-    }
-}
-
-#[cfg(all(
-    target_arch = "x86_64",
-    target_feature = "sse2",
-    not(target_feature = "avx2")
-))]
-#[target_feature(enable = "sse2")]
-unsafe fn matmul_sse2_f64<const M: usize, const N: usize, const P: usize>(
-    lhs: &Matrix<M, N, f64>,
-    rhs: &Matrix<N, P, f64>,
-    output: &mut Matrix<M, P, f64>,
-) {
-    use core::arch::x86_64::{
-        _mm_add_pd, _mm_loadu_pd, _mm_mul_pd, _mm_set1_pd, _mm_setzero_pd, _mm_storeu_pd,
-    };
-
-    for column in 0..P {
-        let mut row = 0;
-        while row + 2 <= M {
-            let mut accumulator = _mm_setzero_pd();
-            for shared in 0..N {
-                let lhs_ptr = lhs.as_slice().as_ptr().add(shared * M + row);
-                let lhs_packet = _mm_loadu_pd(lhs_ptr);
-                let rhs_packet = _mm_set1_pd(rhs[(shared, column)]);
-                accumulator = _mm_add_pd(accumulator, _mm_mul_pd(lhs_packet, rhs_packet));
-            }
-            let output_ptr = output.as_mut_slice().as_mut_ptr().add(column * M + row);
-            _mm_storeu_pd(output_ptr, accumulator);
-            row += 2;
-        }
-
-        for row in row..M {
-            let mut accumulator = 0.0_f64;
-            for shared in 0..N {
-                accumulator += lhs[(row, shared)] * rhs[(shared, column)];
-            }
-            output[(row, column)] = accumulator;
-        }
-    }
-}
-
-/// Dispatches matrix multiplication through the selected internal backend.
 #[inline]
 pub(crate) fn matmul<const M: usize, const N: usize, const P: usize, T>(
     lhs: &Matrix<M, N, T>,
@@ -313,31 +83,19 @@ pub(crate) fn matmul<const M: usize, const N: usize, const P: usize, T>(
     T::Matmul::run(lhs, rhs, output);
 }
 
-/// Portable scalar matrix multiplication used as the correctness reference.
-///
-/// Optimized backends should preserve this traversal order where practical so
-/// that floating-point differences remain predictable.
 #[inline]
-pub(crate) fn matmul_scalar<const M: usize, const N: usize, const P: usize, T>(
-    lhs: &Matrix<M, N, T>,
-    rhs: &Matrix<N, P, T>,
-    output: &mut Matrix<M, P, T>,
+pub(crate) fn matvec<const M: usize, const N: usize, T>(
+    matrix: &Matrix<M, N, T>,
+    vector: &Vector<N, T>,
+    output: &mut Vector<M, T>,
 ) where
-    T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
+    T: ReductionScalar,
 {
-    for column in 0..P {
-        for row in 0..M {
-            output[(row, column)] = T::zero();
-        }
-
-        for shared in 0..N {
-            let rhs_value = rhs[(shared, column)];
-            for row in 0..M {
-                output[(row, column)] = output[(row, column)] + lhs[(row, shared)] * rhs_value;
-            }
-        }
-    }
+    T::Reduction::matvec(matrix, vector, output);
 }
+
+#[cfg(test)]
+pub(crate) use portable::matmul_scalar;
 
 #[cfg(test)]
 mod tests {

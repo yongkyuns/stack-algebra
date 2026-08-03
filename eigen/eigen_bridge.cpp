@@ -30,6 +30,12 @@ Scalar norm(const Scalar* input, std::size_t rows, std::size_t columns) {
 }
 
 template <typename Scalar>
+Scalar squared_norm(const Scalar* input, std::size_t rows, std::size_t columns) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
+  return input_map.squaredNorm();
+}
+
+template <typename Scalar>
 Scalar dot(const Scalar* lhs, const Scalar* rhs, std::size_t size) {
   Eigen::Map<const DynamicVector<Scalar>> lhs_map(lhs, size);
   Eigen::Map<const DynamicVector<Scalar>> rhs_map(rhs, size);
@@ -86,6 +92,10 @@ void solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::s
   extern "C" SCALAR sa_eigen_norm_##SUFFIX(const SCALAR* input, std::size_t rows,                \
                                               std::size_t columns) {                                \
     return norm(input, rows, columns);                                                            \
+  }                                                                                                \
+  extern "C" SCALAR sa_eigen_squared_norm_##SUFFIX(const SCALAR* input, std::size_t rows,        \
+                                                     std::size_t columns) {                         \
+    return squared_norm(input, rows, columns);                                                    \
   }                                                                                                \
   extern "C" SCALAR sa_eigen_dot_##SUFFIX(const SCALAR* lhs, const SCALAR* rhs,                  \
                                              std::size_t size) {                                   \

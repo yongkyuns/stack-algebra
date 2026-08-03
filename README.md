@@ -164,6 +164,21 @@ let vector64 = vector.cast::<f64>();
 	assert_relative_eq!(m.norm(), 7.0710678, max_relative = 1e-6);
   ```
 
+- `.squared_norm()`, `.dot()`, and `.matvec()` for fixed-size reductions and
+  matrix-vector products
+  ```rust
+  let lhs = vector![1.0; 2.0; 3.0];
+  let rhs = vector![4.0; 5.0; 6.0];
+  assert_eq!(lhs.dot(&rhs), 32.0);
+  assert_eq!(lhs.squared_norm(), 14.0);
+
+  let matrix = matrix![
+      1.0, 2.0, 3.0;
+      4.0, 5.0, 6.0;
+  ];
+  assert_eq!(matrix.matvec(&lhs), vector![14.0; 32.0]);
+  ```
+
 - `.trace()` for sum of diagonal elements of a sqaure matrix
   ```rust
 	let m = matrix![
@@ -214,9 +229,14 @@ let vector64 = vector.cast::<f64>();
 
 Fixed-size multiplication selects its kernel at compile time. On
 x86-64, `f32` and `f64` use AVX2 when enabled by the target and otherwise use
-an SSE2 kernel; other targets use the portable scalar fallback. Use
+an SSE2 kernel; reduction kernels use fused multiply-add when both AVX2 and
+FMA are enabled. AVX2-only targets retain a non-FMA packet path, and other
+targets use the portable scalar fallback. Use
 `RUSTFLAGS="-C target-cpu=native"` only when the resulting binary will run on
-the same CPU feature set.
+the same CPU feature set. Dot products, squared norms, and matrix-vector
+products use the same compile-time scalar/packet dispatch.
+Custom scalar types can implement `MatrixScalar` for multiplication and add
+`ReductionScalar` when dot, norm, or matrix-vector kernels are needed.
 
 ## Eigen and faer comparison
 
@@ -235,7 +255,7 @@ floating-point reductions and decompositions with documented tolerances. The
 Criterion reports include `stack-algebra` and reusable-buffer faer baselines
 for `f32` and `f64` square products from 2-by-2 through 15-by-15, robotics
 shapes (`2x3 * 3x2`, `3x6 * 6x3`, and `6x15 * 15x6`), matrix-vector products,
-and partial-pivot LU factorization and one-right-hand-side solves. The native
+dot products, norms, and partial-pivot LU factorization and one-right-hand-side solves. The native
 Eigen runner uses the same static, column-major matrices, input values,
 dimensions, and 64-operation batch. Compare its `ns/batch` median with
 Criterion's reported time; its `ns/op` column is the batch time divided by 64.

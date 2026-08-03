@@ -3,7 +3,7 @@ use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use dyn_stack::{MemBuffer, MemStack};
 use faer::{Accum, Mat, Par};
-use stack_algebra::Matrix;
+use stack_algebra::{Matrix, Vector};
 
 const BATCH_SIZE: usize = 64;
 
@@ -91,6 +91,94 @@ macro_rules! scalar_benches {
                         black_box(&output);
                     });
                 });
+                group.finish();
+            }
+
+            fn bench_stack_norm<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+                group_name: &str,
+            ) {
+                let input = stack_matrix::<ROWS, COLUMNS>();
+                let mut output = <$scalar>::default();
+                let mut group = criterion.benchmark_group(group_name);
+                let size = format!("{ROWS}x{COLUMNS}");
+                group.bench_with_input(BenchmarkId::new("stack-algebra", size), &(), |bench, _| {
+                    bench.iter(|| {
+                        for _ in 0..BATCH_SIZE {
+                            output = black_box(&input).norm();
+                        }
+                        black_box(output);
+                    });
+                });
+                group.finish();
+            }
+
+            fn bench_faer_norm<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+                group_name: &str,
+            ) {
+                let input = faer_matrix::<ROWS, COLUMNS>();
+                let mut output = <$scalar>::default();
+                let mut group = criterion.benchmark_group(group_name);
+                let size = format!("{ROWS}x{COLUMNS}");
+                group.bench_with_input(BenchmarkId::new("faer-dynamic", size), &(), |bench, _| {
+                    bench.iter(|| {
+                        for _ in 0..BATCH_SIZE {
+                            output = black_box(&input).norm_l2();
+                        }
+                        black_box(output);
+                    });
+                });
+                group.finish();
+            }
+
+            fn bench_stack_dot<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let lhs =
+                    Vector::<DIMENSION, $scalar>::from_fn(|row, _| (row + 1) as $scalar / 13.0);
+                let rhs =
+                    Vector::<DIMENSION, $scalar>::from_fn(|row, _| (2 * row + 3) as $scalar / 7.0);
+                let mut output = <$scalar>::default();
+                let mut group = criterion.benchmark_group(concat!("robotics/dot/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                output = black_box(&lhs).dot(black_box(&rhs));
+                            }
+                            black_box(output);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_dot<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let lhs = Mat::<$scalar>::from_fn(1, DIMENSION, |_, column| {
+                    (column + 1) as $scalar / 13.0
+                });
+                let rhs =
+                    Mat::<$scalar>::from_fn(DIMENSION, 1, |row, _| (2 * row + 3) as $scalar / 7.0);
+                let mut output = <$scalar>::default();
+                let mut group = criterion.benchmark_group(concat!("robotics/dot/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                output = faer::linalg::matmul::dot::inner_prod(
+                                    black_box(&lhs).row(0),
+                                    faer::Conj::No,
+                                    black_box(&rhs).col(0),
+                                    faer::Conj::No,
+                                );
+                            }
+                            black_box(output);
+                        });
+                    },
+                );
                 group.finish();
             }
 
@@ -210,6 +298,18 @@ macro_rules! scalar_benches {
                     (6, 6, 1),
                     (15, 15, 1)
                 );
+                let norm_group = concat!("robotics/norm/", $scalar_name);
+                for_bench_norm!(
+                    criterion,
+                    norm_group,
+                    bench_stack_norm,
+                    bench_faer_norm,
+                    (3, 3),
+                    (6, 6),
+                    (15, 15),
+                    (6, 15)
+                );
+                for_bench_dimension!(criterion, bench_stack_dot, bench_faer_dot, 3, 6, 15);
                 for_bench_dimension!(
                     criterion,
                     bench_stack_lu_factor,
@@ -236,6 +336,15 @@ macro_rules! for_bench_product {
         $(
             $stack::<$rows, $shared, $columns>($criterion, $group);
             $faer::<$rows, $shared, $columns>($criterion, $group);
+        )+
+    };
+}
+
+macro_rules! for_bench_norm {
+    ($criterion:expr, $group:expr, $stack:ident, $faer:ident, $(($rows:expr, $columns:expr)),+ $(,)?) => {
+        $(
+            $stack::<$rows, $columns>($criterion, $group);
+            $faer::<$rows, $columns>($criterion, $group);
         )+
     };
 }

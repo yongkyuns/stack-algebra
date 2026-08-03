@@ -19,9 +19,9 @@ use core::{
 
 pub use algebra::PartialPivLu;
 pub use index::MatrixIndex;
-pub use kernels::MatrixScalar;
 #[doc(hidden)]
-pub use kernels::{MatmulBackend, ScalarMatmul};
+pub use kernels::{MatmulBackend, ReductionBackend, ScalarMatmul, ScalarReduction};
+pub use kernels::{MatrixScalar, ReductionScalar};
 pub use num::{AsPrimitive, Float, One, Real, Zero};
 pub use view::{Column, Row};
 
@@ -243,25 +243,28 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         self.transpose()
     }
 
+    /// Returns the sum of squares of all entries.
+    #[inline]
+    pub fn squared_norm(&self) -> T
+    where
+        T: Real + ReductionScalar,
+    {
+        T::Reduction::squared_norm(self)
+    }
+
     /// Compute the Frobenius norm
+    #[inline]
     pub fn norm(&self) -> T
     where
-        T: Real,
+        T: Real + ReductionScalar,
     {
-        let mut tmp = T::zero();
-        for c in 0..N {
-            for r in 0..M {
-                let v = self[(r, c)].abs();
-                tmp = tmp + v * v;
-            }
-        }
-        tmp.sqrt()
+        self.squared_norm().sqrt()
     }
 
     /// Compute the Frobenius norm
     pub fn normalize(self) -> Self
     where
-        T: Real,
+        T: Real + ReductionScalar,
     {
         self / self.norm()
     }
@@ -314,6 +317,17 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     //         .max()
     //         .unwrap_or_else(Zero::zero)
     // }
+}
+
+impl<const M: usize, T> Matrix<M, 1, T>
+where
+    T: ReductionScalar,
+{
+    /// Computes the dot product of two fixed-size vectors.
+    #[inline]
+    pub fn dot(&self, other: &Self) -> T {
+        T::Reduction::dot(self, other)
+    }
 }
 
 // impl<const M: usize, const N: usize, T> Clone for Matrix<M, N, T>
@@ -626,7 +640,29 @@ mod tests {
             1.0,-2.0;
            -3.0, 6.0;
         ];
+        assert_eq!(m.squared_norm(), 50.0);
         assert_relative_eq!(m.norm(), 7.0710678, max_relative = 1e-6);
+    }
+
+    #[test]
+    fn vector_dot_and_matvec() {
+        let lhs = Matrix::<5, 1, f64>::from_rows([[1.0], [-2.0], [3.0], [4.0], [-5.0]]);
+        let rhs = Matrix::<5, 1, f64>::from_rows([[2.0], [3.0], [-4.0], [5.0], [6.0]]);
+        assert_eq!(lhs.dot(&rhs), -26.0);
+
+        let matrix = Matrix::<4, 3, f64>::from_rows([
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+            [10.0, 11.0, 12.0],
+        ]);
+        let vector = Matrix::<3, 1, f64>::from_rows([[2.0], [-1.0], [0.5]]);
+        let expected = Matrix::<4, 1, f64>::from_rows([[1.5], [6.0], [10.5], [15.0]]);
+        assert_eq!(matrix.matvec(&vector), expected);
+
+        let mut output = Vector::<4, f64>::zeros();
+        matrix.matvec_into(&vector, &mut output);
+        assert_eq!(output, expected);
     }
 
     #[test]

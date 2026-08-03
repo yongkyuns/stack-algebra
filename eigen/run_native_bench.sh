@@ -20,8 +20,12 @@ if [[ -n "${CXXFLAGS:-}" ]]; then
 fi
 
 mkdir -p "${root_dir}/target"
-"${compiler}" -std=c++17 -O3 -DNDEBUG \
-  "${user_flags[@]}" "${eigen_flags[@]}" "${root_dir}/eigen/native_bench.cpp" \
-  -o "${root_dir}/target/eigen-native-bench"
+compile_command=("${compiler}" -std=c++17 -O3 -DNDEBUG)
+if ((${#user_flags[@]})); then
+  compile_command+=("${user_flags[@]}")
+fi
+compile_command+=("${eigen_flags[@]}" "${root_dir}/eigen/native_bench.cpp" \
+  -o "${root_dir}/target/eigen-native-bench")
+"${compile_command[@]}"
 
 exec "${root_dir}/target/eigen-native-bench" "$@"

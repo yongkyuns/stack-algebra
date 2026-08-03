@@ -128,6 +128,36 @@ void benchmark_lu_factor(const char* name) {
   });
 }
 
+template <typename Scalar, int Rows, int Columns>
+void benchmark_norm(const char* name) {
+  auto input = make_matrix<Scalar, Rows, Columns>();
+  Scalar output{};
+  benchmark_case(name, [&] {
+    auto* input_pointer = opaque(&input);
+    output = input_pointer->norm();
+  });
+  opaque(&output);
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_dot(const char* name) {
+  using RowVector = Eigen::Matrix<Scalar, 1, Dimension, Eigen::RowMajor>;
+  using ColVector = Eigen::Matrix<Scalar, Dimension, 1, Eigen::ColMajor>;
+  RowVector lhs;
+  ColVector rhs;
+  for (int index = 0; index < Dimension; ++index) {
+    lhs(index) = static_cast<Scalar>(index + 1) / Scalar(13);
+    rhs(index) = static_cast<Scalar>(2 * index + 3) / Scalar(7);
+  }
+  Scalar output{};
+  benchmark_case(name, [&] {
+    auto* lhs_pointer = opaque(&lhs);
+    auto* rhs_pointer = opaque(&rhs);
+    output = lhs_pointer->dot(*rhs_pointer);
+  });
+  opaque(&output);
+}
+
 template <typename Scalar, int Dimension>
 void benchmark_lu_solve(const char* name) {
   auto input = make_system<Scalar, Dimension>();
@@ -160,6 +190,13 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_product<Scalar, 3, 3, 1>("matvec 3x3");
   benchmark_product<Scalar, 6, 6, 1>("matvec 6x6");
   benchmark_product<Scalar, 15, 15, 1>("matvec 15x15");
+  benchmark_norm<Scalar, 3, 3>("norm 3x3");
+  benchmark_norm<Scalar, 6, 6>("norm 6x6");
+  benchmark_norm<Scalar, 15, 15>("norm 15x15");
+  benchmark_norm<Scalar, 6, 15>("norm 6x15");
+  benchmark_dot<Scalar, 3>("dot 3");
+  benchmark_dot<Scalar, 6>("dot 6");
+  benchmark_dot<Scalar, 15>("dot 15");
   benchmark_lu_factor<Scalar, 3>("LU factor 3x3");
   benchmark_lu_factor<Scalar, 6>("LU factor 6x6");
   benchmark_lu_factor<Scalar, 15>("LU factor 15x15");

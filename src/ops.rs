@@ -4,9 +4,9 @@ use core::ops::{
 };
 
 use crate::index::MatrixIndex;
-use crate::kernels::{matmul, MatrixScalar};
+use crate::kernels::{matmul, matvec, MatrixScalar, ReductionScalar};
 use crate::num::Zero;
-use crate::Matrix;
+use crate::{Matrix, Vector};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Indexing
@@ -269,6 +269,26 @@ where
     #[inline]
     pub fn mul_into<const P: usize>(&self, rhs: &Matrix<N, P, T>, output: &mut Matrix<M, P, T>) {
         matmul(self, rhs, output);
+    }
+}
+
+impl<const M: usize, const N: usize, T> Matrix<M, N, T>
+where
+    T: ReductionScalar,
+{
+    /// Multiplies this matrix by a fixed-size vector without allocating
+    /// intermediate storage.
+    #[inline]
+    pub fn matvec(&self, vector: &Vector<N, T>) -> Vector<M, T> {
+        let mut output = Vector::<M, T>::zeros();
+        self.matvec_into(vector, &mut output);
+        output
+    }
+
+    /// Multiplies this matrix by a fixed-size vector and writes into `output`.
+    #[inline]
+    pub fn matvec_into(&self, vector: &Vector<N, T>, output: &mut Vector<M, T>) {
+        matvec(self, vector, output);
     }
 }
 
