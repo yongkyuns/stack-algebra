@@ -4,6 +4,7 @@ mod algebra;
 mod fmt;
 mod index;
 mod iter;
+mod kernels;
 mod new;
 mod num;
 mod ops;
@@ -18,6 +19,9 @@ use core::{
 
 pub use algebra::PartialPivLu;
 pub use index::MatrixIndex;
+pub use kernels::MatrixScalar;
+#[doc(hidden)]
+pub use kernels::{MatmulBackend, ScalarMatmul};
 pub use num::{AsPrimitive, Float, One, Real, Zero};
 pub use view::{Column, Row};
 

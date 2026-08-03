@@ -1,4 +1,4 @@
-use crate::{Matrix, Real};
+use crate::{Matrix, MatrixScalar, Real};
 
 /// LU decomposition with partial row pivoting.
 ///
@@ -13,7 +13,7 @@ pub struct PartialPivLu<const D: usize, T> {
     row_swaps: usize,
 }
 
-impl<const D: usize, T: Real> PartialPivLu<D, T> {
+impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
     /// Computes a partial-pivot LU decomposition of `matrix`.
     #[inline]
     pub fn decompose(matrix: &Matrix<D, D, T>) -> Self {
@@ -142,7 +142,7 @@ impl<const D: usize, T: Real> PartialPivLu<D, T> {
     }
 }
 
-impl<const D: usize, T: Real> Matrix<D, D, T> {
+impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
     /// Computes the partial-pivot LU factorization of this matrix.
     #[inline]
     pub fn partial_piv_lu(&self) -> PartialPivLu<D, T> {

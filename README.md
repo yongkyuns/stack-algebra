@@ -212,6 +212,12 @@ let vector64 = vector.cast::<f64>();
   matrix.mul_into(&matrix, &mut output);
   ```
 
+Fixed-size multiplication selects its kernel at compile time. On
+x86-64, `f32` and `f64` use AVX2 when enabled by the target and otherwise use
+an SSE2 kernel; other targets use the portable scalar fallback. Use
+`RUSTFLAGS="-C target-cpu=native"` only when the resulting binary will run on
+the same CPU feature set.
+
 ## Eigen and faer comparison
 
 The published library has no C++ or faer dependency. Local correctness and

@@ -4,6 +4,7 @@ use core::ops::{
 };
 
 use crate::index::MatrixIndex;
+use crate::kernels::{matmul, MatrixScalar};
 use crate::num::Zero;
 use crate::Matrix;
 
@@ -238,7 +239,7 @@ macro_rules! impl_op_mul {
     ($lhs:ty, $rhs:ty) => {
         impl<T, const N: usize, const M: usize, const P: usize> Mul<$rhs> for $lhs
         where
-            T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
+            T: MatrixScalar,
         {
             type Output = Matrix<M, P, T>;
 
@@ -260,25 +261,14 @@ impl_op_mul! { &Matrix<M,N,T>, &Matrix<N,P,T> }
 
 impl<const M: usize, const N: usize, T> Matrix<M, N, T>
 where
-    T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
+    T: MatrixScalar,
 {
     /// Multiplies this matrix by `rhs` and writes the result into `output`.
     ///
     /// The inputs and output use column-major traversal and do not allocate.
     #[inline]
     pub fn mul_into<const P: usize>(&self, rhs: &Matrix<N, P, T>, output: &mut Matrix<M, P, T>) {
-        for column in 0..P {
-            for row in 0..M {
-                output[(row, column)] = T::zero();
-            }
-
-            for shared in 0..N {
-                let rhs_value = rhs[(shared, column)];
-                for row in 0..M {
-                    output[(row, column)] = output[(row, column)] + self[(row, shared)] * rhs_value;
-                }
-            }
-        }
+        matmul(self, rhs, output);
     }
 }
 

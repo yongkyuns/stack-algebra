@@ -61,6 +61,23 @@ fn matrix<const R: usize, const C: usize>() -> Matrix<R, C, f64> {
     })
 }
 
+fn next_value(state: &mut u64) -> f64 {
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    let mantissa = *state >> 11;
+    (mantissa as f64 / (1_u64 << 53) as f64) * 2.0 - 1.0
+}
+
+fn generated_f64<const R: usize, const C: usize>(seed: u64) -> Matrix<R, C, f64> {
+    let mut state = seed;
+    Matrix::from_fn(|_, _| next_value(&mut state))
+}
+
+fn generated_f32<const R: usize, const C: usize>(seed: u64) -> Matrix<R, C, f32> {
+    generated_f64::<R, C>(seed).cast()
+}
+
 fn assert_close_f64(actual: &[f64], expected: &[f64]) {
     assert_eq!(actual.len(), expected.len());
     for (actual, expected) in actual.iter().zip(expected) {
@@ -127,6 +144,40 @@ fn compare_square_matmul<const D: usize>() {
     assert_close_f64((&lhs * &rhs).as_slice(), eigen.as_slice());
 }
 
+fn compare_rectangular_f64<const M: usize, const N: usize, const P: usize>() {
+    let lhs = generated_f64::<M, N>(11);
+    let rhs = generated_f64::<N, P>(29);
+    let mut eigen = Matrix::<M, P, f64>::zeros();
+    unsafe {
+        sa_eigen_matmul_f64(
+            lhs.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            M,
+            N,
+            P,
+            eigen.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    assert_close_f64((&lhs * &rhs).as_slice(), eigen.as_slice());
+}
+
+fn compare_rectangular_f32<const M: usize, const N: usize, const P: usize>() {
+    let lhs = generated_f32::<M, N>(11);
+    let rhs = generated_f32::<N, P>(29);
+    let mut eigen = Matrix::<M, P, f32>::zeros();
+    unsafe {
+        sa_eigen_matmul_f32(
+            lhs.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            M,
+            N,
+            P,
+            eigen.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    assert_close_f32((&lhs * &rhs).as_slice(), eigen.as_slice());
+}
+
 #[test]
 fn fixed_size_matrix_products_match_eigen() {
     compare_square_matmul::<2>();
@@ -135,6 +186,29 @@ fn fixed_size_matrix_products_match_eigen() {
     compare_square_matmul::<6>();
     compare_square_matmul::<9>();
     compare_square_matmul::<15>();
+}
+
+#[test]
+fn rectangular_matrix_products_match_eigen_across_shapes() {
+    compare_rectangular_f64::<1, 1, 1>();
+    compare_rectangular_f64::<2, 3, 4>();
+    compare_rectangular_f64::<3, 5, 2>();
+    compare_rectangular_f64::<5, 7, 3>();
+    compare_rectangular_f64::<7, 4, 9>();
+    compare_rectangular_f64::<9, 6, 5>();
+    compare_rectangular_f64::<2, 3, 2>();
+    compare_rectangular_f64::<3, 6, 3>();
+    compare_rectangular_f64::<6, 15, 6>();
+
+    compare_rectangular_f32::<1, 1, 1>();
+    compare_rectangular_f32::<2, 3, 4>();
+    compare_rectangular_f32::<3, 5, 2>();
+    compare_rectangular_f32::<5, 7, 3>();
+    compare_rectangular_f32::<7, 4, 9>();
+    compare_rectangular_f32::<9, 6, 5>();
+    compare_rectangular_f32::<2, 3, 2>();
+    compare_rectangular_f32::<3, 6, 3>();
+    compare_rectangular_f32::<6, 15, 6>();
 }
 
 #[test]
