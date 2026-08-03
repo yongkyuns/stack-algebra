@@ -246,6 +246,17 @@ let vector64 = vector.cast::<f64>();
       .expect("design matrix is full rank");
   ```
 
+- `.col_piv_householder_qr()` for rank-aware least-squares systems
+  ```rust
+  let factor = design.col_piv_householder_qr();
+  assert_eq!(factor.rank(), 2);
+  let coefficients = factor
+      .solve_least_squares(&observations)
+      .expect("design matrix is full rank");
+  ```
+  Use `.solve_least_squares_basic()` when dependent columns should be handled
+  using Eigen-compatible basic rank-deficient semantics.
+
 - `PartialPivLu` for allocation-free linear solves
   ```rust
   let matrix = Matrix::<3, 3, f64>::eye();
@@ -306,6 +317,7 @@ include partial-pivot LU, Householder QR, Cholesky LLT on generated SPD systems,
 LDLT plus explicit no-pivot LDLT on generated symmetric-indefinite systems, each with factorization and
 one-right-hand-side solve cases. LLT and LDLT include 3, 6, 15, and 32 square
 dimensions to expose small-matrix overhead and larger fixed-size scaling.
+QR additionally covers tall `6x3`, `15x6`, `32x8`, and `64x16` systems.
 
 ## QEMU target validation
 

@@ -34,6 +34,17 @@ macro_rules! scalar_benches {
                 })
             }
 
+            fn stack_tall_system<const ROWS: usize, const COLUMNS: usize>(
+            ) -> Matrix<ROWS, COLUMNS, $scalar> {
+                Matrix::from_fn(|row, column| {
+                    if row == column {
+                        (ROWS + 1) as $scalar
+                    } else {
+                        (row + 2 * column + 1) as $scalar / 19.0
+                    }
+                })
+            }
+
             fn stack_spd_system<const DIMENSION: usize>() -> Matrix<DIMENSION, DIMENSION, $scalar> {
                 Matrix::from_fn(|row, column| {
                     let mut value = <$scalar>::default();
@@ -74,6 +85,16 @@ macro_rules! scalar_benches {
                 Mat::from_fn(DIMENSION, DIMENSION, |row, column| {
                     if row == column {
                         (DIMENSION + 1) as $scalar
+                    } else {
+                        (row + 2 * column + 1) as $scalar / 19.0
+                    }
+                })
+            }
+
+            fn faer_tall_system<const ROWS: usize, const COLUMNS: usize>() -> Mat<$scalar> {
+                Mat::from_fn(ROWS, COLUMNS, |row, column| {
+                    if row == column {
+                        (ROWS + 1) as $scalar
                     } else {
                         (row + 2 * column + 1) as $scalar / 19.0
                     }
@@ -172,7 +193,7 @@ macro_rules! scalar_benches {
                 criterion: &mut Criterion,
                 group_name: &str,
             ) {
-                let input = stack_matrix::<ROWS, COLUMNS>();
+                let input = stack_tall_system::<ROWS, COLUMNS>();
                 let mut output = <$scalar>::default();
                 let mut group = criterion.benchmark_group(group_name);
                 let size = format!("{ROWS}x{COLUMNS}");
@@ -191,7 +212,7 @@ macro_rules! scalar_benches {
                 criterion: &mut Criterion,
                 group_name: &str,
             ) {
-                let input = faer_matrix::<ROWS, COLUMNS>();
+                let input = faer_tall_system::<ROWS, COLUMNS>();
                 let mut output = <$scalar>::default();
                 let mut group = criterion.benchmark_group(group_name);
                 let size = format!("{ROWS}x{COLUMNS}");
@@ -422,6 +443,184 @@ macro_rules! scalar_benches {
                     criterion.benchmark_group(concat!("robotics/qr-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution.copy_from(black_box(&rhs));
+                                black_box(&factor).solve_lstsq_in_place(black_box(&mut solution));
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_col_piv_qr_factor<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let input = stack_system::<DIMENSION>();
+                let mut factor = input.col_piv_householder_qr();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/col-piv-qr-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input).col_piv_householder_qr();
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_col_piv_qr_factor<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let input = faer_system::<DIMENSION>();
+                let mut factor = input.col_piv_qr();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/col-piv-qr-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input).col_piv_qr();
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_col_piv_qr_solve<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let factor = stack_system::<DIMENSION>().col_piv_householder_qr();
+                let rhs = stack_rhs::<DIMENSION>();
+                let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/col-piv-qr-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution = black_box(&factor)
+                                    .solve_least_squares(black_box(&rhs))
+                                    .expect("benchmark system is full rank");
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_col_piv_qr_solve<const DIMENSION: usize>(criterion: &mut Criterion) {
+                let factor = faer_system::<DIMENSION>().col_piv_qr();
+                let rhs = faer_rhs::<DIMENSION>();
+                let mut solution = faer_rhs::<DIMENSION>();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/col-piv-qr-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution.copy_from(black_box(&rhs));
+                                black_box(&factor).solve_lstsq_in_place(black_box(&mut solution));
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_tall_qr_factor<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = stack_matrix::<ROWS, COLUMNS>();
+                let mut factor = input.householder_qr();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/tall-qr-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input).householder_qr();
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_tall_qr_factor<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = faer_matrix::<ROWS, COLUMNS>();
+                let mut factor = input.qr();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/tall-qr-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input).qr();
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_tall_qr_solve<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let factor = stack_tall_system::<ROWS, COLUMNS>().householder_qr();
+                let rhs = stack_matrix::<ROWS, 1>();
+                let mut solution = Matrix::<COLUMNS, 1, $scalar>::zeros();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/tall-qr-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution = black_box(&factor)
+                                    .solve_least_squares(black_box(&rhs))
+                                    .expect("tall benchmark system is full rank");
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_tall_qr_solve<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let factor = faer_tall_system::<ROWS, COLUMNS>().qr();
+                let rhs = faer_matrix::<ROWS, 1>();
+                let mut solution = faer_matrix::<ROWS, 1>();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/tall-qr-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", format!("{ROWS}x{COLUMNS}")),
                     &(),
                     |bench, _| {
                         bench.iter(|| {
@@ -708,6 +907,28 @@ macro_rules! scalar_benches {
                 for_stack_dimension!(criterion, bench_faer_qr_factor, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_stack_qr_solve, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_faer_qr_solve, 3, 6, 15, 32);
+                for_stack_dimension!(criterion, bench_stack_col_piv_qr_factor, 3, 6, 15, 32);
+                for_stack_dimension!(criterion, bench_faer_col_piv_qr_factor, 3, 6, 15, 32);
+                for_stack_dimension!(criterion, bench_stack_col_piv_qr_solve, 3, 6, 15, 32);
+                for_stack_dimension!(criterion, bench_faer_col_piv_qr_solve, 3, 6, 15, 32);
+                for_tall_dimension!(
+                    criterion,
+                    bench_stack_tall_qr_factor,
+                    bench_faer_tall_qr_factor,
+                    (6, 3),
+                    (15, 6),
+                    (32, 8),
+                    (64, 16)
+                );
+                for_tall_dimension!(
+                    criterion,
+                    bench_stack_tall_qr_solve,
+                    bench_faer_tall_qr_solve,
+                    (6, 3),
+                    (15, 6),
+                    (32, 8),
+                    (64, 16)
+                );
                 for_stack_dimension!(criterion, bench_stack_llt_factor, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_stack_llt_solve, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_faer_llt_factor, 3, 6, 15, 32);
@@ -754,6 +975,15 @@ macro_rules! for_stack_dimension {
     ($criterion:expr, $stack:ident, $($dimension:expr),+ $(,)?) => {
         $(
             $stack::<$dimension>($criterion);
+        )+
+    };
+}
+
+macro_rules! for_tall_dimension {
+    ($criterion:expr, $stack:ident, $faer:ident, $(($rows:expr, $columns:expr)),+ $(,)?) => {
+        $(
+            $stack::<$rows, $columns>($criterion);
+            $faer::<$rows, $columns>($criterion);
         )+
     };
 }

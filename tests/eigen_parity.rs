@@ -35,6 +35,14 @@ unsafe extern "C" {
         rhs_columns: usize,
         output: *mut f32,
     );
+    fn sa_eigen_col_piv_qr_solve_f32(
+        input: *const f32,
+        rhs: *const f32,
+        rows: usize,
+        columns: usize,
+        rhs_columns: usize,
+        output: *mut f32,
+    );
     fn sa_eigen_llt_solve_f32(
         input: *const f32,
         rhs: *const f32,
@@ -84,6 +92,14 @@ unsafe extern "C" {
         output: *mut f64,
     );
     fn sa_eigen_qr_solve_f64(
+        input: *const f64,
+        rhs: *const f64,
+        rows: usize,
+        columns: usize,
+        rhs_columns: usize,
+        output: *mut f64,
+    );
+    fn sa_eigen_col_piv_qr_solve_f64(
         input: *const f64,
         rhs: *const f64,
         rows: usize,
@@ -774,6 +790,28 @@ fn f32_qr_least_squares_matches_eigen() {
 }
 
 #[test]
+fn f32_column_pivoted_qr_matches_eigen() {
+    let design = Matrix::<3, 2, f32>::from_rows([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]]);
+    let rhs = Matrix::<3, 1, f32>::from_columns([[-1.0, 0.0, 1.0]]);
+    let mut eigen_solution = Matrix::<2, 1, f32>::zeros();
+    unsafe {
+        sa_eigen_col_piv_qr_solve_f32(
+            design.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            3,
+            2,
+            1,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let solution = design
+        .col_piv_householder_qr()
+        .solve_least_squares(&rhs)
+        .expect("pivoted design matrix is full rank");
+    assert_close_f32(solution.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
 fn determinant_inverse_and_solve_match_eigen() {
     let matrix =
         Matrix::<3, 3, f64>::from_rows([[6.0, 2.0, 3.0], [1.0, 1.0, 1.0], [0.0, 4.0, 9.0]]);
@@ -827,5 +865,121 @@ fn qr_least_squares_matches_eigen() {
         .householder_qr()
         .solve_least_squares(&rhs)
         .expect("design matrix is full rank");
+    assert_close_f64(solution.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn column_pivoted_qr_matches_eigen() {
+    let design = Matrix::<3, 2, f64>::from_rows([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]]);
+    let rhs = Matrix::<3, 1, f64>::from_columns([[-1.0, 0.0, 1.0]]);
+    let mut eigen_solution = Matrix::<2, 1, f64>::zeros();
+    unsafe {
+        sa_eigen_col_piv_qr_solve_f64(
+            design.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            3,
+            2,
+            1,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let solution = design
+        .col_piv_householder_qr()
+        .solve_least_squares(&rhs)
+        .expect("pivoted design matrix is full rank");
+    assert_close_f64(solution.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn tall_qr_matches_eigen() {
+    let design = Matrix::<6, 3, f64>::from_rows([
+        [1.0, 0.0, 2.0],
+        [2.0, 1.0, 1.0],
+        [3.0, 1.0, 0.0],
+        [4.0, 2.0, 1.0],
+        [5.0, 3.0, 2.0],
+        [6.0, 5.0, 1.0],
+    ]);
+    let rhs = Matrix::<6, 2, f64>::from_rows([
+        [1.0, -2.0],
+        [2.0, 0.5],
+        [4.0, 1.0],
+        [5.0, 2.5],
+        [7.0, 3.0],
+        [8.0, 4.5],
+    ]);
+    let mut eigen_solution = Matrix::<3, 2, f64>::zeros();
+    unsafe {
+        sa_eigen_qr_solve_f64(
+            design.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            6,
+            3,
+            2,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let solution = design
+        .householder_qr()
+        .solve_least_squares(&rhs)
+        .expect("tall design matrix is full rank");
+    assert_close_f64(solution.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn tall_f32_qr_matches_eigen() {
+    let design = Matrix::<6, 3, f32>::from_rows([
+        [1.0, 0.0, 2.0],
+        [2.0, 1.0, 1.0],
+        [3.0, 1.0, 0.0],
+        [4.0, 2.0, 1.0],
+        [5.0, 3.0, 2.0],
+        [6.0, 5.0, 1.0],
+    ]);
+    let rhs = Matrix::<6, 2, f32>::from_rows([
+        [1.0, -2.0],
+        [2.0, 0.5],
+        [4.0, 1.0],
+        [5.0, 2.5],
+        [7.0, 3.0],
+        [8.0, 4.5],
+    ]);
+    let mut eigen_solution = Matrix::<3, 2, f32>::zeros();
+    unsafe {
+        sa_eigen_qr_solve_f32(
+            design.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            6,
+            3,
+            2,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let solution = design
+        .householder_qr()
+        .solve_least_squares(&rhs)
+        .expect("tall design matrix is full rank");
+    assert_close_f32(solution.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn rank_deficient_basic_qr_matches_eigen() {
+    let design = Matrix::<3, 2, f64>::from_rows([[1.0, 2.0], [2.0, 4.0], [3.0, 6.0]]);
+    let rhs = Matrix::<3, 1, f64>::from_columns([[1.0, 1.0, 1.0]]);
+    let mut eigen_solution = Matrix::<2, 1, f64>::zeros();
+    unsafe {
+        sa_eigen_col_piv_qr_solve_f64(
+            design.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            3,
+            2,
+            1,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let solution = design
+        .col_piv_householder_qr()
+        .solve_least_squares_basic(&rhs)
+        .expect("tall rank-deficient solve");
     assert_close_f64(solution.as_slice(), eigen_solution.as_slice());
 }

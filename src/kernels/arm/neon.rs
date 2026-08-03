@@ -19,6 +19,11 @@ impl MatmulBackend<f32> for NeonMatmul {
     }
 
     #[inline]
+    fn dot(lhs: &[f32], rhs: &[f32], initial: f32) -> f32 {
+        unsafe { dot_slices_f32(lhs, rhs, initial) }
+    }
+
+    #[inline]
     fn symmetric_rank_k_update<const D: usize>(
         matrix: &mut Matrix<D, D, f32>,
         block_start: usize,
@@ -46,6 +51,11 @@ impl MatmulBackend<f64> for NeonMatmul {
         output: &mut Matrix<M, P, f64>,
     ) {
         unsafe { matmul_f64(lhs, rhs, output) }
+    }
+
+    #[inline]
+    fn dot(lhs: &[f64], rhs: &[f64], initial: f64) -> f64 {
+        unsafe { dot_slices_f64(lhs, rhs, initial) }
     }
 
     #[inline]
@@ -350,6 +360,52 @@ unsafe fn dot_f64<const M: usize>(lhs: &Vector<M, f64>, rhs: &Vector<M, f64>) ->
     }
     let mut result = vaddvq_f64(accumulator);
     while index < M {
+        result += lhs[index] * rhs[index];
+        index += 1;
+    }
+    result
+}
+
+#[target_feature(enable = "neon")]
+unsafe fn dot_slices_f32(lhs: &[f32], rhs: &[f32], initial: f32) -> f32 {
+    use core::arch::aarch64::{vaddq_f32, vaddvq_f32, vdupq_n_f32, vld1q_f32, vmulq_f32};
+    let mut index = 0;
+    let mut accumulator = vdupq_n_f32(0.0);
+    while index + 4 <= lhs.len() {
+        accumulator = vaddq_f32(
+            accumulator,
+            vmulq_f32(
+                vld1q_f32(lhs.as_ptr().add(index)),
+                vld1q_f32(rhs.as_ptr().add(index)),
+            ),
+        );
+        index += 4;
+    }
+    let mut result = initial + vaddvq_f32(accumulator);
+    while index < lhs.len() {
+        result += lhs[index] * rhs[index];
+        index += 1;
+    }
+    result
+}
+
+#[target_feature(enable = "neon")]
+unsafe fn dot_slices_f64(lhs: &[f64], rhs: &[f64], initial: f64) -> f64 {
+    use core::arch::aarch64::{vaddq_f64, vaddvq_f64, vdupq_n_f64, vld1q_f64, vmulq_f64};
+    let mut index = 0;
+    let mut accumulator = vdupq_n_f64(0.0);
+    while index + 2 <= lhs.len() {
+        accumulator = vaddq_f64(
+            accumulator,
+            vmulq_f64(
+                vld1q_f64(lhs.as_ptr().add(index)),
+                vld1q_f64(rhs.as_ptr().add(index)),
+            ),
+        );
+        index += 2;
+    }
+    let mut result = initial + vaddvq_f64(accumulator);
+    while index < lhs.len() {
         result += lhs[index] * rhs[index];
         index += 1;
     }

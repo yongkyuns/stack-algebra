@@ -90,6 +90,15 @@ void qr_solve(const Scalar* input, const Scalar* rhs, std::size_t rows, std::siz
 }
 
 template <typename Scalar>
+void col_piv_qr_solve(const Scalar* input, const Scalar* rhs, std::size_t rows,
+                      std::size_t columns, std::size_t rhs_columns, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, rows, rhs_columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, columns, rhs_columns);
+  output_map.noalias() = input_map.colPivHouseholderQr().solve(rhs_map);
+}
+
+template <typename Scalar>
 int llt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::size_t columns,
               Scalar* output) {
   Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
@@ -163,6 +172,11 @@ int ldlt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, st
                                                 std::size_t rows, std::size_t columns,              \
                                                 std::size_t rhs_columns, SCALAR* output) {           \
     qr_solve(input, rhs, rows, columns, rhs_columns, output);                                      \
+  }                                                                                                \
+  extern "C" void sa_eigen_col_piv_qr_solve_##SUFFIX(                                             \
+      const SCALAR* input, const SCALAR* rhs, std::size_t rows, std::size_t columns,              \
+      std::size_t rhs_columns, SCALAR* output) {                                                    \
+    col_piv_qr_solve(input, rhs, rows, columns, rhs_columns, output);                               \
   }                                                                                                \
   extern "C" int sa_eigen_llt_solve_##SUFFIX(const SCALAR* input, const SCALAR* rhs,             \
                                                 std::size_t dimension, std::size_t columns,         \

@@ -63,6 +63,19 @@ Matrix<Scalar, Dimension, Dimension> make_system() {
   return matrix;
 }
 
+template <typename Scalar, int Rows, int Columns>
+Matrix<Scalar, Rows, Columns> make_tall_system() {
+  Matrix<Scalar, Rows, Columns> matrix;
+  for (int row = 0; row < Rows; ++row) {
+    for (int column = 0; column < Columns; ++column) {
+      matrix(row, column) = row == column
+                                ? Scalar(Rows + 1)
+                                : static_cast<Scalar>(row + 2 * column + 1) / Scalar(19);
+    }
+  }
+  return matrix;
+}
+
 template <typename Scalar, int Dimension>
 Matrix<Scalar, Dimension, Dimension> make_spd_system() {
   Matrix<Scalar, Dimension, Dimension> matrix;
@@ -254,6 +267,58 @@ void benchmark_qr_solve(const char* name) {
 }
 
 template <typename Scalar, int Dimension>
+void benchmark_col_piv_qr_factor(const char* name) {
+  auto input = make_system<Scalar, Dimension>();
+  auto factor = input.colPivHouseholderQr();
+  benchmark_case(name, [&] {
+    auto* input_pointer = opaque(&input);
+    factor.compute(*input_pointer);
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_col_piv_qr_solve(const char* name) {
+  auto input = make_system<Scalar, Dimension>();
+  auto factor = input.colPivHouseholderQr();
+  auto rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    auto* factor_pointer = opaque(&factor);
+    auto* rhs_pointer = opaque(&rhs);
+    auto* solution_pointer = opaque(&solution);
+    *solution_pointer = factor_pointer->solve(*rhs_pointer);
+  });
+  opaque(&solution);
+}
+
+template <typename Scalar, int Rows, int Columns>
+void benchmark_tall_qr_factor(const char* name) {
+  auto input = make_tall_system<Scalar, Rows, Columns>();
+  auto factor = input.householderQr();
+  benchmark_case(name, [&] {
+    auto* input_pointer = opaque(&input);
+    factor.compute(*input_pointer);
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Rows, int Columns>
+void benchmark_tall_qr_solve(const char* name) {
+  auto input = make_tall_system<Scalar, Rows, Columns>();
+  auto factor = input.householderQr();
+  auto rhs = make_rhs<Scalar, Rows, 1>();
+  Matrix<Scalar, Columns, 1> solution;
+  benchmark_case(name, [&] {
+    auto* factor_pointer = opaque(&factor);
+    auto* rhs_pointer = opaque(&rhs);
+    auto* solution_pointer = opaque(&solution);
+    *solution_pointer = factor_pointer->solve(*rhs_pointer);
+  });
+  opaque(&solution);
+}
+
+template <typename Scalar, int Dimension>
 void benchmark_llt_solve(const char* name) {
   auto input = make_spd_system<Scalar, Dimension>();
   auto factor = input.llt();
@@ -329,6 +394,22 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_qr_solve<Scalar, 6>("QR solve 6x6");
   benchmark_qr_solve<Scalar, 15>("QR solve 15x15");
   benchmark_qr_solve<Scalar, 32>("QR solve 32x32");
+  benchmark_col_piv_qr_factor<Scalar, 3>("ColPiv QR factor 3x3");
+  benchmark_col_piv_qr_factor<Scalar, 6>("ColPiv QR factor 6x6");
+  benchmark_col_piv_qr_factor<Scalar, 15>("ColPiv QR factor 15x15");
+  benchmark_col_piv_qr_factor<Scalar, 32>("ColPiv QR factor 32x32");
+  benchmark_col_piv_qr_solve<Scalar, 3>("ColPiv QR solve 3x3");
+  benchmark_col_piv_qr_solve<Scalar, 6>("ColPiv QR solve 6x6");
+  benchmark_col_piv_qr_solve<Scalar, 15>("ColPiv QR solve 15x15");
+  benchmark_col_piv_qr_solve<Scalar, 32>("ColPiv QR solve 32x32");
+  benchmark_tall_qr_factor<Scalar, 6, 3>("Tall QR factor 6x3");
+  benchmark_tall_qr_factor<Scalar, 15, 6>("Tall QR factor 15x6");
+  benchmark_tall_qr_factor<Scalar, 32, 8>("Tall QR factor 32x8");
+  benchmark_tall_qr_factor<Scalar, 64, 16>("Tall QR factor 64x16");
+  benchmark_tall_qr_solve<Scalar, 6, 3>("Tall QR solve 6x3");
+  benchmark_tall_qr_solve<Scalar, 15, 6>("Tall QR solve 15x6");
+  benchmark_tall_qr_solve<Scalar, 32, 8>("Tall QR solve 32x8");
+  benchmark_tall_qr_solve<Scalar, 64, 16>("Tall QR solve 64x16");
   benchmark_llt_solve<Scalar, 3>("LLT solve 3x3");
   benchmark_llt_solve<Scalar, 6>("LLT solve 6x6");
   benchmark_llt_solve<Scalar, 15>("LLT solve 15x15");

@@ -409,6 +409,11 @@ impl MatmulBackend<f32> for X86Avx2FmaMatmul {
     }
 
     #[inline]
+    fn dot(lhs: &[f32], rhs: &[f32], initial: f32) -> f32 {
+        unsafe { super::avx2::dot_slices_f32(lhs, rhs, initial) }
+    }
+
+    #[inline]
     fn rank_update_sub(target: &mut [f32], source: &[f32], scale: f32) {
         unsafe { super::avx2::rank_update_sub_f32(target, source, scale) }
     }
@@ -436,6 +441,11 @@ impl MatmulBackend<f64> for X86Avx2FmaMatmul {
         output: &mut Matrix<M, P, f64>,
     ) {
         unsafe { super::avx2::matmul_f64(lhs, rhs, output) }
+    }
+
+    #[inline]
+    fn dot(lhs: &[f64], rhs: &[f64], initial: f64) -> f64 {
+        unsafe { super::avx2::dot_slices_f64(lhs, rhs, initial) }
     }
 
     #[inline]

@@ -100,6 +100,60 @@ unsafe fn reduction_dot_f64<const M: usize>(lhs: &Vector<M, f64>, rhs: &Vector<M
     result
 }
 
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn dot_slices_f32(lhs: &[f32], rhs: &[f32], initial: f32) -> f32 {
+    use core::arch::x86_64::{
+        _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+    };
+    let mut accumulator = _mm256_setzero_ps();
+    let mut index = 0;
+    while index + 8 <= lhs.len() {
+        let left = _mm256_loadu_ps(lhs.as_ptr().add(index));
+        let right = _mm256_loadu_ps(rhs.as_ptr().add(index));
+        accumulator = _mm256_add_ps(accumulator, _mm256_mul_ps(left, right));
+        index += 8;
+    }
+    let mut lanes = [0.0_f32; 8];
+    _mm256_storeu_ps(lanes.as_mut_ptr(), accumulator);
+    let mut result = initial
+        + lanes[0]
+        + lanes[1]
+        + lanes[2]
+        + lanes[3]
+        + lanes[4]
+        + lanes[5]
+        + lanes[6]
+        + lanes[7];
+    while index < lhs.len() {
+        result += lhs[index] * rhs[index];
+        index += 1;
+    }
+    result
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn dot_slices_f64(lhs: &[f64], rhs: &[f64], initial: f64) -> f64 {
+    use core::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_storeu_pd,
+    };
+    let mut accumulator = _mm256_setzero_pd();
+    let mut index = 0;
+    while index + 4 <= lhs.len() {
+        let left = _mm256_loadu_pd(lhs.as_ptr().add(index));
+        let right = _mm256_loadu_pd(rhs.as_ptr().add(index));
+        accumulator = _mm256_add_pd(accumulator, _mm256_mul_pd(left, right));
+        index += 4;
+    }
+    let mut lanes = [0.0_f64; 4];
+    _mm256_storeu_pd(lanes.as_mut_ptr(), accumulator);
+    let mut result = initial + lanes[0] + lanes[1] + lanes[2] + lanes[3];
+    while index < lhs.len() {
+        result += lhs[index] * rhs[index];
+        index += 1;
+    }
+    result
+}
+
 #[cfg(not(target_feature = "fma"))]
 #[target_feature(enable = "avx2")]
 unsafe fn reduction_squared_norm_f32<const M: usize, const N: usize>(
@@ -235,6 +289,11 @@ impl MatmulBackend<f32> for X86Avx2Matmul {
     }
 
     #[inline]
+    fn dot(lhs: &[f32], rhs: &[f32], initial: f32) -> f32 {
+        unsafe { dot_slices_f32(lhs, rhs, initial) }
+    }
+
+    #[inline]
     fn symmetric_rank_k_update<const D: usize>(
         matrix: &mut Matrix<D, D, f32>,
         block_start: usize,
@@ -258,6 +317,11 @@ impl MatmulBackend<f64> for X86Avx2Matmul {
         output: &mut Matrix<M, P, f64>,
     ) {
         unsafe { matmul_f64(lhs, rhs, output) }
+    }
+
+    #[inline]
+    fn dot(lhs: &[f64], rhs: &[f64], initial: f64) -> f64 {
+        unsafe { dot_slices_f64(lhs, rhs, initial) }
     }
 
     #[inline]

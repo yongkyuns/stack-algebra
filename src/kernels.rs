@@ -19,6 +19,17 @@ pub trait MatmulBackend<T> {
         output: &mut Matrix<M, P, T>,
     );
 
+    fn dot(lhs: &[T], rhs: &[T], initial: T) -> T
+    where
+        T: Copy + Add<Output = T> + Mul<Output = T>,
+    {
+        let mut result = initial;
+        for (lhs_value, rhs_value) in lhs.iter().zip(rhs.iter()) {
+            result = result + *lhs_value * *rhs_value;
+        }
+        result
+    }
+
     fn symmetric_rank_k_update<const D: usize>(
         matrix: &mut Matrix<D, D, T>,
         block_start: usize,

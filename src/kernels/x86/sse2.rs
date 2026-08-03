@@ -90,6 +90,48 @@ unsafe fn reduction_dot_f64<const M: usize>(lhs: &Vector<M, f64>, rhs: &Vector<M
 }
 
 #[target_feature(enable = "sse2")]
+unsafe fn dot_slices_f32(lhs: &[f32], rhs: &[f32], initial: f32) -> f32 {
+    use core::arch::x86_64::{_mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps};
+    let mut accumulator = _mm_setzero_ps();
+    let mut index = 0;
+    while index + 4 <= lhs.len() {
+        let left = _mm_loadu_ps(lhs.as_ptr().add(index));
+        let right = _mm_loadu_ps(rhs.as_ptr().add(index));
+        accumulator = _mm_add_ps(accumulator, _mm_mul_ps(left, right));
+        index += 4;
+    }
+    let mut lanes = [0.0_f32; 4];
+    _mm_storeu_ps(lanes.as_mut_ptr(), accumulator);
+    let mut result = initial + lanes[0] + lanes[1] + lanes[2] + lanes[3];
+    while index < lhs.len() {
+        result += lhs[index] * rhs[index];
+        index += 1;
+    }
+    result
+}
+
+#[target_feature(enable = "sse2")]
+unsafe fn dot_slices_f64(lhs: &[f64], rhs: &[f64], initial: f64) -> f64 {
+    use core::arch::x86_64::{_mm_add_pd, _mm_loadu_pd, _mm_mul_pd, _mm_setzero_pd, _mm_storeu_pd};
+    let mut accumulator = _mm_setzero_pd();
+    let mut index = 0;
+    while index + 2 <= lhs.len() {
+        let left = _mm_loadu_pd(lhs.as_ptr().add(index));
+        let right = _mm_loadu_pd(rhs.as_ptr().add(index));
+        accumulator = _mm_add_pd(accumulator, _mm_mul_pd(left, right));
+        index += 2;
+    }
+    let mut lanes = [0.0_f64; 2];
+    _mm_storeu_pd(lanes.as_mut_ptr(), accumulator);
+    let mut result = initial + lanes[0] + lanes[1];
+    while index < lhs.len() {
+        result += lhs[index] * rhs[index];
+        index += 1;
+    }
+    result
+}
+
+#[target_feature(enable = "sse2")]
 unsafe fn reduction_squared_norm_f32<const M: usize, const N: usize>(
     matrix: &Matrix<M, N, f32>,
 ) -> f32 {
@@ -207,6 +249,11 @@ impl MatmulBackend<f32> for X86Sse2Matmul {
     }
 
     #[inline]
+    fn dot(lhs: &[f32], rhs: &[f32], initial: f32) -> f32 {
+        unsafe { dot_slices_f32(lhs, rhs, initial) }
+    }
+
+    #[inline]
     fn rank_update_sub(target: &mut [f32], source: &[f32], scale: f32) {
         for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
             *target_value -= *source_value * scale;
@@ -222,6 +269,11 @@ impl MatmulBackend<f64> for X86Sse2Matmul {
         output: &mut Matrix<M, P, f64>,
     ) {
         unsafe { matmul_f64(lhs, rhs, output) }
+    }
+
+    #[inline]
+    fn dot(lhs: &[f64], rhs: &[f64], initial: f64) -> f64 {
+        unsafe { dot_slices_f64(lhs, rhs, initial) }
     }
 
     #[inline]
