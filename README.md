@@ -310,6 +310,14 @@ rustup target add riscv32imc-unknown-none-elf
 qemu-tests/run_riscv32.sh
 ```
 
+The AArch64 harness targets `aarch64-unknown-none` and validates the NEON
+packet kernels on QEMU's Cortex-A53 model:
+
+```sh
+rustup target add aarch64-unknown-none
+qemu-tests/run_aarch64.sh
+```
+
 ## License
 
 This project is distributed under the terms of both the MIT license and the Apache License (Version 2.0).

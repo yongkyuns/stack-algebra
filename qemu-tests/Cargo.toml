@@ -7,6 +7,7 @@ publish = false
 [features]
 cortex-m = ["dep:cortex-m-rt", "dep:cortex-m-semihosting"]
 riscv32 = ["dep:riscv-rt"]
+aarch64 = []
 
 [dependencies]
 stack-algebra = { path = ".." }
@@ -27,6 +28,11 @@ required-features = ["cortex-m"]
 name = "riscv32"
 path = "src/bin/riscv32.rs"
 required-features = ["riscv32"]
+
+[[bin]]
+name = "aarch64"
+path = "src/bin/aarch64.rs"
+required-features = ["aarch64"]
 
 [profile.release]
 codegen-units = 1
