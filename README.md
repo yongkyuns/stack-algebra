@@ -220,18 +220,20 @@ performance comparisons are opt-in and require Eigen headers discoverable via
 
 ```sh
 cargo test --features eigen-compare
-RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench robotics
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh
 ```
 
 The parity suite compares elementary operations bit-for-bit and compares
 floating-point reductions and decompositions with documented tolerances. The
-Criterion report includes `stack-algebra` and reusable-buffer faer baselines
-for `f32` and `f64` matrices from 2-by-2 through 15-by-15. The native Eigen
-runner uses the same static, column-major matrices, input values, dimensions,
-and 64-multiplication batch. Compare its `ns/batch` median with Criterion's
-reported time; its `ns/op` column is the batch time divided by 64. It uses no
-Rust-to-C++ calls in the timed region.
+Criterion reports include `stack-algebra` and reusable-buffer faer baselines
+for `f32` and `f64` square products from 2-by-2 through 15-by-15, robotics
+shapes (`2x3 * 3x2`, `3x6 * 6x3`, and `6x15 * 15x6`), matrix-vector products,
+and partial-pivot LU factorization and one-right-hand-side solves. The native
+Eigen runner uses the same static, column-major matrices, input values,
+dimensions, and 64-operation batch. Compare its `ns/batch` median with
+Criterion's reported time; its `ns/op` column is the batch time divided by 64.
+It uses no Rust-to-C++ calls in the timed region.
 
 ## License
 
