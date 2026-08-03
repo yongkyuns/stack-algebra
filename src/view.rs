@@ -1,9 +1,138 @@
 //! Row and column slices of a matrix.
 
 use core::iter::Sum;
-use core::ops::{Deref, DerefMut, Mul};
+use core::ops::{Deref, DerefMut, Index, IndexMut, Mul};
 
+use crate::Matrix;
 use stride::Stride;
+
+/// A fixed-size block view into a matrix.
+pub struct Block<'a, const M: usize, const N: usize, const R: usize, const C: usize, T> {
+    matrix: &'a Matrix<M, N, T>,
+    row_offset: usize,
+    column_offset: usize,
+}
+
+impl<'a, const M: usize, const N: usize, const R: usize, const C: usize, T>
+    Block<'a, M, N, R, C, T>
+{
+    pub(crate) fn new(
+        matrix: &'a Matrix<M, N, T>,
+        row_offset: usize,
+        column_offset: usize,
+    ) -> Self {
+        Self {
+            matrix,
+            row_offset,
+            column_offset,
+        }
+    }
+
+    /// Returns the element at block-local coordinates.
+    #[inline]
+    pub fn get(&self, row: usize, column: usize) -> Option<&T> {
+        if row < R && column < C {
+            Some(&self.matrix[(self.row_offset + row, self.column_offset + column)])
+        } else {
+            None
+        }
+    }
+
+    /// Copies this view into an owning fixed-size matrix.
+    #[inline]
+    pub fn to_matrix(&self) -> Matrix<R, C, T>
+    where
+        T: Copy,
+    {
+        Matrix::from_fn(|row, column| *self.get(row, column).expect("block index is in bounds"))
+    }
+}
+
+impl<const M: usize, const N: usize, const R: usize, const C: usize, T> Index<(usize, usize)>
+    for Block<'_, M, N, R, C, T>
+{
+    type Output = T;
+
+    #[inline]
+    fn index(&self, index: (usize, usize)) -> &Self::Output {
+        self.get(index.0, index.1)
+            .expect("block index is out of bounds")
+    }
+}
+
+/// A mutable fixed-size block view into a matrix.
+pub struct BlockMut<'a, const M: usize, const N: usize, const R: usize, const C: usize, T> {
+    matrix: &'a mut Matrix<M, N, T>,
+    row_offset: usize,
+    column_offset: usize,
+}
+
+impl<'a, const M: usize, const N: usize, const R: usize, const C: usize, T>
+    BlockMut<'a, M, N, R, C, T>
+{
+    pub(crate) fn new(
+        matrix: &'a mut Matrix<M, N, T>,
+        row_offset: usize,
+        column_offset: usize,
+    ) -> Self {
+        Self {
+            matrix,
+            row_offset,
+            column_offset,
+        }
+    }
+
+    /// Returns the element at block-local coordinates.
+    #[inline]
+    pub fn get(&self, row: usize, column: usize) -> Option<&T> {
+        if row < R && column < C {
+            Some(&self.matrix[(self.row_offset + row, self.column_offset + column)])
+        } else {
+            None
+        }
+    }
+
+    /// Returns the mutable element at block-local coordinates.
+    #[inline]
+    pub fn get_mut(&mut self, row: usize, column: usize) -> Option<&mut T> {
+        if row < R && column < C {
+            Some(&mut self.matrix[(self.row_offset + row, self.column_offset + column)])
+        } else {
+            None
+        }
+    }
+
+    /// Copies this view into an owning fixed-size matrix.
+    #[inline]
+    pub fn to_matrix(&self) -> Matrix<R, C, T>
+    where
+        T: Copy,
+    {
+        Matrix::from_fn(|row, column| *self.get(row, column).expect("block index is in bounds"))
+    }
+}
+
+impl<const M: usize, const N: usize, const R: usize, const C: usize, T> Index<(usize, usize)>
+    for BlockMut<'_, M, N, R, C, T>
+{
+    type Output = T;
+
+    #[inline]
+    fn index(&self, index: (usize, usize)) -> &Self::Output {
+        self.get(index.0, index.1)
+            .expect("block index is out of bounds")
+    }
+}
+
+impl<const M: usize, const N: usize, const R: usize, const C: usize, T> IndexMut<(usize, usize)>
+    for BlockMut<'_, M, N, R, C, T>
+{
+    #[inline]
+    fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
+        self.get_mut(index.0, index.1)
+            .expect("block index is out of bounds")
+    }
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Row
@@ -194,4 +323,26 @@ fn dot_partial() {
     ];
     let d = m.row(1).dot_partial(m.column(2), 1..3);
     assert_eq!(d, 126.0);
+}
+
+#[test]
+fn block_views_read_and_write_column_major_storage() {
+    use super::*;
+    let mut matrix = matrix![
+        1, 2, 3, 4;
+        5, 6, 7, 8;
+        9, 10, 11, 12;
+    ];
+    let block = matrix.block::<2, 2>(1, 1).expect("block is in bounds");
+    assert_eq!(
+        block.to_matrix(),
+        Matrix::<2, 2, i32>::from_rows([[6, 7], [10, 11]])
+    );
+    assert!(matrix.block::<2, 2>(2, 3).is_none());
+
+    let mut block = matrix.block_mut::<2, 2>(1, 1).expect("block is in bounds");
+    block[(0, 1)] = 70;
+    *block.get_mut(1, 0).expect("block index is in bounds") = 100;
+    assert_eq!(matrix[(1, 2)], 70);
+    assert_eq!(matrix[(2, 1)], 100);
 }

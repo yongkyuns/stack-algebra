@@ -169,6 +169,47 @@ void benchmark_product(const char* name) {
 }
 
 template <typename Scalar, int Dimension>
+Matrix<Scalar, Dimension, Dimension> make_lower_system() {
+  auto matrix = make_system<Scalar, Dimension>();
+  for (int row = 0; row < Dimension; ++row) {
+    for (int column = row + 1; column < Dimension; ++column) {
+      matrix(row, column) = Scalar(0);
+    }
+  }
+  return matrix;
+}
+
+template <typename Scalar, int Dimension>
+Matrix<Scalar, Dimension, Dimension> make_upper_system() {
+  auto matrix = make_system<Scalar, Dimension>();
+  for (int row = 1; row < Dimension; ++row) {
+    for (int column = 0; column < row; ++column) {
+      matrix(row, column) = Scalar(0);
+    }
+  }
+  return matrix;
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_triangular_solve(const char* name, bool lower) {
+  auto input = lower ? make_lower_system<Scalar, Dimension>()
+                     : make_upper_system<Scalar, Dimension>();
+  auto rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    auto* input_pointer = opaque(&input);
+    auto* rhs_pointer = opaque(&rhs);
+    auto* solution_pointer = opaque(&solution);
+    if (lower) {
+      *solution_pointer = input_pointer->template triangularView<Eigen::Lower>().solve(*rhs_pointer);
+    } else {
+      *solution_pointer = input_pointer->template triangularView<Eigen::Upper>().solve(*rhs_pointer);
+    }
+  });
+  opaque(&solution);
+}
+
+template <typename Scalar, int Dimension>
 void benchmark_lu_factor(const char* name) {
   auto input = make_system<Scalar, Dimension>();
   benchmark_case(name, [&] {
@@ -318,6 +359,45 @@ void benchmark_tall_qr_solve(const char* name) {
   opaque(&solution);
 }
 
+template <typename Scalar, int Rows, int Columns>
+void benchmark_tall_svd_factor(const char* name) {
+  using Svd = Eigen::JacobiSVD<Matrix<Scalar, Rows, Columns>, Eigen::ComputeThinU | Eigen::ComputeThinV>;
+  auto input = make_tall_system<Scalar, Rows, Columns>();
+  Svd factor;
+  benchmark_case(name, [&] {
+    auto* input_pointer = opaque(&input);
+    factor.compute(*input_pointer);
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Rows, int Columns>
+void benchmark_tall_svd_solve(const char* name) {
+  using Svd = Eigen::JacobiSVD<Matrix<Scalar, Rows, Columns>, Eigen::ComputeThinU | Eigen::ComputeThinV>;
+  auto input = make_tall_system<Scalar, Rows, Columns>();
+  Svd factor(input);
+  auto rhs = make_rhs<Scalar, Rows, 1>();
+  Matrix<Scalar, Columns, 1> solution;
+  benchmark_case(name, [&] {
+    auto* factor_pointer = opaque(&factor);
+    auto* rhs_pointer = opaque(&rhs);
+    auto* solution_pointer = opaque(&solution);
+    *solution_pointer = factor_pointer->solve(*rhs_pointer);
+  });
+  opaque(&solution);
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_self_adjoint_eigen_factor(const char* name) {
+  auto input = make_spd_system<Scalar, Dimension>();
+  Eigen::SelfAdjointEigenSolver<Matrix<Scalar, Dimension, Dimension>> factor;
+  benchmark_case(name, [&] {
+    auto* input_pointer = opaque(&input);
+    factor.compute(*input_pointer);
+    opaque(&factor);
+  });
+}
+
 template <typename Scalar, int Dimension>
 void benchmark_llt_solve(const char* name) {
   auto input = make_spd_system<Scalar, Dimension>();
@@ -410,6 +490,20 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_tall_qr_solve<Scalar, 15, 6>("Tall QR solve 15x6");
   benchmark_tall_qr_solve<Scalar, 32, 8>("Tall QR solve 32x8");
   benchmark_tall_qr_solve<Scalar, 64, 16>("Tall QR solve 64x16");
+  benchmark_tall_svd_factor<Scalar, 6, 3>("Tall SVD factor 6x3");
+  benchmark_tall_svd_factor<Scalar, 15, 6>("Tall SVD factor 15x6");
+  benchmark_tall_svd_solve<Scalar, 6, 3>("Tall SVD solve 6x3");
+  benchmark_tall_svd_solve<Scalar, 15, 6>("Tall SVD solve 15x6");
+  benchmark_self_adjoint_eigen_factor<Scalar, 3>("Self-adjoint eigen factor 3x3");
+  benchmark_self_adjoint_eigen_factor<Scalar, 6>("Self-adjoint eigen factor 6x6");
+  benchmark_self_adjoint_eigen_factor<Scalar, 15>("Self-adjoint eigen factor 15x15");
+  benchmark_self_adjoint_eigen_factor<Scalar, 32>("Self-adjoint eigen factor 32x32");
+  benchmark_triangular_solve<Scalar, 3>("Lower triangular solve 3x3", true);
+  benchmark_triangular_solve<Scalar, 6>("Lower triangular solve 6x6", true);
+  benchmark_triangular_solve<Scalar, 15>("Lower triangular solve 15x15", true);
+  benchmark_triangular_solve<Scalar, 3>("Upper triangular solve 3x3", false);
+  benchmark_triangular_solve<Scalar, 6>("Upper triangular solve 6x6", false);
+  benchmark_triangular_solve<Scalar, 15>("Upper triangular solve 15x15", false);
   benchmark_llt_solve<Scalar, 3>("LLT solve 3x3");
   benchmark_llt_solve<Scalar, 6>("LLT solve 6x6");
   benchmark_llt_solve<Scalar, 15>("LLT solve 15x15");

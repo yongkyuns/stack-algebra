@@ -17,13 +17,16 @@ use core::{
     slice,
 };
 
-pub use algebra::{Cholesky, ColPivHouseholderQr, HouseholderQr, Ldlt, PartialPivLu};
+pub use algebra::{
+    Cholesky, ColPivHouseholderQr, HouseholderQr, Ldlt, LowerTriangular, PartialPivLu,
+    SelfAdjointEigen, Svd, UpperTriangular,
+};
 pub use index::MatrixIndex;
 #[doc(hidden)]
 pub use kernels::{MatmulBackend, ReductionBackend, ScalarMatmul, ScalarReduction};
 pub use kernels::{MatrixScalar, ReductionScalar};
 pub use num::{AsPrimitive, Float, One, Real, Zero};
-pub use view::{Column, Row};
+pub use view::{Block, BlockMut, Column, Row};
 
 #[doc(hidden)]
 pub use vectrix_macro as proc_macro;
@@ -97,6 +100,38 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     #[inline]
     pub fn column_mut(&mut self, i: usize) -> &mut Column<M, N, T> {
         Column::new_mut(&mut self.data[i])
+    }
+
+    /// Returns a fixed-size block view, or `None` when it exceeds the matrix.
+    #[inline]
+    pub fn block<const R: usize, const C: usize>(
+        &self,
+        row_offset: usize,
+        column_offset: usize,
+    ) -> Option<Block<'_, M, N, R, C, T>> {
+        let row_end = row_offset.checked_add(R)?;
+        let column_end = column_offset.checked_add(C)?;
+        if row_end <= M && column_end <= N {
+            Some(Block::new(self, row_offset, column_offset))
+        } else {
+            None
+        }
+    }
+
+    /// Returns a mutable fixed-size block view, or `None` when it exceeds the matrix.
+    #[inline]
+    pub fn block_mut<const R: usize, const C: usize>(
+        &mut self,
+        row_offset: usize,
+        column_offset: usize,
+    ) -> Option<BlockMut<'_, M, N, R, C, T>> {
+        let row_end = row_offset.checked_add(R)?;
+        let column_end = column_offset.checked_add(C)?;
+        if row_end <= M && column_end <= N {
+            Some(BlockMut::new(self, row_offset, column_offset))
+        } else {
+            None
+        }
     }
 
     /// Returns a reference to an element in the matrix or `None` if out of

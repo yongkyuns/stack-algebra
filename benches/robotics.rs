@@ -608,6 +608,23 @@ macro_rules! scalar_benches {
                         });
                     },
                 );
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra-reuse", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                black_box(&factor)
+                                    .solve_least_squares_into(
+                                        black_box(&rhs),
+                                        black_box(&mut solution),
+                                    )
+                                    .expect("tall benchmark system is full rank");
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
                 group.finish();
             }
 
@@ -629,6 +646,214 @@ macro_rules! scalar_benches {
                                 black_box(&factor).solve_lstsq_in_place(black_box(&mut solution));
                             }
                             black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_svd_factor<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = stack_tall_system::<ROWS, COLUMNS>();
+                let mut factor = input.svd().expect("benchmark matrix is tall");
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/svd-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input).svd().expect("benchmark matrix is tall");
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_svd_factor<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = faer_tall_system::<ROWS, COLUMNS>();
+                let mut factor = input.thin_svd().expect("benchmark matrix is tall");
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/svd-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input)
+                                    .thin_svd()
+                                    .expect("benchmark matrix is tall");
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_svd_solve<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = stack_tall_system::<ROWS, COLUMNS>();
+                let factor = input.svd().expect("benchmark matrix is tall");
+                let rhs = stack_matrix::<ROWS, 1>();
+                let mut solution = Matrix::<COLUMNS, 1, $scalar>::zeros();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/svd-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution = black_box(&factor).solve(black_box(&rhs));
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra-reuse", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                black_box(&factor)
+                                    .solve_into(black_box(&rhs), black_box(&mut solution));
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_svd_solve<const ROWS: usize, const COLUMNS: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = faer_tall_system::<ROWS, COLUMNS>();
+                let factor = input.thin_svd().expect("benchmark matrix is tall");
+                let rhs = faer_matrix::<ROWS, 1>();
+                let mut solution = faer_matrix::<ROWS, 1>();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/svd-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", format!("{ROWS}x{COLUMNS}")),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution.copy_from(black_box(&rhs));
+                                black_box(&factor).solve_lstsq_in_place(black_box(&mut solution));
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_self_adjoint_eigen_factor<const DIMENSION: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = stack_spd_system::<DIMENSION>();
+                let mut factor = input
+                    .self_adjoint_eigen()
+                    .expect("benchmark matrix is symmetric");
+                let mut group = criterion
+                    .benchmark_group(concat!("robotics/self-adjoint-eigen-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-algebra", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input)
+                                    .self_adjoint_eigen()
+                                    .expect("benchmark matrix is symmetric");
+                            }
+                            black_box(&factor);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_lower_triangular_solve<const DIMENSION: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = stack_spd_system::<DIMENSION>();
+                let rhs = stack_rhs::<DIMENSION>();
+                let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
+                let view = input.lower_triangular();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/triangular-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-lower", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution = view.solve(black_box(&rhs));
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_stack_upper_triangular_solve<const DIMENSION: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = stack_spd_system::<DIMENSION>();
+                let rhs = stack_rhs::<DIMENSION>();
+                let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
+                let view = input.upper_triangular();
+                let mut group =
+                    criterion.benchmark_group(concat!("robotics/triangular-solve/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("stack-upper", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                solution = view.solve(black_box(&rhs));
+                            }
+                            black_box(&solution);
+                        });
+                    },
+                );
+                group.finish();
+            }
+
+            fn bench_faer_self_adjoint_eigen_factor<const DIMENSION: usize>(
+                criterion: &mut Criterion,
+            ) {
+                let input = faer_spd_system::<DIMENSION>();
+                let mut factor = input
+                    .self_adjoint_eigen(Side::Lower)
+                    .expect("benchmark matrix is symmetric");
+                let mut group = criterion
+                    .benchmark_group(concat!("robotics/self-adjoint-eigen-factor/", $scalar_name));
+                group.bench_with_input(
+                    BenchmarkId::new("faer-dynamic", DIMENSION),
+                    &(),
+                    |bench, _| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                factor = black_box(&input)
+                                    .self_adjoint_eigen(Side::Lower)
+                                    .expect("benchmark matrix is symmetric");
+                            }
+                            black_box(&factor);
                         });
                     },
                 );
@@ -929,6 +1154,38 @@ macro_rules! scalar_benches {
                     (32, 8),
                     (64, 16)
                 );
+                for_tall_dimension!(
+                    criterion,
+                    bench_stack_svd_factor,
+                    bench_faer_svd_factor,
+                    (6, 3),
+                    (15, 6)
+                );
+                for_tall_dimension!(
+                    criterion,
+                    bench_stack_svd_solve,
+                    bench_faer_svd_solve,
+                    (6, 3),
+                    (15, 6)
+                );
+                for_stack_dimension!(
+                    criterion,
+                    bench_stack_self_adjoint_eigen_factor,
+                    3,
+                    6,
+                    15,
+                    32
+                );
+                for_stack_dimension!(
+                    criterion,
+                    bench_faer_self_adjoint_eigen_factor,
+                    3,
+                    6,
+                    15,
+                    32
+                );
+                for_stack_dimension!(criterion, bench_stack_lower_triangular_solve, 3, 6, 15);
+                for_stack_dimension!(criterion, bench_stack_upper_triangular_solve, 3, 6, 15);
                 for_stack_dimension!(criterion, bench_stack_llt_factor, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_stack_llt_solve, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_faer_llt_factor, 3, 6, 15, 32);

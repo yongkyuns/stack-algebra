@@ -43,6 +43,21 @@ unsafe extern "C" {
         rhs_columns: usize,
         output: *mut f32,
     );
+    fn sa_eigen_svd_singular_values_f32(
+        input: *const f32,
+        rows: usize,
+        columns: usize,
+        output: *mut f32,
+    );
+    fn sa_eigen_svd_solve_f32(
+        input: *const f32,
+        rhs: *const f32,
+        rows: usize,
+        columns: usize,
+        rhs_columns: usize,
+        output: *mut f32,
+    );
+    fn sa_eigen_self_adjoint_eigenvalues_f32(input: *const f32, dimension: usize, output: *mut f32);
     fn sa_eigen_llt_solve_f32(
         input: *const f32,
         rhs: *const f32,
@@ -107,6 +122,54 @@ unsafe extern "C" {
         rhs_columns: usize,
         output: *mut f64,
     );
+    fn sa_eigen_svd_singular_values_f64(
+        input: *const f64,
+        rows: usize,
+        columns: usize,
+        output: *mut f64,
+    );
+    fn sa_eigen_svd_solve_f64(
+        input: *const f64,
+        rhs: *const f64,
+        rows: usize,
+        columns: usize,
+        rhs_columns: usize,
+        output: *mut f64,
+    );
+    fn sa_eigen_self_adjoint_eigenvalues_f64(input: *const f64, dimension: usize, output: *mut f64);
+    fn sa_eigen_lower_triangular_solve_f64(
+        input: *const f64,
+        rhs: *const f64,
+        dimension: usize,
+        columns: usize,
+        output: *mut f64,
+    );
+    fn sa_eigen_upper_triangular_solve_f64(
+        input: *const f64,
+        rhs: *const f64,
+        dimension: usize,
+        columns: usize,
+        output: *mut f64,
+    );
+    fn sa_eigen_lower_triangular_mul_f64(
+        input: *const f64,
+        rhs: *const f64,
+        dimension: usize,
+        columns: usize,
+        output: *mut f64,
+    );
+    fn sa_eigen_upper_triangular_mul_f64(
+        input: *const f64,
+        rhs: *const f64,
+        dimension: usize,
+        columns: usize,
+        output: *mut f64,
+    );
+    fn sa_eigen_self_adjoint_eigenvectors_f64(
+        input: *const f64,
+        dimension: usize,
+        output: *mut f64,
+    );
     fn sa_eigen_llt_solve_f64(
         input: *const f64,
         rhs: *const f64,
@@ -164,6 +227,23 @@ fn assert_close_f32(actual: &[f32], expected: &[f32]) {
         let error = (actual - expected).abs();
         let scale = actual.abs().max(expected.abs());
         assert!(error <= 1e-5 + 1e-5 * scale, "{actual} != {expected}");
+    }
+}
+
+fn assert_eigenvectors_match_f64<const D: usize>(
+    actual: &Matrix<D, D, f64>,
+    expected: &Matrix<D, D, f64>,
+) {
+    for column in 0..D {
+        let mut dot = 0.0;
+        for row in 0..D {
+            dot += actual[(row, column)] * expected[(row, column)];
+        }
+        let sign = if dot.is_sign_negative() { -1.0 } else { 1.0 };
+        for row in 0..D {
+            let aligned = sign * expected[(row, column)];
+            assert!((actual[(row, column)] - aligned).abs() <= 1e-11);
+        }
     }
 }
 
@@ -353,11 +433,12 @@ fn cholesky_solves_match_eigen() {
         )
     };
     assert_eq!(eigen_status_f64, 1);
-    let solution_f64 = matrix_f64
-        .cholesky()
-        .expect("matrix is positive-definite")
-        .solve(&rhs_f64);
+    let factor_f64 = matrix_f64.cholesky().expect("matrix is positive-definite");
+    let solution_f64 = factor_f64.solve(&rhs_f64);
+    let mut output_f64 = Matrix::<3, 1, f64>::zeros();
+    factor_f64.solve_into(&rhs_f64, &mut output_f64);
     assert_close_f64(solution_f64.as_slice(), eigen_solution_f64.as_slice());
+    assert_close_f64(output_f64.as_slice(), eigen_solution_f64.as_slice());
 
     let matrix_f32 = matrix_f64.cast::<f32>();
     let rhs_f32 = rhs_f64.cast::<f32>();
@@ -372,11 +453,12 @@ fn cholesky_solves_match_eigen() {
         )
     };
     assert_eq!(eigen_status_f32, 1);
-    let solution_f32 = matrix_f32
-        .cholesky()
-        .expect("matrix is positive-definite")
-        .solve(&rhs_f32);
+    let factor_f32 = matrix_f32.cholesky().expect("matrix is positive-definite");
+    let solution_f32 = factor_f32.solve(&rhs_f32);
+    let mut output_f32 = Matrix::<3, 1, f32>::zeros();
+    factor_f32.solve_into(&rhs_f32, &mut output_f32);
     assert_close_f32(solution_f32.as_slice(), eigen_solution_f32.as_slice());
+    assert_close_f32(output_f32.as_slice(), eigen_solution_f32.as_slice());
 }
 
 #[test]
@@ -395,11 +477,12 @@ fn ldlt_solves_match_eigen() {
         )
     };
     assert_eq!(eigen_status_f64, 1);
-    let solution_f64 = matrix_f64
-        .ldlt()
-        .expect("matrix is nonsingular")
-        .solve(&rhs_f64);
+    let factor_f64 = matrix_f64.ldlt().expect("matrix is nonsingular");
+    let solution_f64 = factor_f64.solve(&rhs_f64);
+    let mut output_f64 = Matrix::<3, 1, f64>::zeros();
+    factor_f64.solve_into(&rhs_f64, &mut output_f64);
     assert_close_f64(solution_f64.as_slice(), eigen_solution_f64.as_slice());
+    assert_close_f64(output_f64.as_slice(), eigen_solution_f64.as_slice());
 
     let matrix_f32 = matrix_f64.cast::<f32>();
     let rhs_f32 = rhs_f64.cast::<f32>();
@@ -414,11 +497,12 @@ fn ldlt_solves_match_eigen() {
         )
     };
     assert_eq!(eigen_status_f32, 1);
-    let solution_f32 = matrix_f32
-        .ldlt()
-        .expect("matrix is nonsingular")
-        .solve(&rhs_f32);
+    let factor_f32 = matrix_f32.ldlt().expect("matrix is nonsingular");
+    let solution_f32 = factor_f32.solve(&rhs_f32);
+    let mut output_f32 = Matrix::<3, 1, f32>::zeros();
+    factor_f32.solve_into(&rhs_f32, &mut output_f32);
     assert_close_f32(solution_f32.as_slice(), eigen_solution_f32.as_slice());
+    assert_close_f32(output_f32.as_slice(), eigen_solution_f32.as_slice());
 }
 
 fn compare_matvec_f64<const M: usize, const N: usize>(seed: u64) {
@@ -812,6 +896,33 @@ fn f32_column_pivoted_qr_matches_eigen() {
 }
 
 #[test]
+fn f32_svd_matches_eigen() {
+    let design = Matrix::<4, 2, f32>::from_rows([[1.0, 2.0], [2.0, 1.0], [3.0, 4.0], [5.0, 2.0]]);
+    let rhs = Matrix::<4, 1, f32>::from_rows([[1.0], [2.0], [4.0], [3.0]]);
+    let mut eigen_values = Matrix::<2, 1, f32>::zeros();
+    let mut eigen_solution = Matrix::<2, 1, f32>::zeros();
+    unsafe {
+        sa_eigen_svd_singular_values_f32(
+            design.as_slice().as_ptr(),
+            4,
+            2,
+            eigen_values.as_mut_slice().as_mut_ptr(),
+        );
+        sa_eigen_svd_solve_f32(
+            design.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            4,
+            2,
+            1,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let svd = design.svd().expect("tall matrix is supported");
+    assert_close_f32(svd.singular_values().as_slice(), eigen_values.as_slice());
+    assert_close_f32(svd.solve(&rhs).as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
 fn determinant_inverse_and_solve_match_eigen() {
     let matrix =
         Matrix::<3, 3, f64>::from_rows([[6.0, 2.0, 3.0], [1.0, 1.0, 1.0], [0.0, 4.0, 9.0]]);
@@ -840,10 +951,11 @@ fn determinant_inverse_and_solve_match_eigen() {
             eigen_solution.as_mut_slice().as_mut_ptr(),
         );
     }
-    assert_close_f64(
-        matrix.partial_piv_lu().solve(&rhs).as_slice(),
-        eigen_solution.as_slice(),
-    );
+    let factor = matrix.partial_piv_lu();
+    assert_close_f64(factor.solve(&rhs).as_slice(), eigen_solution.as_slice());
+    let mut output = Vector::<3, f64>::zeros();
+    factor.solve_into(&rhs, &mut output);
+    assert_close_f64(output.as_slice(), eigen_solution.as_slice());
 }
 
 #[test]
@@ -861,11 +973,16 @@ fn qr_least_squares_matches_eigen() {
             eigen_solution.as_mut_slice().as_mut_ptr(),
         );
     }
-    let solution = design
-        .householder_qr()
+    let factor = design.householder_qr();
+    let solution = factor
         .solve_least_squares(&rhs)
         .expect("design matrix is full rank");
+    let mut output = Matrix::<2, 2, f64>::zeros();
+    factor
+        .solve_least_squares_into(&rhs, &mut output)
+        .expect("design matrix is full rank");
     assert_close_f64(solution.as_slice(), eigen_solution.as_slice());
+    assert_close_f64(output.as_slice(), eigen_solution.as_slice());
 }
 
 #[test]
@@ -883,11 +1000,176 @@ fn column_pivoted_qr_matches_eigen() {
             eigen_solution.as_mut_slice().as_mut_ptr(),
         );
     }
-    let solution = design
-        .col_piv_householder_qr()
+    let factor = design.col_piv_householder_qr();
+    let solution = factor
         .solve_least_squares(&rhs)
         .expect("pivoted design matrix is full rank");
+    let mut output = Matrix::<2, 1, f64>::zeros();
+    factor
+        .solve_least_squares_into(&rhs, &mut output)
+        .expect("pivoted design matrix is full rank");
     assert_close_f64(solution.as_slice(), eigen_solution.as_slice());
+    assert_close_f64(output.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn svd_matches_eigen() {
+    let design = Matrix::<4, 2, f64>::from_rows([[1.0, 2.0], [2.0, 1.0], [3.0, 4.0], [5.0, 2.0]]);
+    let rhs = Matrix::<4, 1, f64>::from_rows([[1.0], [2.0], [4.0], [3.0]]);
+    let mut eigen_values = Matrix::<2, 1, f64>::zeros();
+    let mut eigen_solution = Matrix::<2, 1, f64>::zeros();
+    unsafe {
+        sa_eigen_svd_singular_values_f64(
+            design.as_slice().as_ptr(),
+            4,
+            2,
+            eigen_values.as_mut_slice().as_mut_ptr(),
+        );
+        sa_eigen_svd_solve_f64(
+            design.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            4,
+            2,
+            1,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let svd = design.svd().expect("tall matrix is supported");
+    assert_close_f64(svd.singular_values().as_slice(), eigen_values.as_slice());
+    assert_close_f64(svd.solve(&rhs).as_slice(), eigen_solution.as_slice());
+    let mut output = Matrix::<2, 1, f64>::zeros();
+    svd.solve_into(&rhs, &mut output);
+    assert_close_f64(output.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn randomized_svd_matches_eigen() {
+    let design = generated_f64::<6, 3>(91);
+    let rhs = generated_f64::<6, 2>(127);
+    let mut eigen_values = Matrix::<3, 1, f64>::zeros();
+    let mut eigen_solution = Matrix::<3, 2, f64>::zeros();
+    unsafe {
+        sa_eigen_svd_singular_values_f64(
+            design.as_slice().as_ptr(),
+            6,
+            3,
+            eigen_values.as_mut_slice().as_mut_ptr(),
+        );
+        sa_eigen_svd_solve_f64(
+            design.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            6,
+            3,
+            2,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let svd = design.svd().expect("tall matrix is supported");
+    assert_close_f64(svd.singular_values().as_slice(), eigen_values.as_slice());
+    assert_close_f64(svd.solve(&rhs).as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn self_adjoint_eigenvalues_match_eigen() {
+    let matrix =
+        Matrix::<3, 3, f64>::from_rows([[4.0, 1.0, 2.0], [1.0, 3.0, 0.5], [2.0, 0.5, 5.0]]);
+    let mut eigen_values = Matrix::<3, 1, f64>::zeros();
+    unsafe {
+        sa_eigen_self_adjoint_eigenvalues_f64(
+            matrix.as_slice().as_ptr(),
+            3,
+            eigen_values.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let eigen = matrix.self_adjoint_eigen().expect("matrix is symmetric");
+    assert_close_f64(eigen.eigenvalues().as_slice(), eigen_values.as_slice());
+    let mut eigen_vectors = Matrix::<3, 3, f64>::zeros();
+    unsafe {
+        sa_eigen_self_adjoint_eigenvectors_f64(
+            matrix.as_slice().as_ptr(),
+            3,
+            eigen_vectors.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    assert_eigenvectors_match_f64(eigen.eigenvectors(), &eigen_vectors);
+    assert_close_f64(eigen.reconstruct().as_slice(), matrix.as_slice());
+}
+
+#[test]
+fn f32_self_adjoint_eigenvalues_match_eigen() {
+    let matrix =
+        Matrix::<3, 3, f32>::from_rows([[4.0, 1.0, 2.0], [1.0, 3.0, 0.5], [2.0, 0.5, 5.0]]);
+    let mut eigen_values = Matrix::<3, 1, f32>::zeros();
+    unsafe {
+        sa_eigen_self_adjoint_eigenvalues_f32(
+            matrix.as_slice().as_ptr(),
+            3,
+            eigen_values.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    let eigen = matrix.self_adjoint_eigen().expect("matrix is symmetric");
+    assert_close_f32(eigen.eigenvalues().as_slice(), eigen_values.as_slice());
+}
+
+#[test]
+fn triangular_views_match_eigen() {
+    let lower =
+        Matrix::<3, 3, f64>::from_rows([[2.0, 0.0, 0.0], [3.0, 4.0, 0.0], [-1.0, 2.0, 5.0]]);
+    let upper =
+        Matrix::<3, 3, f64>::from_rows([[2.0, -1.0, 3.0], [0.0, 4.0, 2.0], [0.0, 0.0, 5.0]]);
+    let rhs = Matrix::<3, 2, f64>::from_rows([[2.0, 4.0], [11.0, 6.0], [7.0, 13.0]]);
+
+    let mut eigen_lower_solution = Matrix::<3, 2, f64>::zeros();
+    let mut eigen_lower_product = Matrix::<3, 2, f64>::zeros();
+    let mut eigen_upper_solution = Matrix::<3, 2, f64>::zeros();
+    let mut eigen_upper_product = Matrix::<3, 2, f64>::zeros();
+    unsafe {
+        sa_eigen_lower_triangular_solve_f64(
+            lower.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            3,
+            2,
+            eigen_lower_solution.as_mut_slice().as_mut_ptr(),
+        );
+        sa_eigen_lower_triangular_mul_f64(
+            lower.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            3,
+            2,
+            eigen_lower_product.as_mut_slice().as_mut_ptr(),
+        );
+        sa_eigen_upper_triangular_solve_f64(
+            upper.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            3,
+            2,
+            eigen_upper_solution.as_mut_slice().as_mut_ptr(),
+        );
+        sa_eigen_upper_triangular_mul_f64(
+            upper.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            3,
+            2,
+            eigen_upper_product.as_mut_slice().as_mut_ptr(),
+        );
+    }
+
+    let lower_view = lower.lower_triangular();
+    let upper_view = upper.upper_triangular();
+    assert_close_f64(
+        lower_view.solve(&rhs).as_slice(),
+        eigen_lower_solution.as_slice(),
+    );
+    assert_close_f64(
+        upper_view.solve(&rhs).as_slice(),
+        eigen_upper_solution.as_slice(),
+    );
+    let mut lower_product = Matrix::<3, 2, f64>::zeros();
+    let mut upper_product = Matrix::<3, 2, f64>::zeros();
+    lower_view.mul_into(&rhs, &mut lower_product);
+    upper_view.mul_into(&rhs, &mut upper_product);
+    assert_close_f64(lower_product.as_slice(), eigen_lower_product.as_slice());
+    assert_close_f64(upper_product.as_slice(), eigen_upper_product.as_slice());
 }
 
 #[test]

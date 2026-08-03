@@ -99,6 +99,65 @@ void col_piv_qr_solve(const Scalar* input, const Scalar* rhs, std::size_t rows,
 }
 
 template <typename Scalar>
+void svd_singular_values(const Scalar* input, std::size_t rows, std::size_t columns,
+                         Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
+  Eigen::Map<Eigen::Matrix<Scalar, Eigen::Dynamic, 1>> output_map(output, columns);
+  using Svd = Eigen::JacobiSVD<DynamicMatrix<Scalar>, Eigen::ComputeThinU | Eigen::ComputeThinV>;
+  output_map = Svd(input_map).singularValues();
+}
+
+template <typename Scalar>
+void svd_solve(const Scalar* input, const Scalar* rhs, std::size_t rows, std::size_t columns,
+               std::size_t rhs_columns, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, rows, rhs_columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, columns, rhs_columns);
+  using Svd = Eigen::JacobiSVD<DynamicMatrix<Scalar>, Eigen::ComputeThinU | Eigen::ComputeThinV>;
+  output_map.noalias() = Svd(input_map).solve(rhs_map);
+}
+
+template <typename Scalar>
+void self_adjoint_eigenvalues(const Scalar* input, std::size_t dimension, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  Eigen::Map<Eigen::Matrix<Scalar, Eigen::Dynamic, 1>> output_map(output, dimension);
+  output_map = Eigen::SelfAdjointEigenSolver<DynamicMatrix<Scalar>>(input_map).eigenvalues();
+}
+
+template <typename Scalar>
+void self_adjoint_eigenvectors(const Scalar* input, std::size_t dimension, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, dimension, dimension);
+  output_map = Eigen::SelfAdjointEigenSolver<DynamicMatrix<Scalar>>(input_map).eigenvectors();
+}
+
+template <typename Scalar>
+void triangular_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension,
+                      std::size_t columns, bool lower, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, dimension, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, dimension, columns);
+  if (lower) {
+    output_map.noalias() = input_map.template triangularView<Eigen::Lower>().solve(rhs_map);
+  } else {
+    output_map.noalias() = input_map.template triangularView<Eigen::Upper>().solve(rhs_map);
+  }
+}
+
+template <typename Scalar>
+void triangular_mul(const Scalar* input, const Scalar* rhs, std::size_t dimension,
+                    std::size_t columns, bool lower, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, dimension, columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, dimension, columns);
+  if (lower) {
+    output_map.noalias() = input_map.template triangularView<Eigen::Lower>() * rhs_map;
+  } else {
+    output_map.noalias() = input_map.template triangularView<Eigen::Upper>() * rhs_map;
+  }
+}
+
+template <typename Scalar>
 int llt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::size_t columns,
               Scalar* output) {
   Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
@@ -177,6 +236,43 @@ int ldlt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, st
       const SCALAR* input, const SCALAR* rhs, std::size_t rows, std::size_t columns,              \
       std::size_t rhs_columns, SCALAR* output) {                                                    \
     col_piv_qr_solve(input, rhs, rows, columns, rhs_columns, output);                               \
+  }                                                                                                \
+  extern "C" void sa_eigen_svd_singular_values_##SUFFIX(                                           \
+      const SCALAR* input, std::size_t rows, std::size_t columns, SCALAR* output) {                \
+    svd_singular_values(input, rows, columns, output);                                              \
+  }                                                                                                \
+  extern "C" void sa_eigen_svd_solve_##SUFFIX(                                                     \
+      const SCALAR* input, const SCALAR* rhs, std::size_t rows, std::size_t columns,              \
+      std::size_t rhs_columns, SCALAR* output) {                                                    \
+    svd_solve(input, rhs, rows, columns, rhs_columns, output);                                      \
+  }                                                                                                \
+  extern "C" void sa_eigen_self_adjoint_eigenvalues_##SUFFIX(                                      \
+      const SCALAR* input, std::size_t dimension, SCALAR* output) {                                 \
+    self_adjoint_eigenvalues(input, dimension, output);                                             \
+  }                                                                                                \
+  extern "C" void sa_eigen_self_adjoint_eigenvectors_##SUFFIX(                                      \
+      const SCALAR* input, std::size_t dimension, SCALAR* output) {                                 \
+    self_adjoint_eigenvectors(input, dimension, output);                                             \
+  }                                                                                                \
+  extern "C" void sa_eigen_lower_triangular_solve_##SUFFIX(                                         \
+      const SCALAR* input, const SCALAR* rhs, std::size_t dimension, std::size_t columns,          \
+      SCALAR* output) {                                                                             \
+    triangular_solve(input, rhs, dimension, columns, true, output);                                 \
+  }                                                                                                \
+  extern "C" void sa_eigen_upper_triangular_solve_##SUFFIX(                                         \
+      const SCALAR* input, const SCALAR* rhs, std::size_t dimension, std::size_t columns,          \
+      SCALAR* output) {                                                                             \
+    triangular_solve(input, rhs, dimension, columns, false, output);                                \
+  }                                                                                                \
+  extern "C" void sa_eigen_lower_triangular_mul_##SUFFIX(                                           \
+      const SCALAR* input, const SCALAR* rhs, std::size_t dimension, std::size_t columns,          \
+      SCALAR* output) {                                                                             \
+    triangular_mul(input, rhs, dimension, columns, true, output);                                   \
+  }                                                                                                \
+  extern "C" void sa_eigen_upper_triangular_mul_##SUFFIX(                                           \
+      const SCALAR* input, const SCALAR* rhs, std::size_t dimension, std::size_t columns,          \
+      SCALAR* output) {                                                                             \
+    triangular_mul(input, rhs, dimension, columns, false, output);                                  \
   }                                                                                                \
   extern "C" int sa_eigen_llt_solve_##SUFFIX(const SCALAR* input, const SCALAR* rhs,             \
                                                 std::size_t dimension, std::size_t columns,         \

@@ -214,12 +214,23 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
         &self,
         rhs: &Matrix<M, P, T>,
     ) -> Option<Matrix<N, P, T>> {
+        let mut solution = Matrix::<N, P, T>::zeros();
+        self.solve_least_squares_into(rhs, &mut solution)?;
+        Some(solution)
+    }
+
+    /// Solves a full-rank least-squares problem into a caller-provided output.
+    #[inline]
+    pub fn solve_least_squares_into<const P: usize>(
+        &self,
+        rhs: &Matrix<M, P, T>,
+        output: &mut Matrix<N, P, T>,
+    ) -> Option<()> {
         if M < N {
             return None;
         }
 
         let transformed = self.apply_q_transpose(rhs);
-        let mut solution = Matrix::<N, P, T>::zeros();
         let mut diagonal_scale = T::one();
         for row in 0..N {
             let diagonal = self.factors[(row, row)];
@@ -238,12 +249,12 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
                 }
                 let mut value = transformed[(row, rhs_column)];
                 for next in (row + 1)..N {
-                    value = value - self.factors[(row, next)] * solution[(next, rhs_column)];
+                    value = value - self.factors[(row, next)] * output[(next, rhs_column)];
                 }
-                solution[(row, rhs_column)] = value / diagonal;
+                output[(row, rhs_column)] = value / diagonal;
             }
         }
-        Some(solution)
+        Some(())
     }
 }
 
@@ -496,7 +507,23 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
             return None;
         }
 
-        self.solve_least_squares_basic(rhs)
+        let mut solution = Matrix::<N, P, T>::zeros();
+        self.solve_least_squares_into(rhs, &mut solution)?;
+        Some(solution)
+    }
+
+    /// Solves a full-rank least-squares problem into a caller-provided output.
+    #[inline]
+    pub fn solve_least_squares_into<const P: usize>(
+        &self,
+        rhs: &Matrix<M, P, T>,
+        output: &mut Matrix<N, P, T>,
+    ) -> Option<()> {
+        if M < N || self.rank() < N {
+            return None;
+        }
+
+        self.solve_least_squares_basic_into(rhs, output)
     }
 
     /// Solves a least-squares problem using the detected independent pivots.
@@ -509,6 +536,18 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
         &self,
         rhs: &Matrix<M, P, T>,
     ) -> Option<Matrix<N, P, T>> {
+        let mut solution = Matrix::<N, P, T>::zeros();
+        self.solve_least_squares_basic_into(rhs, &mut solution)?;
+        Some(solution)
+    }
+
+    /// Solves a least-squares problem using detected pivots into a caller output.
+    #[inline]
+    pub fn solve_least_squares_basic_into<const P: usize>(
+        &self,
+        rhs: &Matrix<M, P, T>,
+        output: &mut Matrix<N, P, T>,
+    ) -> Option<()> {
         if M < N {
             return None;
         }
@@ -528,14 +567,14 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
             }
         }
 
-        let mut solution = Matrix::<N, P, T>::zeros();
+        *output = Matrix::zeros();
         for column in 0..N {
             for rhs_column in 0..P {
-                solution[(self.permutation[column], rhs_column)] =
+                output[(self.permutation[column], rhs_column)] =
                     permuted_solution[(column, rhs_column)];
             }
         }
-        Some(solution)
+        Some(())
     }
 }
 

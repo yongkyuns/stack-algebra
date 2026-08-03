@@ -259,6 +259,26 @@ let vector64 = vector.cast::<f64>();
   Use `.solve_least_squares_basic()` when dependent columns should be handled
   using Eigen-compatible basic rank-deficient semantics.
 
+- `.svd()` for fixed-size SVD of square, tall, or wide matrices
+  ```rust
+  let svd = design.svd().expect("SVD decomposition succeeds");
+  let rank = svd.rank();
+  let coefficients = svd.solve(&observations);
+  ```
+  SVD also exposes `singular_values()`, `u()`, `v()`, and `pseudo_inverse()`.
+
+All decompositions provide reusable-output solve variants: use `solve_into` for
+LU, Cholesky, LDLT, and SVD, or `solve_least_squares_into` for QR. Cholesky and
+LDLT also retain `solve_in_place` when the right-hand side itself can be reused.
+
+- `.self_adjoint_eigen()` for fixed-size symmetric eigendecomposition
+  ```rust
+  let eig = matrix.self_adjoint_eigen().expect("matrix is symmetric");
+  let values = eig.eigenvalues();
+  let vectors = eig.eigenvectors();
+  ```
+  Eigenvalues are sorted in ascending order and eigenvectors are orthonormal.
+
 - `PartialPivLu` for allocation-free linear solves
   ```rust
   let matrix = Matrix::<3, 3, f64>::eye();
@@ -272,6 +292,15 @@ let vector64 = vector.cast::<f64>();
   let mut output = Matrix::<3, 3, f64>::zeros();
   matrix.mul_into(&matrix, &mut output);
   ```
+
+- `block`, `row`, and `column` views for fixed-size submatrix access
+  ```rust
+  let block = matrix.block::<2, 2>(0, 0).expect("block is in bounds");
+  let values = block.to_matrix();
+  ```
+  Mutable blocks are available through `block_mut`. Triangular views expose
+  `lower_triangular()` and `upper_triangular()` with in-place solves and
+  `mul_into` operations.
 
 Fixed-size multiplication selects its kernel at compile time. On
 x86-64, `f32` and `f64` use AVX2 when enabled by the target and otherwise use
@@ -297,6 +326,9 @@ RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench robotics
 # Focus on decomposition cases:
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench robotics -- 'llt|ldlt'
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 QR
+CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 SVD
+CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 "Self-adjoint eigen"
+CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 triangular
 ```
 
 The parity suite compares elementary operations bit-for-bit and compares
@@ -320,6 +352,11 @@ LDLT plus explicit no-pivot LDLT on generated symmetric-indefinite systems, each
 one-right-hand-side solve cases. LLT and LDLT include 3, 6, 15, and 32 square
 dimensions to expose small-matrix overhead and larger fixed-size scaling.
 QR additionally covers tall `6x3`, `15x6`, `32x8`, and `64x16` systems.
+SVD benchmarks cover tall `6x3` and `15x6` systems.
+Self-adjoint eigendecomposition benchmarks cover symmetric `3x3`, `6x6`,
+`15x15`, and `32x32` systems.
+Triangular solve benchmarks cover lower and upper `3x3`, `6x6`, and `15x15`
+systems using the same static column-major inputs as Eigen.
 
 ## QEMU target validation
 

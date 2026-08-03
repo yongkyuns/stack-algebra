@@ -179,9 +179,16 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
     /// Solves `A * X = B` using this decomposition.
     #[inline]
     pub fn solve<const P: usize>(&self, rhs: &Matrix<D, P, T>) -> Matrix<D, P, T> {
-        let mut solution = *rhs;
-        self.solve_in_place(&mut solution);
+        let mut solution = Matrix::<D, P, T>::zeros();
+        self.solve_into(rhs, &mut solution);
         solution
+    }
+
+    /// Solves `A * X = B` into a caller-provided output matrix.
+    #[inline]
+    pub fn solve_into<const P: usize>(&self, rhs: &Matrix<D, P, T>, output: &mut Matrix<D, P, T>) {
+        *output = *rhs;
+        self.solve_in_place(output);
     }
 
     /// Solves `A * X = B` in place.

@@ -94,6 +94,14 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
     /// Solves `A * x = rhs` using this decomposition.
     #[inline]
     pub fn solve<const P: usize>(&self, rhs: &Matrix<D, P, T>) -> Matrix<D, P, T> {
+        let mut solution = Matrix::<D, P, T>::zeros();
+        self.solve_into(rhs, &mut solution);
+        solution
+    }
+
+    /// Solves `A * X = B` into a caller-provided output matrix.
+    #[inline]
+    pub fn solve_into<const P: usize>(&self, rhs: &Matrix<D, P, T>, output: &mut Matrix<D, P, T>) {
         let mut permuted_rhs: Matrix<D, P, T> = Matrix::zeros();
         self.permutation.mul_into(rhs, &mut permuted_rhs);
 
@@ -108,17 +116,16 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
             }
         }
 
-        let mut solution: Matrix<D, P, T> = Matrix::zeros();
+        *output = Matrix::zeros();
         for column in 0..P {
             for row in (0..D).rev() {
                 let mut value = intermediate[(row, column)];
                 for next in (row + 1)..D {
-                    value = value - self.upper[(row, next)] * solution[(next, column)];
+                    value = value - self.upper[(row, next)] * output[(next, column)];
                 }
-                solution[(row, column)] = value / self.upper[(row, row)];
+                output[(row, column)] = value / self.upper[(row, row)];
             }
         }
-        solution
     }
 
     /// Computes the inverse by solving against the identity matrix.
