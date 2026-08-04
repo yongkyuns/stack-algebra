@@ -397,11 +397,11 @@ performance comparisons are opt-in and require Eigen headers discoverable via
 
 ```sh
 cargo test --features eigen-compare
-RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench robotics
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench small_fixed
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench sparse
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench dense_solvers
 # Focus on decomposition cases:
-RUSTFLAGS="-C target-cpu=native" cargo bench --bench robotics -- 'llt|ldlt'
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench small_fixed -- 'llt|ldlt'
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 "Sparse LLT"
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 QR
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 SVD
@@ -412,7 +412,7 @@ CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 triangular
 The parity suite compares elementary operations bit-for-bit and compares
 floating-point reductions and decompositions with documented tolerances. The
 Criterion reports include `stack-algebra` and reusable-buffer faer baselines
-for `f32` and `f64` square products from 2-by-2 through 15-by-15, robotics
+for `f32` and `f64` square products from 2-by-2 through 15-by-15, small fixed
 shapes (`2x3 * 3x2`, `3x6 * 6x3`, and `6x15 * 15x6`), matrix-vector products,
 dot products, norms, and partial-pivot LU factorization and one-right-hand-side solves. The native
 Eigen runner uses the same static, column-major matrices, input values,

@@ -233,7 +233,7 @@ macro_rules! scalar_benches {
                 let rhs =
                     Vector::<DIMENSION, $scalar>::from_fn(|row, _| (2 * row + 3) as $scalar / 7.0);
                 let mut output = <$scalar>::default();
-                let mut group = criterion.benchmark_group(concat!("robotics/dot/", $scalar_name));
+                let mut group = criterion.benchmark_group(concat!("fixed/dot/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -256,7 +256,7 @@ macro_rules! scalar_benches {
                 let rhs =
                     Mat::<$scalar>::from_fn(DIMENSION, 1, |row, _| (2 * row + 3) as $scalar / 7.0);
                 let mut output = <$scalar>::default();
-                let mut group = criterion.benchmark_group(concat!("robotics/dot/", $scalar_name));
+                let mut group = criterion.benchmark_group(concat!("fixed/dot/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -281,7 +281,7 @@ macro_rules! scalar_benches {
                 let input = stack_system::<DIMENSION>();
                 let mut factor = input.partial_piv_lu();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/lu-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/lu-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -301,7 +301,7 @@ macro_rules! scalar_benches {
                 let input = faer_system::<DIMENSION>();
                 let mut factor = input.partial_piv_lu();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/lu-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/lu-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -321,8 +321,7 @@ macro_rules! scalar_benches {
                 let factor = stack_system::<DIMENSION>().partial_piv_lu();
                 let rhs = stack_matrix::<DIMENSION, 1>();
                 let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
-                let mut group =
-                    criterion.benchmark_group(concat!("robotics/lu-solve/", $scalar_name));
+                let mut group = criterion.benchmark_group(concat!("fixed/lu-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -347,8 +346,7 @@ macro_rules! scalar_benches {
                     $scalar,
                 >(DIMENSION, 1, Par::Seq);
                 let mut scratch = MemBuffer::new(scratch);
-                let mut group =
-                    criterion.benchmark_group(concat!("robotics/lu-solve/", $scalar_name));
+                let mut group = criterion.benchmark_group(concat!("fixed/lu-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -376,7 +374,7 @@ macro_rules! scalar_benches {
                 let input = stack_system::<DIMENSION>();
                 let mut factor = input.householder_qr();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/qr-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/qr-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -396,7 +394,7 @@ macro_rules! scalar_benches {
                 let input = faer_system::<DIMENSION>();
                 let mut factor = input.qr();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/qr-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/qr-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -416,8 +414,7 @@ macro_rules! scalar_benches {
                 let factor = stack_system::<DIMENSION>().householder_qr();
                 let rhs = stack_rhs::<DIMENSION>();
                 let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
-                let mut group =
-                    criterion.benchmark_group(concat!("robotics/qr-solve/", $scalar_name));
+                let mut group = criterion.benchmark_group(concat!("fixed/qr-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -439,8 +436,7 @@ macro_rules! scalar_benches {
                 let factor = faer_system::<DIMENSION>().qr();
                 let rhs = faer_rhs::<DIMENSION>();
                 let mut solution = faer_rhs::<DIMENSION>();
-                let mut group =
-                    criterion.benchmark_group(concat!("robotics/qr-solve/", $scalar_name));
+                let mut group = criterion.benchmark_group(concat!("fixed/qr-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -461,7 +457,7 @@ macro_rules! scalar_benches {
                 let input = stack_system::<DIMENSION>();
                 let mut factor = input.col_piv_householder_qr();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/col-piv-qr-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/col-piv-qr-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -481,7 +477,7 @@ macro_rules! scalar_benches {
                 let input = faer_system::<DIMENSION>();
                 let mut factor = input.col_piv_qr();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/col-piv-qr-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/col-piv-qr-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -502,7 +498,7 @@ macro_rules! scalar_benches {
                 let rhs = stack_rhs::<DIMENSION>();
                 let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/col-piv-qr-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/col-piv-qr-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -525,7 +521,7 @@ macro_rules! scalar_benches {
                 let rhs = faer_rhs::<DIMENSION>();
                 let mut solution = faer_rhs::<DIMENSION>();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/col-piv-qr-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/col-piv-qr-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -548,7 +544,7 @@ macro_rules! scalar_benches {
                 let input = stack_matrix::<ROWS, COLUMNS>();
                 let mut factor = input.householder_qr();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/tall-qr-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/tall-qr-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", format!("{ROWS}x{COLUMNS}")),
                     &(),
@@ -570,7 +566,7 @@ macro_rules! scalar_benches {
                 let input = faer_matrix::<ROWS, COLUMNS>();
                 let mut factor = input.qr();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/tall-qr-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/tall-qr-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", format!("{ROWS}x{COLUMNS}")),
                     &(),
@@ -593,7 +589,7 @@ macro_rules! scalar_benches {
                 let rhs = stack_matrix::<ROWS, 1>();
                 let mut solution = Matrix::<COLUMNS, 1, $scalar>::zeros();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/tall-qr-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/tall-qr-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", format!("{ROWS}x{COLUMNS}")),
                     &(),
@@ -635,7 +631,7 @@ macro_rules! scalar_benches {
                 let rhs = faer_matrix::<ROWS, 1>();
                 let mut solution = faer_matrix::<ROWS, 1>();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/tall-qr-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/tall-qr-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", format!("{ROWS}x{COLUMNS}")),
                     &(),
@@ -658,7 +654,7 @@ macro_rules! scalar_benches {
                 let input = stack_tall_system::<ROWS, COLUMNS>();
                 let mut factor = input.svd().expect("benchmark matrix is tall");
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/svd-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/svd-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", format!("{ROWS}x{COLUMNS}")),
                     &(),
@@ -680,7 +676,7 @@ macro_rules! scalar_benches {
                 let input = faer_tall_system::<ROWS, COLUMNS>();
                 let mut factor = input.thin_svd().expect("benchmark matrix is tall");
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/svd-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/svd-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", format!("{ROWS}x{COLUMNS}")),
                     &(),
@@ -706,7 +702,7 @@ macro_rules! scalar_benches {
                 let rhs = stack_matrix::<ROWS, 1>();
                 let mut solution = Matrix::<COLUMNS, 1, $scalar>::zeros();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/svd-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/svd-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", format!("{ROWS}x{COLUMNS}")),
                     &(),
@@ -743,7 +739,7 @@ macro_rules! scalar_benches {
                 let rhs = faer_matrix::<ROWS, 1>();
                 let mut solution = faer_matrix::<ROWS, 1>();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/svd-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/svd-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", format!("{ROWS}x{COLUMNS}")),
                     &(),
@@ -768,7 +764,7 @@ macro_rules! scalar_benches {
                     .self_adjoint_eigen()
                     .expect("benchmark matrix is symmetric");
                 let mut group = criterion
-                    .benchmark_group(concat!("robotics/self-adjoint-eigen-factor/", $scalar_name));
+                    .benchmark_group(concat!("fixed/self-adjoint-eigen-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -794,7 +790,7 @@ macro_rules! scalar_benches {
                 let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
                 let view = input.lower_triangular();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/triangular-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/triangular-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-lower", DIMENSION),
                     &(),
@@ -818,7 +814,7 @@ macro_rules! scalar_benches {
                 let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
                 let view = input.upper_triangular();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/triangular-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/triangular-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-upper", DIMENSION),
                     &(),
@@ -842,7 +838,7 @@ macro_rules! scalar_benches {
                     .self_adjoint_eigen(Side::Lower)
                     .expect("benchmark matrix is symmetric");
                 let mut group = criterion
-                    .benchmark_group(concat!("robotics/self-adjoint-eigen-factor/", $scalar_name));
+                    .benchmark_group(concat!("fixed/self-adjoint-eigen-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -864,7 +860,7 @@ macro_rules! scalar_benches {
                 let input = stack_spd_system::<DIMENSION>();
                 let mut factor = input.cholesky();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/llt-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/llt-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -887,7 +883,7 @@ macro_rules! scalar_benches {
                 let rhs = stack_rhs::<DIMENSION>();
                 let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/llt-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/llt-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -907,7 +903,7 @@ macro_rules! scalar_benches {
                 let input = faer_spd_system::<DIMENSION>();
                 let mut factor = input.llt(Side::Lower);
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/llt-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/llt-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -931,7 +927,7 @@ macro_rules! scalar_benches {
                 let rhs = faer_rhs::<DIMENSION>();
                 let mut solution = faer_rhs::<DIMENSION>();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/llt-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/llt-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -952,7 +948,7 @@ macro_rules! scalar_benches {
                 let input = stack_ldlt_system::<DIMENSION>();
                 let mut factor = input.ldlt();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/ldlt-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/ldlt-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -972,7 +968,7 @@ macro_rules! scalar_benches {
                 let input = stack_ldlt_system::<DIMENSION>();
                 let mut factor = input.ldlt_no_pivot();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/ldlt-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/ldlt-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra-no-pivot", DIMENSION),
                     &(),
@@ -995,7 +991,7 @@ macro_rules! scalar_benches {
                 let rhs = stack_rhs::<DIMENSION>();
                 let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/ldlt-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/ldlt-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra", DIMENSION),
                     &(),
@@ -1018,7 +1014,7 @@ macro_rules! scalar_benches {
                 let rhs = stack_rhs::<DIMENSION>();
                 let mut solution = Matrix::<DIMENSION, 1, $scalar>::zeros();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/ldlt-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/ldlt-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("stack-algebra-no-pivot", DIMENSION),
                     &(),
@@ -1038,7 +1034,7 @@ macro_rules! scalar_benches {
                 let input = faer_ldlt_system::<DIMENSION>();
                 let mut factor = input.ldlt(Side::Lower);
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/ldlt-factor/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/ldlt-factor/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -1062,7 +1058,7 @@ macro_rules! scalar_benches {
                 let rhs = faer_rhs::<DIMENSION>();
                 let mut solution = faer_rhs::<DIMENSION>();
                 let mut group =
-                    criterion.benchmark_group(concat!("robotics/ldlt-solve/", $scalar_name));
+                    criterion.benchmark_group(concat!("fixed/ldlt-solve/", $scalar_name));
                 group.bench_with_input(
                     BenchmarkId::new("faer-dynamic", DIMENSION),
                     &(),
@@ -1080,8 +1076,8 @@ macro_rules! scalar_benches {
             }
 
             pub fn bench_all(criterion: &mut Criterion) {
-                let matmul_group = concat!("robotics/matmul/", $scalar_name);
-                let matvec_group = concat!("robotics/matvec/", $scalar_name);
+                let matmul_group = concat!("fixed/matmul/", $scalar_name);
+                let matvec_group = concat!("fixed/matvec/", $scalar_name);
                 for_bench_product!(
                     criterion,
                     matmul_group,
@@ -1100,7 +1096,7 @@ macro_rules! scalar_benches {
                     (6, 6, 1),
                     (15, 15, 1)
                 );
-                let norm_group = concat!("robotics/norm/", $scalar_name);
+                let norm_group = concat!("fixed/norm/", $scalar_name);
                 for_bench_norm!(
                     criterion,
                     norm_group,

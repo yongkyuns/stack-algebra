@@ -37,7 +37,7 @@ name = "fixed_size"
 harness = false
 
 [[bench]]
-name = "robotics"
+name = "small_fixed"
 harness = false
 
 [[bench]]

@@ -221,8 +221,8 @@ void svd_singular_values(const Scalar* input, std::size_t rows, std::size_t colu
                          Scalar* output) {
   Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
   Eigen::Map<Eigen::Matrix<Scalar, Eigen::Dynamic, 1>> output_map(output, columns);
-  using Svd = Eigen::JacobiSVD<DynamicMatrix<Scalar>, Eigen::ComputeThinU | Eigen::ComputeThinV>;
-  output_map = Svd(input_map).singularValues();
+  using Svd = Eigen::JacobiSVD<DynamicMatrix<Scalar>>;
+  output_map = Svd(input_map, Eigen::ComputeThinU | Eigen::ComputeThinV).singularValues();
 }
 
 template <typename Scalar>
@@ -231,8 +231,8 @@ void svd_solve(const Scalar* input, const Scalar* rhs, std::size_t rows, std::si
   Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, rows, columns);
   Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, rows, rhs_columns);
   Eigen::Map<DynamicMatrix<Scalar>> output_map(output, columns, rhs_columns);
-  using Svd = Eigen::JacobiSVD<DynamicMatrix<Scalar>, Eigen::ComputeThinU | Eigen::ComputeThinV>;
-  output_map.noalias() = Svd(input_map).solve(rhs_map);
+  using Svd = Eigen::JacobiSVD<DynamicMatrix<Scalar>>;
+  output_map.noalias() = Svd(input_map, Eigen::ComputeThinU | Eigen::ComputeThinV).solve(rhs_map);
 }
 
 template <typename Scalar>

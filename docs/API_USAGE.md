@@ -282,7 +282,7 @@ the performance path when pivots stay within blocks.
 cargo test --all-features
 cargo check --no-default-features
 cargo clippy --all-targets --all-features -- -D warnings
-RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench robotics
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench small_fixed
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench sparse
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench dense_solvers
 qemu-tests/run_cortex_m.sh
