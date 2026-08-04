@@ -23,10 +23,13 @@ use core::{
 
 pub use algebra::{
     Cholesky, ColPivHouseholderQr, DecompositionError, HouseholderQr, Ldlt, LowerTriangular,
-    PartialPivLu, SelfAdjointEigen, SelfAdjointLower, SelfAdjointUpper, SelfAdjointView, Svd,
-    UpperTriangular,
+    PartialPivLu, SelfAdjointEigen, SelfAdjointEigenWorkspace, SelfAdjointLower, SelfAdjointUpper,
+    SelfAdjointView, Svd, UpperTriangular,
 };
-pub use block_sparse::StaticBlockCscMatrix;
+pub use block_sparse::{
+    StaticBlockCscCholesky, StaticBlockCscCholeskyPattern, StaticBlockCscLdlt,
+    StaticBlockCscLdltPattern, StaticBlockCscMatrix, StaticBlockCsrMatrix,
+};
 pub use bounded::MatrixBuf;
 pub use geometry::{AffineTransform, AngleAxis, Isometry, Quaternion, RotationMatrix};
 pub use index::MatrixIndex;
@@ -59,6 +62,12 @@ pub struct Matrix<const M: usize, const N: usize, T = f32> {
 }
 
 impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
+    /// Returns the exact inline storage footprint of this fixed-size matrix.
+    #[inline]
+    pub const fn storage_bytes() -> usize {
+        core::mem::size_of::<Self>()
+    }
+
     /// Copies a fixed-size matrix view into an owning matrix.
     #[inline]
     pub fn from_view<V>(view: &V) -> Self

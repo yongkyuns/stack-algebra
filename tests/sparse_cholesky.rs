@@ -164,11 +164,9 @@ fn minimum_degree_ordering_reduces_star_fill_and_solves() {
     let ordered = symbolic.prepare_ordered(&matrix).unwrap();
     let ordered_factor = symbolic.factor_ordered(&ordered).unwrap();
     let mut reusable_factor = StaticCscCholesky::<4, 10, f64>::decompose(&matrix).unwrap();
-    symbolic.factor_into(&matrix, &mut reusable_factor).unwrap();
-    let mut reusable_ordered_factor = StaticCscCholesky::<4, 10, f64>::decompose(&matrix).unwrap();
-    symbolic
-        .factor_ordered_into(&ordered, &mut reusable_ordered_factor)
-        .unwrap();
+    reusable_factor.recompute(&matrix).unwrap();
+    let mut reusable_ordered_factor = symbolic.factor_ordered(&ordered).unwrap();
+    reusable_ordered_factor.recompute_ordered(&ordered).unwrap();
     let dense =
         matrix![4.0, 1.0, 1.0, 1.0; 1.0, 4.0, 0.0, 0.0; 1.0, 0.0, 4.0, 0.0; 1.0, 0.0, 0.0, 4.0];
     let rhs = vector![1.0; 2.0; 3.0; 4.0];

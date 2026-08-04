@@ -41,5 +41,4 @@ output=$(timeout 10 qemu-system-aarch64 \
   -cpu cortex-a53 \
   -nographic \
   -kernel "$image" 2>&1 || true)
-printf '%s\n' "$output"
-printf '%s\n' "$output" | grep -q "stack-algebra qemu aarch64: PASS"
+printf '%s\n' "$output" | sh "$repo_root/qemu-tests/check_stack_usage.sh" aarch64

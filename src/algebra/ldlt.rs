@@ -1,19 +1,18 @@
 use crate::kernels::MatmulBackend;
+use crate::view::MatrixRead;
 use crate::{DecompositionError, Matrix, MatrixScalar, Real};
 
-/// Symmetric LDLᵀ factorization with Eigen-compatible diagonal pivoting.
+/// Symmetric LDLᵀ factorization with Eigen-compatible Bunch–Kaufman pivoting.
 ///
 /// The factorization has the form `P * A * Pᵀ = L * D * Lᵀ`, where `D` is
-/// diagonal, `L` is unit lower-triangular, and `P` is represented internally
+/// block diagonal, `L` is unit lower-triangular, and `P` is represented internally
 /// by a fixed-size permutation index array. The factor matrix stores `L` below
-/// the diagonal and `D` on the diagonal, matching Eigen's compact layout.
-/// This is the diagonal-`D` variant; matrices that require a 2x2 pivot block
-/// return [`DecompositionError::ZeroPivot`] rather than using a
-/// Bunch–Kaufman block.
+/// the diagonal and scalar 1×1 or 2×2 `D` pivot blocks in compact form.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ldlt<const D: usize, T> {
     factor: Matrix<D, D, T>,
     permutation: [usize; D],
+    pivots: [u8; D],
 }
 
 impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
@@ -32,7 +31,27 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         Self::try_factorize_no_pivot_into(matrix, self)
     }
 
-    /// Computes an Eigen-compatible symmetric diagonal-pivot LDLᵀ decomposition.
+    /// Recomputes this diagonal-pivot factorization directly from a view.
+    #[inline]
+    pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        *self = Self::try_decompose_view(matrix)?;
+        Ok(())
+    }
+
+    /// Recomputes this no-pivot factorization directly from a view.
+    #[inline]
+    pub fn try_compute_no_pivot_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        *self = Self::try_decompose_no_pivot_view(matrix)?;
+        Ok(())
+    }
+
+    /// Computes an Eigen-compatible symmetric Bunch–Kaufman LDLᵀ decomposition.
     ///
     /// Returns `None` for non-finite or singular input. The input is expected
     /// to be symmetric; only its lower triangle is read.
@@ -41,14 +60,26 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         Self::try_decompose(matrix).ok()
     }
 
-    /// Computes a symmetric diagonal-pivot LDLᵀ decomposition with a typed
+    /// Computes a symmetric Bunch–Kaufman LDLᵀ decomposition with a typed
     /// failure result.
     #[inline]
     pub fn try_decompose(matrix: &Matrix<D, D, T>) -> Result<Self, DecompositionError> {
         let mut output = Self {
             factor: *matrix,
             permutation: core::array::from_fn(|index| index),
+            pivots: [1; D],
         };
+        Self::decompose_impl::<true>(&mut output)?;
+        Ok(output)
+    }
+
+    /// Computes a diagonal-pivot LDLᵀ factorization directly from a view.
+    #[inline]
+    pub fn try_decompose_view<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let mut output = Self::view_storage(matrix)?;
         Self::decompose_impl::<true>(&mut output)?;
         Ok(output)
     }
@@ -62,6 +93,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
     ) -> Result<(), DecompositionError> {
         output.factor = *matrix;
         output.permutation = core::array::from_fn(|index| index);
+        output.pivots = [1; D];
         Self::decompose_impl::<true>(output)
     }
 
@@ -82,8 +114,39 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         let mut output = Self {
             factor: *matrix,
             permutation: core::array::from_fn(|index| index),
+            pivots: [1; D],
         };
         Self::decompose_impl::<false>(&mut output)?;
+        Ok(output)
+    }
+
+    /// Computes a no-pivot LDLᵀ factorization directly from a view.
+    #[inline]
+    pub fn try_decompose_no_pivot_view<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let mut output = Self::view_storage(matrix)?;
+        Self::decompose_impl::<false>(&mut output)?;
+        Ok(output)
+    }
+
+    fn view_storage<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let mut output = Self {
+            factor: Matrix::zeros(),
+            permutation: core::array::from_fn(|index| index),
+            pivots: [1; D],
+        };
+        for column in 0..D {
+            for row in column..D {
+                output.factor[(row, column)] = *matrix
+                    .get(row, column)
+                    .ok_or(DecompositionError::InvalidView)?;
+            }
+        }
         Ok(output)
     }
 
@@ -96,11 +159,15 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
     ) -> Result<(), DecompositionError> {
         output.factor = *matrix;
         output.permutation = core::array::from_fn(|index| index);
+        output.pivots = [1; D];
         Self::decompose_impl::<false>(output)
     }
 
     #[inline]
     fn decompose_impl<const PIVOTING: bool>(output: &mut Self) -> Result<(), DecompositionError> {
+        if PIVOTING {
+            return Self::decompose_bunch_kaufman(output);
+        }
         let factor = &mut output.factor;
         let permutation = &mut output.permutation;
 
@@ -109,11 +176,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         while block_start < D {
             let block_end = core::cmp::min(block_start + BLOCK_SIZE, D);
             for diagonal in block_start..block_end {
-                let pivot = if PIVOTING {
-                    Self::pivot_index(factor, diagonal)
-                } else {
-                    diagonal
-                };
+                let pivot = diagonal;
                 let pivot_value = factor[(pivot, pivot)];
                 if !pivot_value.is_finite() {
                     return Err(DecompositionError::NonFinite);
@@ -163,6 +226,191 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         Ok(())
     }
 
+    fn decompose_bunch_kaufman(output: &mut Self) -> Result<(), DecompositionError> {
+        let factor = &mut output.factor;
+        let permutation = &mut output.permutation;
+        output.pivots = [1; D];
+
+        let alpha = T::from(0.6403882032022076).unwrap_or(T::one());
+        let mut position = 0;
+        while position < D {
+            if position + 1 == D {
+                Self::factor_one_pivot(factor, position, &mut output.pivots)?;
+                break;
+            }
+
+            let abs_diagonal = factor[(position, position)].abs();
+            let mut column_max = T::zero();
+            let mut imax = position + 1;
+            for row in (position + 1)..D {
+                let magnitude = factor[(row, position)].abs();
+                if magnitude > column_max {
+                    column_max = magnitude;
+                    imax = row;
+                }
+            }
+
+            if !abs_diagonal.is_finite() || !column_max.is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
+            if abs_diagonal >= alpha * column_max || column_max == T::zero() {
+                Self::factor_one_pivot(factor, position, &mut output.pivots)?;
+                position += 1;
+                continue;
+            }
+
+            let mut row_max = T::zero();
+            for column in position..D {
+                if column != imax {
+                    row_max = row_max.max(Self::lower_value(factor, imax, column).abs());
+                }
+            }
+            let abs_imax_diagonal = factor[(imax, imax)].abs();
+            if !row_max.is_finite() || !abs_imax_diagonal.is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
+            if abs_imax_diagonal >= alpha * row_max {
+                Self::swap_symmetric_lower_bunch(factor, position, imax);
+                permutation.swap(position, imax);
+                Self::factor_one_pivot(factor, position, &mut output.pivots)?;
+                position += 1;
+            } else {
+                if imax != position + 1 {
+                    Self::swap_symmetric_lower_bunch(factor, position + 1, imax);
+                    permutation.swap(position + 1, imax);
+                }
+                Self::factor_two_pivot(factor, position, &mut output.pivots)?;
+                position += 2;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn factor_one_pivot(
+        factor: &mut Matrix<D, D, T>,
+        position: usize,
+        pivots: &mut [u8; D],
+    ) -> Result<(), DecompositionError> {
+        let diagonal = factor[(position, position)];
+        if !diagonal.is_finite() {
+            return Err(DecompositionError::NonFinite);
+        }
+        if diagonal == T::zero() {
+            return Err(DecompositionError::ZeroPivot);
+        }
+        pivots[position] = 1;
+        for row in (position + 1)..D {
+            let value = factor[(row, position)] / diagonal;
+            if !value.is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
+            factor[(row, position)] = value;
+        }
+        for column in (position + 1)..D {
+            let scale = diagonal * factor[(column, position)];
+            {
+                let data = factor.as_mut_slice();
+                let column_offset = column * D;
+                let (prefix, suffix) = data.split_at_mut(column_offset);
+                let source = &prefix[position * D + column..position * D + D];
+                let target = &mut suffix[column..D];
+                T::Matmul::rank_update_sub(target, source, scale);
+            }
+            for row in column..D {
+                if !factor[(row, column)].is_finite() {
+                    return Err(DecompositionError::NonFinite);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn factor_two_pivot(
+        factor: &mut Matrix<D, D, T>,
+        position: usize,
+        pivots: &mut [u8; D],
+    ) -> Result<(), DecompositionError> {
+        let first = factor[(position, position)];
+        let coupling = factor[(position + 1, position)];
+        let second = factor[(position + 1, position + 1)];
+        let determinant = first * second - coupling * coupling;
+        if !first.is_finite()
+            || !coupling.is_finite()
+            || !second.is_finite()
+            || !determinant.is_finite()
+        {
+            return Err(DecompositionError::NonFinite);
+        }
+        if determinant == T::zero() {
+            return Err(DecompositionError::ZeroPivot);
+        }
+        pivots[position] = 2;
+        pivots[position + 1] = 3;
+        for row in (position + 2)..D {
+            let first_value = factor[(row, position)];
+            let second_value = factor[(row, position + 1)];
+            let lower_first = (first_value * second - second_value * coupling) / determinant;
+            let lower_second = (second_value * first - first_value * coupling) / determinant;
+            if !lower_first.is_finite() || !lower_second.is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
+            factor[(row, position)] = lower_first;
+            factor[(row, position + 1)] = lower_second;
+        }
+        for column in (position + 2)..D {
+            for row in column..D {
+                let row_first = factor[(row, position)];
+                let row_second = factor[(row, position + 1)];
+                let column_first = factor[(column, position)];
+                let column_second = factor[(column, position + 1)];
+                let value = factor[(row, column)]
+                    - row_first * first * column_first
+                    - row_first * coupling * column_second
+                    - row_second * coupling * column_first
+                    - row_second * second * column_second;
+                if !value.is_finite() {
+                    return Err(DecompositionError::NonFinite);
+                }
+                factor[(row, column)] = value;
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn lower_value(matrix: &Matrix<D, D, T>, row: usize, column: usize) -> T {
+        if row >= column {
+            matrix[(row, column)]
+        } else {
+            matrix[(column, row)]
+        }
+    }
+
+    fn swap_symmetric_lower_bunch(matrix: &mut Matrix<D, D, T>, first: usize, second: usize) {
+        if first == second {
+            return;
+        }
+        for column in 0..first {
+            let value = matrix[(first, column)];
+            matrix[(first, column)] = matrix[(second, column)];
+            matrix[(second, column)] = value;
+        }
+        for index in (first + 1)..second {
+            let value = matrix[(index, first)];
+            matrix[(index, first)] = matrix[(second, index)];
+            matrix[(second, index)] = value;
+        }
+        let diagonal = matrix[(first, first)];
+        matrix[(first, first)] = matrix[(second, second)];
+        matrix[(second, second)] = diagonal;
+        for row in (second + 1)..D {
+            let value = matrix[(row, first)];
+            matrix[(row, first)] = matrix[(row, second)];
+            matrix[(row, second)] = value;
+        }
+    }
+
     #[inline]
     fn swap_lower_rows(matrix: &mut Matrix<D, D, T>, first: usize, second: usize, columns: usize) {
         for column in 0..columns {
@@ -200,7 +448,11 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
     pub fn lower(&self) -> Matrix<D, D, T> {
         Matrix::from_fn(|row, column| {
             if row > column {
-                self.factor[(row, column)]
+                if self.pivots[column] == 2 && row == column + 1 {
+                    T::zero()
+                } else {
+                    self.factor[(row, column)]
+                }
             } else if row == column {
                 T::one()
             } else {
@@ -215,12 +467,23 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         Matrix::from_fn(|row, _| self.factor[(row, row)])
     }
 
+    /// Returns the compact pivot metadata: `1` for a 1×1 pivot, `2` for the
+    /// first entry of a 2×2 pivot, and `3` for its second entry.
+    #[inline]
+    pub fn pivot_blocks(&self) -> &[u8; D] {
+        &self.pivots
+    }
+
     /// Returns the diagonal factor `D` as a square matrix.
     #[inline]
     pub fn diagonal_matrix(&self) -> Matrix<D, D, T> {
         Matrix::from_fn(|row, column| {
             if row == column {
                 self.factor[(row, row)]
+            } else if row == column + 1 && self.pivots[column] == 2 {
+                self.factor[(row, column)]
+            } else if column == row + 1 && self.pivots[row] == 2 {
+                self.factor[(column, row)]
             } else {
                 T::zero()
             }
@@ -271,24 +534,68 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         }
 
         for column in 0..P {
-            for row in 0..D {
-                let mut value = transformed[(row, column)];
-                for previous in 0..row {
-                    value = value - self.factor[(row, previous)] * transformed[(previous, column)];
+            let mut row = 0;
+            while row < D {
+                if self.pivots[row] == 2 {
+                    for target in (row + 2)..D {
+                        transformed[(target, column)] = transformed[(target, column)]
+                            - self.factor[(target, row)] * transformed[(row, column)]
+                            - self.factor[(target, row + 1)] * transformed[(row + 1, column)];
+                    }
+                    row += 2;
+                } else {
+                    for target in (row + 1)..D {
+                        transformed[(target, column)] = transformed[(target, column)]
+                            - self.factor[(target, row)] * transformed[(row, column)];
+                    }
+                    row += 1;
                 }
-                transformed[(row, column)] = value;
             }
 
-            for row in 0..D {
-                transformed[(row, column)] = transformed[(row, column)] / self.factor[(row, row)];
+            let mut row = 0;
+            while row < D {
+                if self.pivots[row] == 2 {
+                    let first = transformed[(row, column)];
+                    let second = transformed[(row + 1, column)];
+                    let d11 = self.factor[(row, row)];
+                    let d12 = self.factor[(row + 1, row)];
+                    let d22 = self.factor[(row + 1, row + 1)];
+                    let determinant = d11 * d22 - d12 * d12;
+                    transformed[(row, column)] = (first * d22 - second * d12) / determinant;
+                    transformed[(row + 1, column)] = (second * d11 - first * d12) / determinant;
+                    row += 2;
+                } else {
+                    transformed[(row, column)] =
+                        transformed[(row, column)] / self.factor[(row, row)];
+                    row += 1;
+                }
             }
 
-            for row in (0..D).rev() {
-                let mut value = transformed[(row, column)];
-                for next in (row + 1)..D {
-                    value = value - self.factor[(next, row)] * transformed[(next, column)];
+            let mut row = D;
+            while row > 0 {
+                if row >= 2 && self.pivots[row - 2] == 2 {
+                    let first = row - 2;
+                    let second = row - 1;
+                    let mut first_value = transformed[(first, column)];
+                    let mut second_value = transformed[(second, column)];
+                    for next in row..D {
+                        first_value =
+                            first_value - self.factor[(next, first)] * transformed[(next, column)];
+                        second_value = second_value
+                            - self.factor[(next, second)] * transformed[(next, column)];
+                    }
+                    transformed[(first, column)] = first_value;
+                    transformed[(second, column)] = second_value;
+                    row -= 2;
+                } else {
+                    let current = row - 1;
+                    let mut value = transformed[(current, column)];
+                    for next in row..D {
+                        value = value - self.factor[(next, current)] * transformed[(next, column)];
+                    }
+                    transformed[(current, column)] = value;
+                    row -= 1;
                 }
-                transformed[(row, column)] = value;
             }
         }
 
@@ -298,32 +605,17 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             }
         }
     }
-
-    #[inline]
-    fn pivot_index(matrix: &Matrix<D, D, T>, start: usize) -> usize {
-        let data = matrix.as_slice();
-        let mut pivot = start;
-        let mut magnitude = data[start * D + start].abs();
-        for index in (start + 1)..D {
-            let candidate = data[index * D + index].abs();
-            if candidate > magnitude {
-                magnitude = candidate;
-                pivot = index;
-            }
-        }
-        pivot
-    }
 }
 
 impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
-    /// Computes a symmetric diagonal-pivot LDLᵀ factorization with a typed
+    /// Computes a symmetric Bunch–Kaufman LDLᵀ factorization with a typed
     /// failure result.
     #[inline]
     pub fn try_ldlt(&self) -> Result<Ldlt<D, T>, DecompositionError> {
         Ldlt::try_decompose(self)
     }
 
-    /// Computes a symmetric diagonal-pivot LDLᵀ factorization of this matrix.
+    /// Computes a symmetric Bunch–Kaufman LDLᵀ factorization of this matrix.
     #[inline]
     pub fn ldlt(&self) -> Option<Ldlt<D, T>> {
         Ldlt::decompose(self)
@@ -347,7 +639,7 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{matrix, DecompositionError, Matrix};
+    use crate::{matrix, DecompositionError, Ldlt, Map, Matrix};
 
     #[test]
     fn typed_errors_distinguish_ldlt_failures() {
@@ -403,6 +695,34 @@ mod tests {
     }
 
     #[test]
+    fn decomposes_map_and_block_views_without_input_copy() {
+        let matrix = matrix![-1.0_f64, 2.0; 2.0, 3.0];
+        let mapped = Map::<2, 2, f64>::from_slice(matrix.as_slice()).unwrap();
+        let factor = Ldlt::try_decompose_view(&mapped).unwrap();
+        let transformed = factor.permutation() * matrix * factor.permutation().transpose();
+        assert_relative_eq!(
+            transformed,
+            factor.lower() * factor.diagonal_matrix() * factor.lower().transpose(),
+            max_relative = 1e-12
+        );
+
+        let mut storage = Matrix::<3, 3, f64>::zeros();
+        storage[(0, 0)] = -1.0;
+        storage[(1, 0)] = 2.0;
+        storage[(0, 1)] = 2.0;
+        storage[(1, 1)] = 3.0;
+        let block = storage.block::<2, 2>(0, 0).unwrap();
+        let mut reused = factor;
+        reused.try_compute_no_pivot_view(&block).unwrap();
+        assert_eq!(reused.permutation_indices(), &[0, 1]);
+        assert_relative_eq!(
+            matrix,
+            reused.lower() * reused.diagonal_matrix() * reused.lower().transpose(),
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
     fn no_pivot_reconstructs_stable_matrix() {
         let matrix = matrix![
             4.0_f64, 1.0, 0.5;
@@ -419,6 +739,19 @@ mod tests {
     }
 
     #[test]
+    fn diagonal_pivoting_reads_only_the_lower_triangle() {
+        let matrix = matrix![4.0_f64, f64::NAN; 1.0, 3.0];
+        let factor = matrix.ldlt().expect("finite lower triangle");
+        let expected = matrix![4.0_f64, 1.0; 1.0, 3.0];
+        let transformed = factor.permutation() * expected * factor.permutation().transpose();
+        assert_relative_eq!(
+            transformed,
+            factor.lower() * factor.diagonal_matrix() * factor.lower().transpose(),
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
     fn no_pivot_rejects_zero_leading_pivot() {
         let matrix = matrix![0.0_f64, 1.0; 1.0, 2.0];
         assert!(matrix.ldlt_no_pivot().is_none());
@@ -426,10 +759,37 @@ mod tests {
     }
 
     #[test]
-    fn diagonal_pivoting_rejects_matrix_requiring_two_by_two_pivot() {
+    fn diagonal_pivoting_handles_two_by_two_pivot() {
         let matrix = matrix![0.0_f64, 1.0; 1.0, 0.0];
-        assert_eq!(matrix.try_ldlt(), Err(DecompositionError::ZeroPivot));
-        assert!(matrix.ldlt().is_none());
+        let factor = matrix.ldlt().expect("nonsingular 2x2 pivot");
+        assert_eq!(factor.pivot_blocks(), &[2, 3]);
+        let transformed = factor.permutation() * matrix * factor.permutation().transpose();
+        assert_relative_eq!(
+            transformed,
+            factor.lower() * factor.diagonal_matrix() * factor.lower().transpose(),
+            max_relative = 1e-12
+        );
+        let rhs = matrix![2.0_f64; -3.0];
+        assert_relative_eq!(matrix * factor.solve(&rhs), rhs, max_relative = 1e-12);
+    }
+
+    #[test]
+    fn two_by_two_pivot_reconstructs_after_symmetric_exchange() {
+        let matrix = matrix![
+            0.0_f64, 0.0, 1.0;
+            0.0, 2.0, 0.1;
+            1.0, 0.1, 0.0;
+        ];
+        let factor = matrix.ldlt().expect("nonsingular permuted 2x2 pivot");
+        assert_eq!(factor.pivot_blocks(), &[2, 3, 1]);
+        let transformed = factor.permutation() * matrix * factor.permutation().transpose();
+        assert_relative_eq!(
+            transformed,
+            factor.lower() * factor.diagonal_matrix() * factor.lower().transpose(),
+            max_relative = 1e-12
+        );
+        let rhs = matrix![1.0_f64; -2.0; 3.0];
+        assert_relative_eq!(matrix * factor.solve(&rhs), rhs, max_relative = 1e-12);
     }
 
     #[test]

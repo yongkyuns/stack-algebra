@@ -13,4 +13,6 @@ pub enum DecompositionError {
     ZeroPivot,
     /// The iterative factorization did not converge within its fixed budget.
     NoConvergence,
+    /// A matrix view did not provide one of its compile-time coordinates.
+    InvalidView,
 }

@@ -23,6 +23,8 @@ jobs:
   embedded:
     name: Embedded targets and QEMU
     runs-on: ubuntu-latest
+    env:
+      STACK_USAGE_LIMIT_BYTES: 8192
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable

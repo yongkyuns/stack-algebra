@@ -30,9 +30,8 @@ fn sparse_ldlt_solves_indefinite_system() {
 #[test]
 fn sparse_ldlt_reuses_factor_storage() {
     let matrix = indefinite_matrix();
-    let pattern = StaticCscLdltPattern::<3, 6>::analyze(&matrix).unwrap();
     let mut factor = StaticCscLdlt::<3, 6, f64>::decompose(&matrix).unwrap();
-    pattern.factor_ldlt_into(&matrix, &mut factor).unwrap();
+    factor.recompute(&matrix).unwrap();
     let rhs = vector![2.0; -1.0; 4.0];
     let dense = matrix![4.0, 1.0, 2.0; 1.0, -3.0, 1.0; 2.0, 1.0, 2.0];
 
@@ -76,9 +75,16 @@ fn sparse_ldlt_ordering_preserves_solution() {
     let pattern = StaticCscLdltPattern::<4, 10>::analyze_with_ordering(&matrix, ordering).unwrap();
     let ordered = pattern.prepare_ordered(&matrix).unwrap();
     let factor = pattern.factor_ldlt_ordered(&ordered).unwrap();
+    let mut reusable_factor = pattern.factor_ldlt_ordered(&ordered).unwrap();
+    reusable_factor.recompute_ordered(&ordered).unwrap();
     let dense =
         matrix![4.0, 1.0, 1.0, 1.0; 1.0, 4.0, 0.0, 0.0; 1.0, 0.0, 4.0, 0.0; 1.0, 0.0, 0.0, 4.0];
     let rhs = vector![1.0; 2.0; 3.0; 4.0];
 
     assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-12);
+    assert_relative_eq!(
+        dense * reusable_factor.solve(&rhs),
+        rhs,
+        max_relative = 1e-12
+    );
 }

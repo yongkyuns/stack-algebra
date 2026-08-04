@@ -1,4 +1,5 @@
-use crate::{Matrix, MatrixScalar, Real};
+use crate::view::MatrixRead;
+use crate::{DecompositionError, Matrix, MatrixScalar, Real};
 
 /// LU decomposition with partial row pivoting.
 ///
@@ -20,6 +21,16 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
         Self::factorize_into(matrix, self);
     }
 
+    /// Recomputes this factorization directly from a fixed-size matrix view.
+    #[inline]
+    pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        *self = Self::try_decompose_view(matrix)?;
+        Ok(())
+    }
+
     /// Computes a partial-pivot LU decomposition of `matrix`.
     #[inline]
     pub fn decompose(matrix: &Matrix<D, D, T>) -> Self {
@@ -31,6 +42,30 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
         };
         Self::factorize(&mut output);
         output
+    }
+
+    /// Computes a partial-pivot LU factorization directly from a fixed-size
+    /// matrix view without materializing a separate owning input matrix.
+    #[inline]
+    pub fn try_decompose_view<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let mut output = Self {
+            lower: Matrix::eye(),
+            upper: Matrix::zeros(),
+            permutation: core::array::from_fn(|index| index),
+            row_swaps: 0,
+        };
+        for column in 0..D {
+            for row in 0..D {
+                output.upper[(row, column)] = *matrix
+                    .get(row, column)
+                    .ok_or(DecompositionError::InvalidView)?;
+            }
+        }
+        Self::factorize(&mut output);
+        Ok(output)
     }
 
     /// Computes a partial-pivot LU decomposition into caller-provided storage.
@@ -204,7 +239,7 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
 mod tests {
     use approx::{assert_abs_diff_eq, assert_relative_eq};
 
-    use crate::{eye, matrix};
+    use crate::{eye, matrix, Map, Matrix, PartialPivLu};
 
     #[test]
     fn factorization_reconstructs_matrix() {
@@ -233,6 +268,37 @@ mod tests {
         assert_relative_eq!(
             factor.permutation() * matrix,
             factor.lower() * factor.upper(),
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
+    fn decomposes_map_and_block_views() {
+        let matrix = matrix![
+            1.0_f64, 3.0, 5.0;
+            2.0, 4.0, 7.0;
+            1.0, 1.0, 0.0;
+        ];
+        let mapped = Map::<3, 3, f64>::from_slice(matrix.as_slice()).unwrap();
+        let mapped_factor = PartialPivLu::try_decompose_view(&mapped).unwrap();
+        assert_relative_eq!(
+            mapped_factor.permutation() * matrix,
+            mapped_factor.lower() * mapped_factor.upper(),
+            max_relative = 1e-12
+        );
+
+        let mut storage = Matrix::<4, 4, f64>::zeros();
+        for row in 0..3 {
+            for column in 0..3 {
+                storage[(row + 1, column)] = matrix[(row, column)];
+            }
+        }
+        let block = storage.block::<3, 3>(1, 0).unwrap();
+        let mut reused = mapped_factor;
+        reused.try_compute_view(&block).unwrap();
+        assert_relative_eq!(
+            reused.permutation() * matrix,
+            reused.lower() * reused.upper(),
             max_relative = 1e-12
         );
     }

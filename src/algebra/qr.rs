@@ -1,3 +1,4 @@
+use crate::view::MatrixRead;
 use crate::{DecompositionError, MatmulBackend, Matrix, MatrixScalar, Real, Vector};
 
 #[inline]
@@ -110,6 +111,16 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
         Self::factorize_into(matrix, self);
     }
 
+    /// Recomputes this factorization directly from a fixed-size matrix view.
+    #[inline]
+    pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<M, N, T>,
+    {
+        *self = Self::try_decompose_view(matrix)?;
+        Ok(())
+    }
+
     /// Computes a Householder QR factorization.
     #[inline]
     pub fn decompose(matrix: &Matrix<M, N, T>) -> Self {
@@ -119,6 +130,28 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
         };
         Self::factorize(&mut output);
         output
+    }
+
+    /// Computes a Householder QR factorization directly from a fixed-size
+    /// matrix view without materializing a separate owning input matrix.
+    #[inline]
+    pub fn try_decompose_view<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<M, N, T>,
+    {
+        let mut output = Self {
+            factors: Matrix::zeros(),
+            coefficients: Vector::<N, T>::zeros(),
+        };
+        for column in 0..N {
+            for row in 0..M {
+                output.factors[(row, column)] = *matrix
+                    .get(row, column)
+                    .ok_or(DecompositionError::InvalidView)?;
+            }
+        }
+        Self::factorize(&mut output);
+        Ok(output)
     }
 
     /// Computes a Householder QR factorization into caller-provided storage.
@@ -347,6 +380,16 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
         Self::factorize_into(matrix, self);
     }
 
+    /// Recomputes this factorization directly from a fixed-size matrix view.
+    #[inline]
+    pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<M, N, T>,
+    {
+        *self = Self::try_decompose_view(matrix)?;
+        Ok(())
+    }
+
     /// Computes a column-pivoted Householder QR factorization.
     #[inline]
     pub fn decompose(matrix: &Matrix<M, N, T>) -> Self {
@@ -359,6 +402,32 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
         };
         Self::factorize(&mut output);
         output
+    }
+
+    /// Computes a column-pivoted Householder QR factorization directly from a
+    /// fixed-size matrix view without materializing a separate owning input
+    /// matrix.
+    #[inline]
+    pub fn try_decompose_view<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<M, N, T>,
+    {
+        let mut output = Self {
+            factors: Matrix::zeros(),
+            coefficients: Vector::<N, T>::zeros(),
+            permutation: core::array::from_fn(|index| index),
+            max_pivot: T::zero(),
+            threshold: T::zero(),
+        };
+        for column in 0..N {
+            for row in 0..M {
+                output.factors[(row, column)] = *matrix
+                    .get(row, column)
+                    .ok_or(DecompositionError::InvalidView)?;
+            }
+        }
+        Self::factorize(&mut output);
+        Ok(output)
     }
 
     /// Computes a column-pivoted Householder QR factorization into caller-provided storage.
@@ -717,7 +786,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{matrix, DecompositionError, Matrix};
+    use crate::{matrix, ColPivHouseholderQr, DecompositionError, HouseholderQr, Map, Matrix};
 
     #[test]
     fn typed_householder_qr_errors_are_distinguishable() {
@@ -844,6 +913,75 @@ mod tests {
         let permuted = Matrix::from_fn(|row, column| second[(row, factor.permutation()[column])]);
         assert_relative_eq!(
             factor.apply_q(&factor.r()),
+            permuted,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
+    fn decomposes_householder_qr_map_and_block_views() {
+        let matrix = matrix![
+            1.0_f64, 2.0;
+            3.0, 4.0;
+            5.0, 7.0;
+        ];
+        let mapped = Map::<3, 2, f64>::from_slice(matrix.as_slice()).unwrap();
+        let mapped_factor = HouseholderQr::try_decompose_view(&mapped).unwrap();
+        assert_relative_eq!(
+            mapped_factor.apply_q(&mapped_factor.r()),
+            matrix,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
+
+        let mut storage = Matrix::<4, 4, f64>::zeros();
+        for row in 0..3 {
+            for column in 0..2 {
+                storage[(row + 1, column + 1)] = matrix[(row, column)];
+            }
+        }
+        let block = storage.block::<3, 2>(1, 1).unwrap();
+        let mut reused = mapped_factor;
+        reused.try_compute_view(&block).unwrap();
+        assert_relative_eq!(
+            reused.apply_q(&reused.r()),
+            matrix,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
+    fn decomposes_pivoted_qr_map_and_block_views() {
+        let matrix = matrix![
+            1.0_f64, 2.0;
+            3.0, 4.0;
+            5.0, 7.0;
+        ];
+        let mapped = Map::<3, 2, f64>::from_slice(matrix.as_slice()).unwrap();
+        let mapped_factor = ColPivHouseholderQr::try_decompose_view(&mapped).unwrap();
+        let permuted =
+            Matrix::from_fn(|row, column| matrix[(row, mapped_factor.permutation()[column])]);
+        assert_relative_eq!(
+            mapped_factor.apply_q(&mapped_factor.r()),
+            permuted,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
+
+        let mut storage = Matrix::<4, 4, f64>::zeros();
+        for row in 0..3 {
+            for column in 0..2 {
+                storage[(row + 1, column + 1)] = matrix[(row, column)];
+            }
+        }
+        let block = storage.block::<3, 2>(1, 1).unwrap();
+        let mut reused = mapped_factor;
+        reused.try_compute_view(&block).unwrap();
+        let permuted = Matrix::from_fn(|row, column| matrix[(row, reused.permutation()[column])]);
+        assert_relative_eq!(
+            reused.apply_q(&reused.r()),
             permuted,
             epsilon = 1e-12,
             max_relative = 1e-12

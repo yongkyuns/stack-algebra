@@ -43,3 +43,11 @@ harness = false
 [[bench]]
 name = "sparse"
 harness = false
+
+[[bench]]
+name = "block_sparse"
+harness = false
+
+[[bench]]
+name = "dense_solvers"
+harness = false

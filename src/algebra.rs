@@ -11,7 +11,7 @@ mod svd;
 mod triangular;
 
 pub use cholesky::Cholesky;
-pub use eigen::SelfAdjointEigen;
+pub use eigen::{SelfAdjointEigen, SelfAdjointEigenWorkspace};
 pub use error::DecompositionError;
 pub use ldlt::Ldlt;
 pub use lu::PartialPivLu;

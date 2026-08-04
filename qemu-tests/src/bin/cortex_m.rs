@@ -7,6 +7,13 @@ use cortex_m_rt::entry;
 use cortex_m_semihosting::{debug, hprintln};
 use stack_algebra::{Matrix, Vector};
 
+const STACK_PAINT: u32 = 0xCCCC_CCCC;
+
+unsafe extern "C" {
+    static _stack_end: u8;
+    static _stack_start: u8;
+}
+
 #[entry]
 fn main() -> ! {
     let lhs = Matrix::<2, 3, f32>::from_rows([[1.0, -2.0, 3.0], [4.0, 5.0, -6.0]]);
@@ -46,9 +53,36 @@ fn main() -> ! {
         assert!((no_pivot_reconstructed[index] - no_pivot_rhs[index]).abs() < 1e-5);
     }
 
-    hprintln!("stack-algebra qemu cortex-m: PASS");
+    let stack_used = stack_watermark_used();
+    let stack_budget = stack_capacity();
+    assert!(stack_used <= stack_budget);
+    hprintln!(
+        "stack-algebra qemu cortex-m: PASS stack_used={} stack_budget={}",
+        stack_used,
+        stack_budget
+    );
     debug::exit(debug::EXIT_SUCCESS);
     loop {}
+}
+
+fn stack_capacity() -> usize {
+    unsafe { (&_stack_start as *const u8 as usize) - (&_stack_end as *const u8 as usize) }
+}
+
+fn stack_watermark_used() -> usize {
+    let stack_end = unsafe { &_stack_end as *const u8 as usize };
+    let stack_start = unsafe { &_stack_start as *const u8 as usize };
+    let mut first_used = stack_start;
+    let mut address = stack_end;
+    while address + core::mem::size_of::<u32>() <= stack_start {
+        let value = unsafe { core::ptr::read_volatile(address as *const u32) };
+        if value != STACK_PAINT {
+            first_used = address;
+            break;
+        }
+        address += core::mem::size_of::<u32>();
+    }
+    stack_start - first_used
 }
 
 #[panic_handler]

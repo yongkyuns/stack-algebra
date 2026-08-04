@@ -1,5 +1,7 @@
 #![cfg(feature = "eigen-compare")]
 
+use std::ffi::c_void;
+
 use stack_algebra::{
     AffineTransform, Isometry, Matrix, Quaternion, StaticCscCholesky, StaticCscCholeskyPattern,
     StaticCscLdlt, StaticCscMatrix, StaticCscOrdering, Vector,
@@ -201,6 +203,38 @@ unsafe extern "C" {
         columns: usize,
         output: *mut f64,
     ) -> i32;
+    fn sa_eigen_sparse_llt_create_f64(
+        row_indices: *const usize,
+        column_starts: *const usize,
+        values: *const f64,
+        dimension: usize,
+        nonzeros: usize,
+    ) -> *mut c_void;
+    fn sa_eigen_sparse_llt_analyze_f64(context: *mut c_void) -> i32;
+    fn sa_eigen_sparse_llt_factorize_f64(context: *mut c_void) -> i32;
+    fn sa_eigen_sparse_llt_solve_f64(
+        context: *mut c_void,
+        rhs: *const f64,
+        columns: usize,
+        output: *mut f64,
+    ) -> i32;
+    fn sa_eigen_sparse_llt_destroy_f64(context: *mut c_void);
+    fn sa_eigen_sparse_ldlt_create_f64(
+        row_indices: *const usize,
+        column_starts: *const usize,
+        values: *const f64,
+        dimension: usize,
+        nonzeros: usize,
+    ) -> *mut c_void;
+    fn sa_eigen_sparse_ldlt_analyze_f64(context: *mut c_void) -> i32;
+    fn sa_eigen_sparse_ldlt_factorize_f64(context: *mut c_void) -> i32;
+    fn sa_eigen_sparse_ldlt_solve_f64(
+        context: *mut c_void,
+        rhs: *const f64,
+        columns: usize,
+        output: *mut f64,
+    ) -> i32;
+    fn sa_eigen_sparse_ldlt_destroy_f64(context: *mut c_void);
 }
 
 fn matrix<const R: usize, const C: usize>() -> Matrix<R, C, f64> {
@@ -503,6 +537,39 @@ fn sparse_cholesky_solves_match_eigen() {
         .expect("sparse matrix is positive-definite")
         .solve(&rhs);
     assert_close_f64(sparse_solution.as_slice(), eigen_solution.as_slice());
+
+    let eigen_sparse_context = unsafe {
+        sa_eigen_sparse_llt_create_f64(
+            sparse.row_indices().as_ptr(),
+            sparse.column_starts().as_ptr(),
+            sparse.values().as_ptr(),
+            sparse.rows(),
+            sparse.nnz(),
+        )
+    };
+    assert!(!eigen_sparse_context.is_null());
+    assert_eq!(
+        unsafe { sa_eigen_sparse_llt_analyze_f64(eigen_sparse_context) },
+        1
+    );
+    assert_eq!(
+        unsafe { sa_eigen_sparse_llt_factorize_f64(eigen_sparse_context) },
+        1
+    );
+    let mut eigen_sparse_solution = Vector::<3, f64>::zeros();
+    assert_eq!(
+        unsafe {
+            sa_eigen_sparse_llt_solve_f64(
+                eigen_sparse_context,
+                rhs.as_slice().as_ptr(),
+                1,
+                eigen_sparse_solution.as_mut_slice().as_mut_ptr(),
+            )
+        },
+        1
+    );
+    assert_close_f64(eigen_sparse_solution.as_slice(), eigen_solution.as_slice());
+    unsafe { sa_eigen_sparse_llt_destroy_f64(eigen_sparse_context) };
 }
 
 #[test]
@@ -649,6 +716,42 @@ fn ldlt_solves_match_eigen() {
         .expect("sparse indefinite matrix is nonsingular")
         .solve(&sparse_rhs);
     assert_close_f64(sparse_solution.as_slice(), sparse_eigen_solution.as_slice());
+
+    let eigen_sparse_context = unsafe {
+        sa_eigen_sparse_ldlt_create_f64(
+            sparse.row_indices().as_ptr(),
+            sparse.column_starts().as_ptr(),
+            sparse.values().as_ptr(),
+            sparse.rows(),
+            sparse.nnz(),
+        )
+    };
+    assert!(!eigen_sparse_context.is_null());
+    assert_eq!(
+        unsafe { sa_eigen_sparse_ldlt_analyze_f64(eigen_sparse_context) },
+        1
+    );
+    assert_eq!(
+        unsafe { sa_eigen_sparse_ldlt_factorize_f64(eigen_sparse_context) },
+        1
+    );
+    let mut eigen_sparse_solution = Vector::<3, f64>::zeros();
+    assert_eq!(
+        unsafe {
+            sa_eigen_sparse_ldlt_solve_f64(
+                eigen_sparse_context,
+                sparse_rhs.as_slice().as_ptr(),
+                1,
+                eigen_sparse_solution.as_mut_slice().as_mut_ptr(),
+            )
+        },
+        1
+    );
+    assert_close_f64(
+        eigen_sparse_solution.as_slice(),
+        sparse_eigen_solution.as_slice(),
+    );
+    unsafe { sa_eigen_sparse_ldlt_destroy_f64(eigen_sparse_context) };
 
     let pivoted_sparse = StaticCscMatrix::<3, 3, 6, f64>::from_pattern(
         &[0.0, 2.0, 1.0, 3.0, 4.0, 5.0],

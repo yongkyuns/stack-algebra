@@ -1,13 +1,130 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
+#include <Eigen/SparseCholesky>
 
 #include <cstddef>
+#include <new>
 
 template <typename Scalar>
 using DynamicMatrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>;
 
 template <typename Scalar>
 using DynamicVector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+
+template <typename Scalar>
+using SparseMatrix = Eigen::SparseMatrix<Scalar, Eigen::ColMajor, int>;
+
+template <typename Scalar>
+struct SparseLltContext {
+  SparseMatrix<Scalar> matrix;
+  Eigen::SimplicialLLT<SparseMatrix<Scalar>> factor;
+};
+
+template <typename Scalar>
+SparseLltContext<Scalar>* sparse_llt_create(const std::size_t* row_indices,
+                                            const std::size_t* column_starts,
+                                            const Scalar* values, std::size_t dimension,
+                                            std::size_t nonzeros) {
+  try {
+    auto* context = new SparseLltContext<Scalar>();
+    context->matrix.resize(static_cast<int>(dimension), static_cast<int>(dimension));
+    context->matrix.reserve(static_cast<int>(nonzeros));
+    for (std::size_t column = 0; column < dimension; ++column) {
+      const std::size_t start = column_starts[column];
+      const std::size_t end = column + 1 < dimension ? column_starts[column + 1] : nonzeros;
+      for (std::size_t index = start; index < end; ++index) {
+        context->matrix.insert(static_cast<int>(row_indices[index]), static_cast<int>(column)) =
+            values[index];
+      }
+    }
+    context->matrix.makeCompressed();
+    return context;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+template <typename Scalar>
+int sparse_llt_analyze(SparseLltContext<Scalar>* context) {
+  context->factor.analyzePattern(context->matrix);
+  return context->factor.info() == Eigen::Success ? 1 : 0;
+}
+
+template <typename Scalar>
+int sparse_llt_factorize(SparseLltContext<Scalar>* context) {
+  context->factor.factorize(context->matrix);
+  return context->factor.info() == Eigen::Success ? 1 : 0;
+}
+
+template <typename Scalar>
+int sparse_llt_solve(SparseLltContext<Scalar>* context, const Scalar* rhs, std::size_t columns,
+                    Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, context->matrix.rows(), columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, context->matrix.rows(), columns);
+  output_map = context->factor.solve(rhs_map);
+  return context->factor.info() == Eigen::Success ? 1 : 0;
+}
+
+template <typename Scalar>
+void sparse_llt_destroy(SparseLltContext<Scalar>* context) {
+  delete context;
+}
+
+template <typename Scalar>
+struct SparseLdltContext {
+  SparseMatrix<Scalar> matrix;
+  Eigen::SimplicialLDLT<SparseMatrix<Scalar>> factor;
+};
+
+template <typename Scalar>
+SparseLdltContext<Scalar>* sparse_ldlt_create(const std::size_t* row_indices,
+                                              const std::size_t* column_starts,
+                                              const Scalar* values, std::size_t dimension,
+                                              std::size_t nonzeros) {
+  try {
+    auto* context = new SparseLdltContext<Scalar>();
+    context->matrix.resize(static_cast<int>(dimension), static_cast<int>(dimension));
+    context->matrix.reserve(static_cast<int>(nonzeros));
+    for (std::size_t column = 0; column < dimension; ++column) {
+      const std::size_t start = column_starts[column];
+      const std::size_t end = column + 1 < dimension ? column_starts[column + 1] : nonzeros;
+      for (std::size_t index = start; index < end; ++index) {
+        context->matrix.insert(static_cast<int>(row_indices[index]), static_cast<int>(column)) =
+            values[index];
+      }
+    }
+    context->matrix.makeCompressed();
+    return context;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+template <typename Scalar>
+int sparse_ldlt_analyze(SparseLdltContext<Scalar>* context) {
+  context->factor.analyzePattern(context->matrix);
+  return context->factor.info() == Eigen::Success ? 1 : 0;
+}
+
+template <typename Scalar>
+int sparse_ldlt_factorize(SparseLdltContext<Scalar>* context) {
+  context->factor.factorize(context->matrix);
+  return context->factor.info() == Eigen::Success ? 1 : 0;
+}
+
+template <typename Scalar>
+int sparse_ldlt_solve(SparseLdltContext<Scalar>* context, const Scalar* rhs, std::size_t columns,
+                      Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, context->matrix.rows(), columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, context->matrix.rows(), columns);
+  output_map = context->factor.solve(rhs_map);
+  return context->factor.info() == Eigen::Success ? 1 : 0;
+}
+
+template <typename Scalar>
+void sparse_ldlt_destroy(SparseLdltContext<Scalar>* context) {
+  delete context;
+}
 
 template <typename Scalar>
 void add(const Scalar* lhs, const Scalar* rhs, std::size_t rows, std::size_t columns, Scalar* output) {
@@ -227,6 +344,44 @@ int ldlt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, st
   return 1;
 }
 
+template <typename Scalar>
+struct DenseLdltContext {
+  DynamicMatrix<Scalar> matrix;
+  Eigen::LDLT<DynamicMatrix<Scalar>> factor;
+};
+
+template <typename Scalar>
+DenseLdltContext<Scalar>* dense_ldlt_create(const Scalar* input, std::size_t dimension) {
+  try {
+    auto* context = new DenseLdltContext<Scalar>();
+    Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
+    context->matrix = input_map;
+    return context;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+template <typename Scalar>
+int dense_ldlt_factorize(DenseLdltContext<Scalar>* context) {
+  context->factor.compute(context->matrix);
+  return context->factor.info() == Eigen::Success ? 1 : 0;
+}
+
+template <typename Scalar>
+int dense_ldlt_solve(DenseLdltContext<Scalar>* context, const Scalar* rhs,
+                     std::size_t columns, Scalar* output) {
+  Eigen::Map<const DynamicMatrix<Scalar>> rhs_map(rhs, context->matrix.rows(), columns);
+  Eigen::Map<DynamicMatrix<Scalar>> output_map(output, context->matrix.rows(), columns);
+  output_map.noalias() = context->factor.solve(rhs_map);
+  return context->factor.info() == Eigen::Success ? 1 : 0;
+}
+
+template <typename Scalar>
+void dense_ldlt_destroy(DenseLdltContext<Scalar>* context) {
+  delete context;
+}
+
 #define DEFINE_ORACLE_WRAPPERS(SUFFIX, SCALAR)                                                   \
   extern "C" void sa_eigen_add_##SUFFIX(const SCALAR* lhs, const SCALAR* rhs, std::size_t rows, \
                                            std::size_t columns, SCALAR* output) {                 \
@@ -343,3 +498,68 @@ int ldlt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, st
 
 DEFINE_ORACLE_WRAPPERS(f32, float)
 DEFINE_ORACLE_WRAPPERS(f64, double)
+
+#define DEFINE_DENSE_LDLT_WRAPPERS(SUFFIX, SCALAR)                                                \
+  extern "C" void* sa_eigen_dense_ldlt_create_##SUFFIX(const SCALAR* input,                     \
+                                                         std::size_t dimension) {                  \
+    return dense_ldlt_create(input, dimension);                                                    \
+  }                                                                                                 \
+  extern "C" int sa_eigen_dense_ldlt_factorize_##SUFFIX(void* opaque) {                          \
+    return dense_ldlt_factorize(static_cast<DenseLdltContext<SCALAR>*>(opaque));                  \
+  }                                                                                                 \
+  extern "C" int sa_eigen_dense_ldlt_solve_##SUFFIX(                                             \
+      void* opaque, const SCALAR* rhs, std::size_t columns, SCALAR* output) {                     \
+    return dense_ldlt_solve(static_cast<DenseLdltContext<SCALAR>*>(opaque), rhs, columns, output); \
+  }                                                                                                 \
+  extern "C" void sa_eigen_dense_ldlt_destroy_##SUFFIX(void* opaque) {                            \
+    dense_ldlt_destroy(static_cast<DenseLdltContext<SCALAR>*>(opaque));                            \
+  }
+
+DEFINE_DENSE_LDLT_WRAPPERS(f32, float)
+DEFINE_DENSE_LDLT_WRAPPERS(f64, double)
+
+#define DEFINE_SPARSE_LLT_WRAPPERS(SUFFIX, SCALAR)                                               \
+  extern "C" void* sa_eigen_sparse_llt_create_##SUFFIX(                                         \
+      const std::size_t* row_indices, const std::size_t* column_starts, const SCALAR* values,     \
+      std::size_t dimension, std::size_t nonzeros) {                                               \
+    return sparse_llt_create(row_indices, column_starts, values, dimension, nonzeros);             \
+  }                                                                                                 \
+  extern "C" int sa_eigen_sparse_llt_analyze_##SUFFIX(void* opaque) {                             \
+    return sparse_llt_analyze(static_cast<SparseLltContext<SCALAR>*>(opaque));                     \
+  }                                                                                                 \
+  extern "C" int sa_eigen_sparse_llt_factorize_##SUFFIX(void* opaque) {                          \
+    return sparse_llt_factorize(static_cast<SparseLltContext<SCALAR>*>(opaque));                  \
+  }                                                                                                 \
+  extern "C" int sa_eigen_sparse_llt_solve_##SUFFIX(                                              \
+      void* opaque, const SCALAR* rhs, std::size_t columns, SCALAR* output) {                     \
+    return sparse_llt_solve(static_cast<SparseLltContext<SCALAR>*>(opaque), rhs, columns, output); \
+  }                                                                                                 \
+  extern "C" void sa_eigen_sparse_llt_destroy_##SUFFIX(void* opaque) {                           \
+    sparse_llt_destroy(static_cast<SparseLltContext<SCALAR>*>(opaque));                            \
+  }
+
+DEFINE_SPARSE_LLT_WRAPPERS(f32, float)
+DEFINE_SPARSE_LLT_WRAPPERS(f64, double)
+
+#define DEFINE_SPARSE_LDLT_WRAPPERS(SUFFIX, SCALAR)                                               \
+  extern "C" void* sa_eigen_sparse_ldlt_create_##SUFFIX(                                        \
+      const std::size_t* row_indices, const std::size_t* column_starts, const SCALAR* values,     \
+      std::size_t dimension, std::size_t nonzeros) {                                               \
+    return sparse_ldlt_create(row_indices, column_starts, values, dimension, nonzeros);            \
+  }                                                                                                 \
+  extern "C" int sa_eigen_sparse_ldlt_analyze_##SUFFIX(void* opaque) {                            \
+    return sparse_ldlt_analyze(static_cast<SparseLdltContext<SCALAR>*>(opaque));                  \
+  }                                                                                                 \
+  extern "C" int sa_eigen_sparse_ldlt_factorize_##SUFFIX(void* opaque) {                         \
+    return sparse_ldlt_factorize(static_cast<SparseLdltContext<SCALAR>*>(opaque));                \
+  }                                                                                                 \
+  extern "C" int sa_eigen_sparse_ldlt_solve_##SUFFIX(                                             \
+      void* opaque, const SCALAR* rhs, std::size_t columns, SCALAR* output) {                    \
+    return sparse_ldlt_solve(static_cast<SparseLdltContext<SCALAR>*>(opaque), rhs, columns, output); \
+  }                                                                                                 \
+  extern "C" void sa_eigen_sparse_ldlt_destroy_##SUFFIX(void* opaque) {                          \
+    sparse_ldlt_destroy(static_cast<SparseLdltContext<SCALAR>*>(opaque));                         \
+  }
+
+DEFINE_SPARSE_LDLT_WRAPPERS(f32, float)
+DEFINE_SPARSE_LDLT_WRAPPERS(f64, double)

@@ -1,3 +1,4 @@
+use crate::view::MatrixRead;
 use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 
 #[inline]
@@ -48,7 +49,17 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
     /// Recomputes this SVD in place with typed failure reporting.
     #[inline]
     pub fn try_compute(&mut self, matrix: &Matrix<M, N, T>) -> Result<(), DecompositionError> {
-        Self::try_factorize_into(matrix, self)
+        Self::try_factorize(matrix, self)
+    }
+
+    /// Recomputes this SVD directly from a fixed-size matrix view.
+    #[inline]
+    pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<M, N, T>,
+    {
+        *self = Self::try_decompose_view(matrix)?;
+        Ok(())
     }
 
     /// Computes a fixed-size SVD for any matrix shape.
@@ -63,11 +74,59 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
     /// Computes a fixed-size SVD and reports numerical failures explicitly.
     #[inline]
     pub fn try_decompose(matrix: &Matrix<M, N, T>) -> Result<Self, DecompositionError> {
+        let mut output = Self {
+            u: *matrix,
+            singular_values: Vector::<N, T>::zeros(),
+            v: Matrix::<N, N, T>::eye(),
+            threshold: T::zero(),
+        };
+        Self::try_factorize(matrix, &mut output)?;
+        Ok(output)
+    }
+
+    /// Computes an SVD directly from a fixed-size matrix view without
+    /// materializing a separate owning input matrix.
+    #[inline]
+    pub fn try_decompose_view<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<M, N, T>,
+    {
+        let mut output = Self {
+            u: Matrix::zeros(),
+            singular_values: Vector::<N, T>::zeros(),
+            v: Matrix::<N, N, T>::eye(),
+            threshold: T::zero(),
+        };
+        for column in 0..N {
+            for row in 0..M {
+                output.u[(row, column)] = *matrix
+                    .get(row, column)
+                    .ok_or(DecompositionError::InvalidView)?;
+            }
+        }
+        Self::try_factorize_storage(&mut output)?;
+        Ok(output)
+    }
+
+    #[inline]
+    fn try_factorize(
+        matrix: &Matrix<M, N, T>,
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
         if matrix.iter().any(|value| !value.is_finite()) {
             return Err(DecompositionError::NonFinite);
         }
-        let mut u = *matrix;
-        let mut v = Matrix::<N, N, T>::eye();
+        output.u = *matrix;
+        Self::try_factorize_storage(output)
+    }
+
+    #[inline]
+    fn try_factorize_storage(output: &mut Self) -> Result<(), DecompositionError> {
+        output.v = Matrix::<N, N, T>::eye();
+        output.singular_values = Vector::<N, T>::zeros();
+        let u = &mut output.u;
+        let v = &mut output.v;
+        let singular_values = &mut output.singular_values;
         let dimension = T::from(core::cmp::max(M, N)).unwrap_or(T::one());
         let tolerance = T::epsilon() * dimension;
         const MAX_SWEEPS: usize = 32;
@@ -143,9 +202,8 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
             return Err(DecompositionError::NoConvergence);
         }
 
-        let mut singular_values = Vector::<N, T>::zeros();
         for column in 0..N {
-            singular_values[column] = column_norm(&u, column);
+            singular_values[column] = column_norm(u, column);
             if !singular_values[column].is_finite() {
                 return Err(DecompositionError::NonFinite);
             }
@@ -184,21 +242,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
             }
         }
 
-        Ok(Self {
-            u,
-            singular_values,
-            v,
-            threshold: tolerance,
-        })
-    }
-
-    /// Computes an SVD into caller-provided factor storage.
-    #[inline]
-    fn try_factorize_into(
-        matrix: &Matrix<M, N, T>,
-        output: &mut Self,
-    ) -> Result<(), DecompositionError> {
-        *output = Self::try_decompose(matrix)?;
+        output.threshold = tolerance;
         Ok(())
     }
 
@@ -367,7 +411,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Matrix<M, N, T> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{matrix, DecompositionError, Matrix};
+    use crate::{matrix, DecompositionError, Map, Matrix, Svd};
 
     #[test]
     fn reconstructs_square_matrix() {
@@ -406,6 +450,53 @@ mod tests {
         assert_relative_eq!(
             *factor.u() * diagonal * factor.v().transpose(),
             second,
+            epsilon = 1e-10,
+            max_relative = 1e-10
+        );
+    }
+
+    #[test]
+    fn decomposes_map_and_block_views() {
+        let matrix = matrix![
+            1.0_f64, 2.0;
+            3.0, 4.0;
+            5.0, 6.0;
+        ];
+        let mapped = Map::<3, 2, f64>::from_slice(matrix.as_slice()).unwrap();
+        let mapped_factor = Svd::try_decompose_view(&mapped).unwrap();
+        let diagonal = Matrix::from_fn(|row, column| {
+            if row == column {
+                mapped_factor.singular_values()[row]
+            } else {
+                0.0
+            }
+        });
+        assert_relative_eq!(
+            *mapped_factor.u() * diagonal * mapped_factor.v().transpose(),
+            matrix,
+            epsilon = 1e-10,
+            max_relative = 1e-10
+        );
+
+        let mut storage = Matrix::<4, 4, f64>::zeros();
+        for row in 0..3 {
+            for column in 0..2 {
+                storage[(row + 1, column + 1)] = matrix[(row, column)];
+            }
+        }
+        let block = storage.block::<3, 2>(1, 1).unwrap();
+        let mut reused = mapped_factor;
+        reused.try_compute_view(&block).unwrap();
+        let diagonal = Matrix::from_fn(|row, column| {
+            if row == column {
+                reused.singular_values()[row]
+            } else {
+                0.0
+            }
+        });
+        assert_relative_eq!(
+            *reused.u() * diagonal * reused.v().transpose(),
+            matrix,
             epsilon = 1e-10,
             max_relative = 1e-10
         );

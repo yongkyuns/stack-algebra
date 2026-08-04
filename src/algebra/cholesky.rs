@@ -1,4 +1,5 @@
 use crate::kernels::matmul;
+use crate::view::MatrixRead;
 use crate::{DecompositionError, Matrix, MatrixScalar, Real};
 
 /// Cholesky factorization of a symmetric positive-definite matrix.
@@ -15,6 +16,21 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
     #[inline]
     pub fn try_compute(&mut self, matrix: &Matrix<D, D, T>) -> Result<(), DecompositionError> {
         Self::try_factorize_into(matrix, self)
+    }
+
+    /// Recomputes this factorization directly from a fixed-size matrix view.
+    ///
+    /// The view is read in its lower triangle and is not copied into an
+    /// owning matrix. This path uses fixed-size scalar workspace and is useful
+    /// for mapped or block storage.
+    #[inline]
+    pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let factor = Self::try_decompose_view(matrix)?;
+        *self = factor;
+        Ok(())
     }
 
     /// Computes a Cholesky factorization, returning `None` when the input is
@@ -36,6 +52,20 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
         } else {
             Self::decompose_blocked(matrix, &mut output)?;
         }
+        Ok(output)
+    }
+
+    /// Computes a Cholesky factorization directly from a fixed-size matrix
+    /// view without materializing an owning input matrix.
+    #[inline]
+    pub fn try_decompose_view<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let mut output = Self {
+            lower: Matrix::zeros(),
+        };
+        Self::decompose_unblocked_view(matrix, &mut output)?;
         Ok(output)
     }
 
@@ -67,6 +97,44 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
             let column_offset = column * D;
             for row in column..D {
                 let mut value = input[column_offset + row];
+                for previous in 0..column {
+                    let previous_offset = previous * D;
+                    value = value - lower[previous_offset + row] * lower[previous_offset + column];
+                }
+
+                if row == column {
+                    if !value.is_finite() {
+                        return Err(DecompositionError::NonFinite);
+                    }
+                    if value <= T::zero() {
+                        return Err(DecompositionError::NotPositiveDefinite);
+                    }
+                    lower[column_offset + row] = value.sqrt();
+                } else {
+                    let multiplier = value / lower[column_offset + column];
+                    if !multiplier.is_finite() {
+                        return Err(DecompositionError::NonFinite);
+                    }
+                    lower[column_offset + row] = multiplier;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn decompose_unblocked_view<V>(matrix: &V, output: &mut Self) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let lower = output.lower.as_mut_slice();
+
+        for column in 0..D {
+            let column_offset = column * D;
+            for row in column..D {
+                let mut value = *matrix
+                    .get(row, column)
+                    .ok_or(DecompositionError::InvalidView)?;
                 for previous in 0..column {
                     let previous_offset = previous * D;
                     value = value - lower[previous_offset + row] * lower[previous_offset + column];
@@ -297,7 +365,7 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{eye, matrix, DecompositionError, Matrix};
+    use crate::{eye, matrix, Cholesky, DecompositionError, Map, Matrix};
 
     #[test]
     fn typed_errors_distinguish_cholesky_failures() {
@@ -361,6 +429,37 @@ mod tests {
         assert_relative_eq!(
             factor.lower() * factor.lower().transpose(),
             second,
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
+    fn decomposes_map_and_block_views_without_input_copy() {
+        let matrix = matrix![
+            4.0_f64, 1.0, 1.0;
+            1.0, 3.0, 0.0;
+            1.0, 0.0, 2.0;
+        ];
+        let mapped = Map::<3, 3, f64>::from_slice(matrix.as_slice()).unwrap();
+        let mapped_factor = Cholesky::try_decompose_view(&mapped).unwrap();
+        assert_relative_eq!(
+            mapped_factor.lower() * mapped_factor.lower().transpose(),
+            matrix,
+            max_relative = 1e-12
+        );
+
+        let mut storage = Matrix::<4, 4, f64>::zeros();
+        for row in 0..3 {
+            for column in 0..3 {
+                storage[(row, column)] = matrix[(row, column)];
+            }
+        }
+        let block = storage.block::<3, 3>(0, 0).unwrap();
+        let mut block_factor = mapped_factor;
+        block_factor.try_compute_view(&block).unwrap();
+        assert_relative_eq!(
+            block_factor.lower() * block_factor.lower().transpose(),
+            matrix,
             max_relative = 1e-12
         );
     }

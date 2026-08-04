@@ -255,9 +255,7 @@ impl MatmulBackend<f32> for X86Sse2Matmul {
 
     #[inline]
     fn rank_update_sub(target: &mut [f32], source: &[f32], scale: f32) {
-        for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
-            *target_value -= *source_value * scale;
-        }
+        unsafe { rank_update_sub_f32(target, source, scale) }
     }
 }
 
@@ -278,9 +276,7 @@ impl MatmulBackend<f64> for X86Sse2Matmul {
 
     #[inline]
     fn rank_update_sub(target: &mut [f64], source: &[f64], scale: f64) {
-        for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
-            *target_value -= *source_value * scale;
-        }
+        unsafe { rank_update_sub_f64(target, source, scale) }
     }
 }
 
@@ -347,5 +343,45 @@ unsafe fn matmul_f64<const M: usize, const N: usize, const P: usize>(
             }
             output[(row, column)] = accumulator;
         }
+    }
+}
+
+#[target_feature(enable = "sse2")]
+unsafe fn rank_update_sub_f32(target: &mut [f32], source: &[f32], scale: f32) {
+    use core::arch::x86_64::{_mm_loadu_ps, _mm_mul_ps, _mm_set1_ps, _mm_storeu_ps, _mm_sub_ps};
+    let mut index = 0;
+    let scale_packet = _mm_set1_ps(scale);
+    while index + 4 <= target.len() {
+        let target_packet = _mm_loadu_ps(target.as_ptr().add(index));
+        let source_packet = _mm_loadu_ps(source.as_ptr().add(index));
+        _mm_storeu_ps(
+            target.as_mut_ptr().add(index),
+            _mm_sub_ps(target_packet, _mm_mul_ps(source_packet, scale_packet)),
+        );
+        index += 4;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) -= *source.get_unchecked(index) * scale;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "sse2")]
+unsafe fn rank_update_sub_f64(target: &mut [f64], source: &[f64], scale: f64) {
+    use core::arch::x86_64::{_mm_loadu_pd, _mm_mul_pd, _mm_set1_pd, _mm_storeu_pd, _mm_sub_pd};
+    let mut index = 0;
+    let scale_packet = _mm_set1_pd(scale);
+    while index + 2 <= target.len() {
+        let target_packet = _mm_loadu_pd(target.as_ptr().add(index));
+        let source_packet = _mm_loadu_pd(source.as_ptr().add(index));
+        _mm_storeu_pd(
+            target.as_mut_ptr().add(index),
+            _mm_sub_pd(target_packet, _mm_mul_pd(source_packet, scale_packet)),
+        );
+        index += 2;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) -= *source.get_unchecked(index) * scale;
+        index += 1;
     }
 }

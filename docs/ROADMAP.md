@@ -19,13 +19,17 @@ SymForce or any other robotics framework.
 - P0 sparse triangle semantics, compact dense permutations, typed dense
   decomposition failures, and target smoke validation are implemented.
 - The P1 shared `MatrixRead`/`MatrixWrite` view foundation and
-  `Matrix::from_view` are implemented; algorithms still materialize owning
-  matrices until view-native kernels are added.
+  `Matrix::from_view` are implemented; Cholesky now supports zero-copy view
+  decomposition, and LDLT, LU, QR, SVD, and self-adjoint eigendecomposition
+  now support the same zero-copy view path.
 - The bounded `MatrixBuf<MAX_ROWS, MAX_COLS, T>` storage layer is implemented
   with checked active dimensions and no heap allocation.
 - The first block-sparse layer, `StaticBlockCscMatrix`, is implemented with
-  fixed-capacity CSC patterns and allocation-free block matvec. Block CSR and
-  sparse block factorizations remain future work.
+  fixed-capacity CSC patterns and allocation-free block matvec. The matching
+  `StaticBlockCsrMatrix` is now implemented. Native block CSC Cholesky with
+  symbolic fill and reusable solves is implemented. Native block CSC LDLT with
+  local Bunch–Kaufman diagonal blocks, ordering, and reusable solves is implemented.
+  A scalar-expansion adapter is retained for reference comparisons.
 
 ## Execution phases
 
@@ -34,7 +38,8 @@ SymForce or any other robotics framework.
 - Make sparse lower/upper triangle semantics explicit and Eigen-compatible.
 - Replace dense permutation matrices in factorizations with compact index
   permutations shared by dense and sparse algorithms.
-- Standardize reusable `*_into` and `*_in_place` solver APIs.
+- Standardize reusable factor recomputation and `*_in_place` solver APIs;
+  reserve `*_into` for caller-provided output operations.
 - Introduce structured decomposition errors while preserving compatibility
   shims where a breaking change is not yet justified.
 - Split the monolithic sparse implementation into storage, ordering, LLT, and
@@ -50,7 +55,10 @@ SymForce or any other robotics framework.
 - Make caller-provided workspaces first-class for factorization and solves.
   Cholesky, LDLT, LU, QR, SVD, and self-adjoint eigendecomposition now expose
   the unified `compute`/`try_compute` recomputation convention; workspace-
-  specific scratch buffers remain a follow-up measurement.
+  specific scratch buffers are available for self-adjoint eigen sweeps, with
+  SVD requiring no additional matrix scratch beyond its factor storage.
+  Sparse LLT and LDLT factors use `recompute` (or `recompute_ordered` for
+  already-permuted CSC input) while symbolic patterns remain separate.
 
 ### P2 — portable performance architecture
 
@@ -64,10 +72,10 @@ SymForce or any other robotics framework.
 
 ### P3 — numerical capability
 
-- Match Eigen's dense diagonal-pivot LDLT behavior, including pivot
-  selection, permutation conventions, and zero-pivot reporting. Keep any
-  Bunch–Kaufman 2x2 implementation as a separate opt-in algorithm rather than
-  changing the Eigen-compatible default.
+- Match Eigen's dense Bunch–Kaufman LDLT behavior, including 1x1/2x2 pivot
+  selection, permutation conventions, and zero-pivot reporting. Extend the
+  same scalar pivot metadata into sparse block LDLT after validating bounded
+  storage and solve semantics.
 - Add sparse pivoted LDLT with the same documented threshold and failure model.
 - Strengthen QR, SVD, and self-adjoint eigensolver scaling, rank, convergence,
   and tolerance behavior.
@@ -79,7 +87,9 @@ SymForce or any other robotics framework.
 
 - Add a bounded runtime-size matrix (`MatrixBuf<MAX_R, MAX_C, T>`-style) with
   no allocation and an Eigen `MaxRows`/`MaxCols`-like capacity contract.
-- Add fixed-capacity block CSC/CSR for block-sparse robotics systems.
+- Extend fixed-capacity block CSC/CSR with additional block-level ordering
+  strategies and native cross-block pivot handling; local pivoted LDLT and an
+  explicit dense global-pivot fallback are implemented.
 - Add heap-backed dynamic matrices only behind an optional `alloc`/`std` layer.
 
 ### P5 — release and target gates

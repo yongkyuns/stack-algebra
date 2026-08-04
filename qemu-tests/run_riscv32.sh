@@ -29,8 +29,10 @@ RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-T$repo_root/qemu-tests/riscv-memory.x -C 
     --features riscv32 \
     --bin riscv32
 
-qemu-system-riscv32 \
+output=$(qemu-system-riscv32 \
   -M virt \
   -nographic \
   -bios none \
-  -kernel "$binary"
+  -kernel "$binary")
+
+printf '%s\n' "$output" | sh "$repo_root/qemu-tests/check_stack_usage.sh" riscv32

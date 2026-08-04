@@ -24,9 +24,11 @@ RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Tlink.x" cargo build \
     --manifest-path "$manifest" --target-dir "$repo_root/qemu-tests/target" \
     --target "$target" --release --features cortex-m --bin cortex-m
 
-qemu-system-arm \
-    -M mps2-an386 \
-    -nographic \
-    -monitor none \
-    -semihosting-config enable=on,target=native \
-    -kernel "$binary"
+output=$(qemu-system-arm \
+  -M mps2-an386 \
+  -nographic \
+  -monitor none \
+  -semihosting-config enable=on,target=native \
+  -kernel "$binary")
+
+printf '%s\n' "$output" | sh "$repo_root/qemu-tests/check_stack_usage.sh" cortex-m

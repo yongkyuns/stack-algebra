@@ -1,3 +1,4 @@
+use crate::view::MatrixRead;
 use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 
 /// Self-adjoint eigendecomposition of a fixed-size real symmetric matrix.
@@ -10,11 +11,71 @@ pub struct SelfAdjointEigen<const D: usize, T> {
     eigenvectors: Matrix<D, D, T>,
 }
 
+/// Caller-owned scratch storage for self-adjoint eigendecomposition sweeps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelfAdjointEigenWorkspace<const D: usize, T> {
+    work: Matrix<D, D, T>,
+}
+
+impl<const D: usize, T: Real> SelfAdjointEigenWorkspace<D, T> {
+    /// Creates zeroed workspace storage.
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            work: Matrix::zeros(),
+        }
+    }
+}
+
+impl<const D: usize, T: Real> Default for SelfAdjointEigenWorkspace<D, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
     /// Recomputes this eigendecomposition in place with typed failure reporting.
     #[inline]
     pub fn try_compute(&mut self, matrix: &Matrix<D, D, T>) -> Result<(), DecompositionError> {
-        Self::try_factorize_into(matrix, self)
+        let mut workspace = SelfAdjointEigenWorkspace::new();
+        Self::try_factorize(matrix, self, &mut workspace.work)
+    }
+
+    /// Recomputes this eigendecomposition directly from a fixed-size matrix
+    /// view with typed failure reporting.
+    #[inline]
+    pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let mut workspace = SelfAdjointEigenWorkspace::new();
+        *self = Self::try_decompose_view_with_workspace(matrix, &mut workspace)?;
+        Ok(())
+    }
+
+    /// Recomputes this eigendecomposition using caller-owned scratch storage.
+    #[inline]
+    pub fn try_compute_with_workspace(
+        &mut self,
+        matrix: &Matrix<D, D, T>,
+        workspace: &mut SelfAdjointEigenWorkspace<D, T>,
+    ) -> Result<(), DecompositionError> {
+        Self::try_factorize(matrix, self, &mut workspace.work)
+    }
+
+    /// Recomputes this eigendecomposition from a view using caller-owned
+    /// scratch storage.
+    #[inline]
+    pub fn try_compute_view_with_workspace<V>(
+        &mut self,
+        matrix: &V,
+        workspace: &mut SelfAdjointEigenWorkspace<D, T>,
+    ) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        *self = Self::try_decompose_view_with_workspace(matrix, workspace)?;
+        Ok(())
     }
 
     /// Computes the eigendecomposition of a symmetric matrix.
@@ -31,12 +92,65 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
     /// explicitly.
     #[inline]
     pub fn try_decompose(matrix: &Matrix<D, D, T>) -> Result<Self, DecompositionError> {
+        let mut output = Self {
+            eigenvalues: Vector::<D, T>::zeros(),
+            eigenvectors: Matrix::<D, D, T>::eye(),
+        };
+        let mut workspace = SelfAdjointEigenWorkspace::new();
+        Self::try_factorize(matrix, &mut output, &mut workspace.work)?;
+        Ok(output)
+    }
+
+    /// Computes an eigendecomposition directly from a fixed-size matrix view
+    /// without materializing a separate owning input matrix.
+    #[inline]
+    pub fn try_decompose_view<V>(matrix: &V) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let mut workspace = SelfAdjointEigenWorkspace::new();
+        Self::try_decompose_view_with_workspace(matrix, &mut workspace)
+    }
+
+    /// Computes an eigendecomposition from a view using caller-owned scratch.
+    #[inline]
+    pub fn try_decompose_view_with_workspace<V>(
+        matrix: &V,
+        workspace: &mut SelfAdjointEigenWorkspace<D, T>,
+    ) -> Result<Self, DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        let mut output = Self {
+            eigenvalues: Vector::<D, T>::zeros(),
+            eigenvectors: Matrix::<D, D, T>::eye(),
+        };
+        Self::try_factorize(matrix, &mut output, &mut workspace.work)?;
+        Ok(output)
+    }
+
+    #[inline]
+    fn try_factorize<V>(
+        matrix: &V,
+        output: &mut Self,
+        work: &mut Matrix<D, D, T>,
+    ) -> Result<(), DecompositionError>
+    where
+        V: MatrixRead<D, D, T>,
+    {
+        for column in 0..D {
+            for row in 0..D {
+                work[(row, column)] = *matrix
+                    .get(row, column)
+                    .ok_or(DecompositionError::InvalidView)?;
+            }
+        }
         let dimension = T::from(D).unwrap_or(T::one());
         let tolerance = T::epsilon() * dimension;
         for row in 0..D {
             for column in 0..row {
-                let left = matrix[(row, column)];
-                let right = matrix[(column, row)];
+                let left = work[(row, column)];
+                let right = work[(column, row)];
                 if !left.is_finite() || !right.is_finite() {
                     return Err(DecompositionError::NonFinite);
                 }
@@ -45,13 +159,13 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
                     return Err(DecompositionError::NotSymmetric);
                 }
             }
-            if !matrix[(row, row)].is_finite() {
+            if !work[(row, row)].is_finite() {
                 return Err(DecompositionError::NonFinite);
             }
         }
 
-        let mut work = *matrix;
-        let mut eigenvectors = Matrix::<D, D, T>::eye();
+        output.eigenvectors = Matrix::<D, D, T>::eye();
+        let eigenvectors = &mut output.eigenvectors;
         const MAX_SWEEPS: usize = 64;
         let mut converged = false;
 
@@ -136,7 +250,7 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
             return Err(DecompositionError::NoConvergence);
         }
 
-        let mut eigenvalues = Vector::<D, T>::zeros();
+        let eigenvalues = &mut output.eigenvalues;
         for index in 0..D {
             eigenvalues[index] = work[(index, index)];
             if !eigenvalues[index].is_finite() {
@@ -156,19 +270,6 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
             }
         }
 
-        Ok(Self {
-            eigenvalues,
-            eigenvectors,
-        })
-    }
-
-    /// Computes an eigendecomposition into caller-provided factor storage.
-    #[inline]
-    fn try_factorize_into(
-        matrix: &Matrix<D, D, T>,
-        output: &mut Self,
-    ) -> Result<(), DecompositionError> {
-        *output = Self::try_decompose(matrix)?;
         Ok(())
     }
 
@@ -220,7 +321,7 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{matrix, DecompositionError, Matrix};
+    use crate::{matrix, DecompositionError, Map, Matrix, SelfAdjointEigen};
 
     #[test]
     fn reconstructs_symmetric_matrix() {
@@ -267,6 +368,48 @@ mod tests {
             epsilon = 1e-10,
             max_relative = 1e-10
         );
+    }
+
+    #[test]
+    fn reuses_caller_provided_eigen_workspace() {
+        let first = matrix![4.0_f64, 1.0; 1.0, 3.0];
+        let second = matrix![2.0_f64, -1.0; -1.0, 5.0];
+        let mut factor = first
+            .self_adjoint_eigen()
+            .expect("first matrix is symmetric");
+        let mut workspace = super::SelfAdjointEigenWorkspace::new();
+        factor
+            .try_compute_with_workspace(&second, &mut workspace)
+            .expect("second matrix is symmetric");
+        assert_relative_eq!(
+            factor.reconstruct(),
+            second,
+            epsilon = 1e-10,
+            max_relative = 1e-10
+        );
+    }
+
+    #[test]
+    fn decomposes_map_and_block_views() {
+        let matrix = matrix![
+            4.0_f64, 1.0, 0.0;
+            1.0, 3.0, 1.0;
+            0.0, 1.0, 2.0;
+        ];
+        let mapped = Map::<3, 3, f64>::from_slice(matrix.as_slice()).unwrap();
+        let mapped_factor = SelfAdjointEigen::try_decompose_view(&mapped).unwrap();
+        assert_relative_eq!(mapped_factor.reconstruct(), matrix, max_relative = 1e-10);
+
+        let mut storage = Matrix::<4, 4, f64>::zeros();
+        for row in 0..3 {
+            for column in 0..3 {
+                storage[(row + 1, column + 1)] = matrix[(row, column)];
+            }
+        }
+        let block = storage.block::<3, 3>(1, 1).unwrap();
+        let mut reused = mapped_factor;
+        reused.try_compute_view(&block).unwrap();
+        assert_relative_eq!(reused.reconstruct(), matrix, max_relative = 1e-10);
     }
 
     #[test]

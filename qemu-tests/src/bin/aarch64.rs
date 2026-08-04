@@ -13,6 +13,15 @@ global_asm!(
     "_start:",
     "ldr x0, =__stack_top",
     "mov sp, x0",
+    "ldr x2, =__stack_bottom",
+    "mov w3, #0xcccc",
+    "movk w3, #0xcccc, lsl #16",
+    "1:",
+    "cmp x2, x0",
+    "b.hs 2f",
+    "str w3, [x2], #4",
+    "b 1b",
+    "2:",
     "mrs x1, cpacr_el1",
     "orr x1, x1, #(3 << 20)",
     "msr cpacr_el1, x1",
@@ -69,7 +78,14 @@ pub extern "C" fn main() -> ! {
         .solve(&pivoted_rhs);
     assert_close(&(pivoted_matrix * pivoted_solution), &pivoted_rhs, 1e-5);
 
-    write_str("stack-algebra qemu aarch64: PASS\n");
+    let stack_used = stack_watermark_used();
+    let stack_budget = stack_capacity();
+    assert!(stack_used <= stack_budget);
+    write_str("stack-algebra qemu aarch64: PASS stack_used=");
+    write_usize(stack_used);
+    write_str(" stack_budget=");
+    write_usize(stack_budget);
+    write_str("\n");
     loop {
         core::hint::spin_loop();
     }
@@ -84,6 +100,58 @@ fn write_str(message: &str) {
             core::ptr::write_volatile(UART as *mut u32, byte as u32);
         }
     }
+}
+
+fn write_byte(byte: u8) {
+    const UART: usize = 0x0900_0000;
+    const UART_FLAG: usize = UART + 0x18;
+    unsafe {
+        while core::ptr::read_volatile(UART_FLAG as *const u32) & (1 << 5) != 0 {}
+        core::ptr::write_volatile(UART as *mut u32, byte as u32);
+    }
+}
+
+fn write_usize(mut value: usize) {
+    let mut digits = [0u8; 20];
+    let mut length = 0;
+    if value == 0 {
+        write_byte(b'0');
+        return;
+    }
+    while value != 0 {
+        digits[length] = b'0' + (value % 10) as u8;
+        length += 1;
+        value /= 10;
+    }
+    while length != 0 {
+        length -= 1;
+        write_byte(digits[length]);
+    }
+}
+
+fn stack_capacity() -> usize {
+    unsafe { (&__stack_top as *const u8 as usize) - (&__stack_bottom as *const u8 as usize) }
+}
+
+fn stack_watermark_used() -> usize {
+    let stack_bottom = unsafe { &__stack_bottom as *const u8 as usize };
+    let stack_top = unsafe { &__stack_top as *const u8 as usize };
+    let mut first_used = stack_top;
+    let mut address = stack_bottom;
+    while address + core::mem::size_of::<u32>() <= stack_top {
+        let value = unsafe { core::ptr::read_volatile(address as *const u32) };
+        if value != 0xCCCC_CCCC {
+            first_used = address;
+            break;
+        }
+        address += core::mem::size_of::<u32>();
+    }
+    stack_top - first_used
+}
+
+unsafe extern "C" {
+    static __stack_bottom: u8;
+    static __stack_top: u8;
 }
 
 fn assert_close<const M: usize, const N: usize>(

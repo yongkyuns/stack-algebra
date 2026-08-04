@@ -19,6 +19,11 @@ applications in rust. This means several things:
 The implementation roadmap and release gates are tracked in
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
+For a consolidated capability matrix, see
+[`docs/FEATURES.md`](docs/FEATURES.md). For copy-ready API patterns, see
+[`docs/API_USAGE.md`](docs/API_USAGE.md); robotics-oriented storage and
+algorithm recipes are in [`docs/USE_CASES.md`](docs/USE_CASES.md).
+
 Implementing numerical algorithms in rust can be made much more productive and ergonomic
 if simple abstractions and necessary algebra routines are available. This library is
 a growing collection of addressing those needs. It is heavily based on 
@@ -235,10 +240,12 @@ let vector64 = vector.cast::<f64>();
   let factor = matrix.ldlt_no_pivot().expect("matrix is nonsingular");
   ```
 
-The dense LDLT path stores a diagonal `D` and supports 1x1 diagonal pivots,
-matching Eigen's standard `LDLT`. It does not implement LAPACK-style
-Bunch–Kaufman 2x2 pivot blocks; inputs that require one return a zero-pivot
-error through `try_ldlt()`.
+The dense LDLT path stores compact 1x1 or 2x2 `D` pivot blocks using
+Eigen-compatible Bunch–Kaufman selection. `pivot_blocks()` reports the block
+layout (`1`, `2`, `3`), while `diagonal_matrix()` reconstructs the full `D`.
+Native block sparse LDLT retains block ordering plus local Bunch–Kaufman
+metadata inside each dense diagonal block. Use `try_dense_ldlt::<N>()` on a
+block matrix when a global scalar pivot may cross block boundaries.
 
 - `.householder_qr()` for full-rank square or overdetermined least-squares systems
   ```rust
@@ -281,6 +288,9 @@ LDLT also retain `solve_in_place` when the right-hand side itself can be reused.
 All factor types support Eigen-style recomputation: use `try_compute` for
 fallible factorizations and `compute` for infallible ones. Factor storage is
 owned by the factor object and reused by these methods.
+Self-adjoint eigendecomposition also accepts a reusable
+`SelfAdjointEigenWorkspace` through `try_compute_with_workspace` when callers
+need explicit stack/RAM control.
 
 - `.self_adjoint_eigen()` for fixed-size symmetric eigendecomposition
   ```rust
@@ -323,17 +333,24 @@ owned by the factor object and reused by these methods.
   buffers, with checked construction and mutable indexing. `StridedMap` and
   `StridedMapMut` cover padded or row-major buffers without repacking.
   `MatrixRead` and `MatrixWrite` provide a shared compile-time-dimension view
-  interface, and `Matrix::from_view` copies any compatible view into owned
-  storage.
+  interface, and all dense decompositions expose `try_decompose_view` plus
+  `try_compute_view` variants for zero-copy factorization from compatible views.
+  `Matrix::from_view` remains available when an owned snapshot is required.
 
 - `MatrixBuf<MAX_ROWS, MAX_COLS, T>` for bounded runtime dimensions without
   heap allocation. It reserves a compile-time capacity, tracks active rows and
   columns, supports checked resizing and column access, and can round-trip to
-  fixed-size `Matrix` values.
+  fixed-size `Matrix` values. `Matrix`, `MatrixBuf`, sparse patterns/factors,
+  and block sparse matrices expose `storage_bytes()` for compile-time RAM
+  budgeting on embedded targets.
 
-- `StaticBlockCscMatrix` for fixed-capacity block CSC storage. Block patterns
-  are validated once, dense blocks remain stack-owned, and block matvec writes
-  into caller-provided scalar slices without allocation.
+- `StaticBlockCscMatrix` and `StaticBlockCsrMatrix` for fixed-capacity block
+  sparse storage. Block patterns are validated once, dense blocks remain
+  stack-owned, and block matvec writes into caller-provided scalar slices
+  without allocation. Block CSC supports native block Cholesky plus a bounded
+  scalar-CSC expansion reference path. Native block LDLT supports compact
+  local Bunch–Kaufman diagonal blocks, fixed block orderings, and analysis-time
+  block diagonal pivoting.
 
 - `StaticCscPattern` and `StaticCscMatrix` for allocation-free, bounded sparse
   CSC storage. Symbolic structure can be validated once and numeric values
@@ -382,6 +399,7 @@ performance comparisons are opt-in and require Eigen headers discoverable via
 cargo test --features eigen-compare
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench robotics
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench sparse
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench dense_solvers
 # Focus on decomposition cases:
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench robotics -- 'llt|ldlt'
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 "Sparse LLT"
@@ -420,22 +438,36 @@ systems using the same static column-major inputs as Eigen.
 Sparse LLT and no-pivot LDLT benchmarks use lower-triangular tridiagonal,
 band-2, and star patterns at representative fixed sizes in both `f32` and `f64`; analysis,
 numeric refactorization with a reused symbolic pattern, and solve are reported
-separately for stack-algebra, faer, and Eigen. Fixed-capacity sparse Cholesky
+separately for stack-algebra and faer. Native Eigen comparison covers the dense
+benchmark suite plus sparse LLT/LDLT when `eigen-compare` is enabled. Fixed-capacity sparse Cholesky
 also exposes deterministic minimum-degree ordering for reducing fill-in before
 reusing a symbolic pattern. Stack-algebra factor benchmarks reuse the numeric
 factor buffer, matching Eigen's in-place `factorize` model.
 Repeated ordered refactorization can validate and prepare the ordered CSC
-matrix once with `prepare_ordered`, then use `factor_ordered_into` for numeric
-updates without repeating permutation or structural checks.
+matrix once with `prepare_ordered`, then use `recompute_ordered` for numeric
+updates without repeating permutation or structural checks. For natural CSC
+coordinates, call `recompute` on the existing numeric factor.
 Sparse LDLT provides a fast no-pivot path plus analysis-time 1x1 diagonal
-pivoting; matrices requiring 2x2 pivot blocks are reported as zero-pivot
-failures.
+pivoting; matrices requiring scalar 2x2 pivot blocks are reported as zero-pivot
+failures. Dense fixed-size LDLT supports Bunch–Kaufman 1x1/2x2 blocks.
+The block-sparse benchmark also reports native local-pivot LDLT, the global
+`try_dense_ldlt` fallback, faer, and optional Eigen solve baselines for a
+cross-block indefinite 2x2 case.
+The dense-solver benchmark adds 8x8, 16x16, and 32x32 SPD LDLT factor-and-solve
+and reused-solve measurements for stack-algebra and faer, with an optional
+Eigen baseline. Matrix construction, factor setup, and faer/Eigen allocation are
+outside reused-factor and reused-solve timing.
+The same benchmark reports reusable stack LDLT with and without Bunch–Kaufman
+pivoting; this separates the robust pivot-selection/update overhead from the
+underlying no-pivot factorization before any architecture-specific tuning.
 
 ## QEMU target validation
 
 The standalone Cortex-M harness builds the library for
 `thumbv7em-none-eabihf` and runs deterministic multiplication, LU-solve, and
-pivoted/no-pivot LDLT checks under QEMU's MPS2 Cortex-M4 machine:
+pivoted/no-pivot LDLT checks under QEMU's MPS2 Cortex-M4 machine. The harness
+also reports a stack watermark from `cortex-m-rt`'s painted stack. The AArch64
+and RISC-V harnesses report the same bounded 64 KiB watermark:
 
 ```sh
 qemu-tests/run_cortex_m.sh
@@ -457,6 +489,10 @@ packet kernels on QEMU's Cortex-A53 model:
 rustup target add aarch64-unknown-none
 qemu-tests/run_aarch64.sh
 ```
+
+The scripts enforce the linker-provided stack budget. Set
+`STACK_USAGE_LIMIT_BYTES` to apply a stricter regression threshold; CI uses an
+8 KiB limit for all three targets.
 
 ## License
 

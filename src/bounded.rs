@@ -31,6 +31,12 @@ where
         })
     }
 
+    /// Returns the exact inline storage footprint of this bounded buffer.
+    #[inline]
+    pub const fn storage_bytes() -> usize {
+        core::mem::size_of::<Self>()
+    }
+
     /// Creates a bounded matrix from an owning fixed-size matrix.
     #[inline]
     pub fn from_matrix<const M: usize, const N: usize>(matrix: &Matrix<M, N, T>) -> Option<Self> {
@@ -217,5 +223,15 @@ mod tests {
             from_values.to_matrix::<2, 2>(),
             Some(Matrix::from_rows([[1, 2], [3, 4]]))
         );
+    }
+
+    #[test]
+    fn reports_inline_storage_footprint() {
+        assert_eq!(
+            MatrixBuf::<4, 3, i32>::storage_bytes(),
+            core::mem::size_of::<MatrixBuf<4, 3, i32>>()
+        );
+        const FOOTPRINT: usize = MatrixBuf::<4, 3, i32>::storage_bytes();
+        assert!(FOOTPRINT >= 4 * 3 * core::mem::size_of::<i32>());
     }
 }

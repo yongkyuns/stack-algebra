@@ -52,6 +52,16 @@ fn matvec_handles_empty_columns_and_repeated_value_updates() {
 }
 
 #[test]
+fn sparse_storage_footprints_are_compile_time_constants() {
+    type MatrixType = StaticCscMatrix<3, 3, 6, f64>;
+    type Pattern = StaticCscPattern<3, 3, 6>;
+    const MATRIX_BYTES: usize = MatrixType::storage_bytes();
+    const PATTERN_BYTES: usize = Pattern::storage_bytes();
+    assert_eq!(MATRIX_BYTES, core::mem::size_of::<MatrixType>());
+    assert_eq!(PATTERN_BYTES, core::mem::size_of::<Pattern>());
+}
+
+#[test]
 fn malformed_patterns_are_rejected_without_partial_construction() {
     assert_eq!(
         Matrix::from_pattern(&[1.0], &[], &[0, 1, 1, 1]),

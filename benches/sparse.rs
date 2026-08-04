@@ -1,5 +1,8 @@
 use std::hint::black_box;
 
+#[cfg(feature = "eigen-compare")]
+use std::{ffi::c_void, marker::PhantomData};
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use faer::prelude::Solve;
 use faer::sparse::linalg::solvers::{Llt, SymbolicLlt};
@@ -15,6 +18,326 @@ use stack_algebra::{
 const MAX_NNZ: usize = 128;
 const MAX_STAR_NNZ: usize = 1024;
 const BATCH_SIZE: usize = 64;
+
+#[cfg(feature = "eigen-compare")]
+trait EigenSparseScalar: Real {
+    unsafe fn create(
+        row_indices: *const usize,
+        column_starts: *const usize,
+        values: *const Self,
+        dimension: usize,
+        nonzeros: usize,
+    ) -> *mut c_void;
+    unsafe fn analyze(context: *mut c_void) -> i32;
+    unsafe fn factorize(context: *mut c_void) -> i32;
+    unsafe fn solve(
+        context: *mut c_void,
+        rhs: *const Self,
+        columns: usize,
+        output: *mut Self,
+    ) -> i32;
+    unsafe fn destroy(context: *mut c_void);
+}
+
+#[cfg(feature = "eigen-compare")]
+macro_rules! impl_eigen_sparse_scalar {
+    ($scalar:ty, $create:ident, $analyze:ident, $factorize:ident, $solve:ident, $destroy:ident) => {
+        unsafe extern "C" {
+            fn $create(
+                row_indices: *const usize,
+                column_starts: *const usize,
+                values: *const $scalar,
+                dimension: usize,
+                nonzeros: usize,
+            ) -> *mut c_void;
+            fn $analyze(context: *mut c_void) -> i32;
+            fn $factorize(context: *mut c_void) -> i32;
+            fn $solve(
+                context: *mut c_void,
+                rhs: *const $scalar,
+                columns: usize,
+                output: *mut $scalar,
+            ) -> i32;
+            fn $destroy(context: *mut c_void);
+        }
+
+        impl EigenSparseScalar for $scalar {
+            unsafe fn create(
+                row_indices: *const usize,
+                column_starts: *const usize,
+                values: *const Self,
+                dimension: usize,
+                nonzeros: usize,
+            ) -> *mut c_void {
+                $create(row_indices, column_starts, values, dimension, nonzeros)
+            }
+
+            unsafe fn analyze(context: *mut c_void) -> i32 {
+                $analyze(context)
+            }
+
+            unsafe fn factorize(context: *mut c_void) -> i32 {
+                $factorize(context)
+            }
+
+            unsafe fn solve(
+                context: *mut c_void,
+                rhs: *const Self,
+                columns: usize,
+                output: *mut Self,
+            ) -> i32 {
+                $solve(context, rhs, columns, output)
+            }
+
+            unsafe fn destroy(context: *mut c_void) {
+                $destroy(context)
+            }
+        }
+    };
+}
+
+#[cfg(feature = "eigen-compare")]
+impl_eigen_sparse_scalar!(
+    f32,
+    sa_eigen_sparse_llt_create_f32,
+    sa_eigen_sparse_llt_analyze_f32,
+    sa_eigen_sparse_llt_factorize_f32,
+    sa_eigen_sparse_llt_solve_f32,
+    sa_eigen_sparse_llt_destroy_f32
+);
+#[cfg(feature = "eigen-compare")]
+impl_eigen_sparse_scalar!(
+    f64,
+    sa_eigen_sparse_llt_create_f64,
+    sa_eigen_sparse_llt_analyze_f64,
+    sa_eigen_sparse_llt_factorize_f64,
+    sa_eigen_sparse_llt_solve_f64,
+    sa_eigen_sparse_llt_destroy_f64
+);
+
+#[cfg(feature = "eigen-compare")]
+struct EigenSparseLlt<T: EigenSparseScalar> {
+    context: *mut c_void,
+    _scalar: PhantomData<T>,
+}
+
+#[cfg(feature = "eigen-compare")]
+impl<T: EigenSparseScalar> EigenSparseLlt<T> {
+    fn new<const N: usize, const CAPACITY: usize>(
+        matrix: &StaticCscMatrix<N, N, CAPACITY, T>,
+    ) -> Self {
+        let context = unsafe {
+            T::create(
+                matrix.row_indices().as_ptr(),
+                matrix.column_starts().as_ptr(),
+                matrix.values().as_ptr(),
+                N,
+                matrix.nnz(),
+            )
+        };
+        assert!(
+            !context.is_null(),
+            "Eigen sparse LLT context allocation failed"
+        );
+        Self {
+            context,
+            _scalar: PhantomData,
+        }
+    }
+
+    fn analyze(&self) {
+        assert_eq!(unsafe { T::analyze(self.context) }, 1);
+    }
+
+    fn factorize(&self) {
+        assert_eq!(unsafe { T::factorize(self.context) }, 1);
+    }
+
+    fn solve<const N: usize, const P: usize>(
+        &self,
+        rhs: &Matrix<N, P, T>,
+        output: &mut Matrix<N, P, T>,
+    ) {
+        assert_eq!(
+            unsafe {
+                T::solve(
+                    self.context,
+                    rhs.as_slice().as_ptr(),
+                    P,
+                    output.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+    }
+}
+
+#[cfg(feature = "eigen-compare")]
+impl<T: EigenSparseScalar> Drop for EigenSparseLlt<T> {
+    fn drop(&mut self) {
+        unsafe { T::destroy(self.context) }
+    }
+}
+
+#[cfg(feature = "eigen-compare")]
+trait EigenSparseLdltScalar: Real {
+    unsafe fn create(
+        row_indices: *const usize,
+        column_starts: *const usize,
+        values: *const Self,
+        dimension: usize,
+        nonzeros: usize,
+    ) -> *mut c_void;
+    unsafe fn analyze(context: *mut c_void) -> i32;
+    unsafe fn factorize(context: *mut c_void) -> i32;
+    unsafe fn solve(
+        context: *mut c_void,
+        rhs: *const Self,
+        columns: usize,
+        output: *mut Self,
+    ) -> i32;
+    unsafe fn destroy(context: *mut c_void);
+}
+
+#[cfg(feature = "eigen-compare")]
+macro_rules! impl_eigen_sparse_ldlt_scalar {
+    ($scalar:ty, $create:ident, $analyze:ident, $factorize:ident, $solve:ident, $destroy:ident) => {
+        unsafe extern "C" {
+            fn $create(
+                row_indices: *const usize,
+                column_starts: *const usize,
+                values: *const $scalar,
+                dimension: usize,
+                nonzeros: usize,
+            ) -> *mut c_void;
+            fn $analyze(context: *mut c_void) -> i32;
+            fn $factorize(context: *mut c_void) -> i32;
+            fn $solve(
+                context: *mut c_void,
+                rhs: *const $scalar,
+                columns: usize,
+                output: *mut $scalar,
+            ) -> i32;
+            fn $destroy(context: *mut c_void);
+        }
+
+        impl EigenSparseLdltScalar for $scalar {
+            unsafe fn create(
+                row_indices: *const usize,
+                column_starts: *const usize,
+                values: *const Self,
+                dimension: usize,
+                nonzeros: usize,
+            ) -> *mut c_void {
+                $create(row_indices, column_starts, values, dimension, nonzeros)
+            }
+
+            unsafe fn analyze(context: *mut c_void) -> i32 {
+                $analyze(context)
+            }
+
+            unsafe fn factorize(context: *mut c_void) -> i32 {
+                $factorize(context)
+            }
+
+            unsafe fn solve(
+                context: *mut c_void,
+                rhs: *const Self,
+                columns: usize,
+                output: *mut Self,
+            ) -> i32 {
+                $solve(context, rhs, columns, output)
+            }
+
+            unsafe fn destroy(context: *mut c_void) {
+                $destroy(context)
+            }
+        }
+    };
+}
+
+#[cfg(feature = "eigen-compare")]
+impl_eigen_sparse_ldlt_scalar!(
+    f32,
+    sa_eigen_sparse_ldlt_create_f32,
+    sa_eigen_sparse_ldlt_analyze_f32,
+    sa_eigen_sparse_ldlt_factorize_f32,
+    sa_eigen_sparse_ldlt_solve_f32,
+    sa_eigen_sparse_ldlt_destroy_f32
+);
+#[cfg(feature = "eigen-compare")]
+impl_eigen_sparse_ldlt_scalar!(
+    f64,
+    sa_eigen_sparse_ldlt_create_f64,
+    sa_eigen_sparse_ldlt_analyze_f64,
+    sa_eigen_sparse_ldlt_factorize_f64,
+    sa_eigen_sparse_ldlt_solve_f64,
+    sa_eigen_sparse_ldlt_destroy_f64
+);
+
+#[cfg(feature = "eigen-compare")]
+struct EigenSparseLdlt<T: EigenSparseLdltScalar> {
+    context: *mut c_void,
+    _scalar: PhantomData<T>,
+}
+
+#[cfg(feature = "eigen-compare")]
+impl<T: EigenSparseLdltScalar> EigenSparseLdlt<T> {
+    fn new<const N: usize, const CAPACITY: usize>(
+        matrix: &StaticCscMatrix<N, N, CAPACITY, T>,
+    ) -> Self {
+        let context = unsafe {
+            T::create(
+                matrix.row_indices().as_ptr(),
+                matrix.column_starts().as_ptr(),
+                matrix.values().as_ptr(),
+                N,
+                matrix.nnz(),
+            )
+        };
+        assert!(
+            !context.is_null(),
+            "Eigen sparse LDLT context allocation failed"
+        );
+        Self {
+            context,
+            _scalar: PhantomData,
+        }
+    }
+
+    fn analyze(&self) {
+        assert_eq!(unsafe { T::analyze(self.context) }, 1);
+    }
+
+    fn factorize(&self) {
+        assert_eq!(unsafe { T::factorize(self.context) }, 1);
+    }
+
+    fn solve<const N: usize, const P: usize>(
+        &self,
+        rhs: &Matrix<N, P, T>,
+        output: &mut Matrix<N, P, T>,
+    ) {
+        assert_eq!(
+            unsafe {
+                T::solve(
+                    self.context,
+                    rhs.as_slice().as_ptr(),
+                    P,
+                    output.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+    }
+}
+
+#[cfg(feature = "eigen-compare")]
+impl<T: EigenSparseLdltScalar> Drop for EigenSparseLdlt<T> {
+    fn drop(&mut self) {
+        unsafe { T::destroy(self.context) }
+    }
+}
 
 fn cast<T: FromPrimitive>(value: f64) -> T {
     T::from_f64(value).unwrap()
@@ -168,9 +491,7 @@ fn bench_stack_matrix<const N: usize, const CAPACITY: usize, T: Real + FromPrimi
         |bench, _| {
             bench.iter(|| {
                 for _ in 0..BATCH_SIZE {
-                    symbolic
-                        .factor_into(black_box(&matrix), black_box(&mut factor))
-                        .unwrap();
+                    factor = symbolic.factor(black_box(&matrix)).unwrap();
                 }
                 black_box(&factor);
             });
@@ -179,9 +500,7 @@ fn bench_stack_matrix<const N: usize, const CAPACITY: usize, T: Real + FromPrimi
     group.bench_with_input(BenchmarkId::new("stack-factor-reuse", N), &N, |bench, _| {
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
-                symbolic
-                    .factor_reuse_into(black_box(&matrix), black_box(&mut factor))
-                    .unwrap();
+                factor.recompute(black_box(&matrix)).unwrap();
             }
             black_box(&factor);
         });
@@ -227,9 +546,7 @@ fn bench_stack_ldlt<const N: usize, T: Real + FromPrimitive>(
     group.bench_with_input(BenchmarkId::new("stack-factor-reuse", N), &N, |bench, _| {
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
-                symbolic
-                    .factor_ldlt_reuse_into(black_box(&matrix), black_box(&mut factor))
-                    .unwrap();
+                factor.recompute(black_box(&matrix)).unwrap();
             }
             black_box(&factor);
         });
@@ -238,6 +555,43 @@ fn bench_stack_ldlt<const N: usize, T: Real + FromPrimitive>(
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
                 factor.solve_into(black_box(&rhs), black_box(&mut solution));
+            }
+            black_box(&solution);
+        });
+    });
+    group.finish();
+}
+
+#[cfg(feature = "eigen-compare")]
+fn bench_eigen_ldlt<const N: usize, T: EigenSparseLdltScalar + FromPrimitive>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+) {
+    let matrix = stack_indefinite::<N, T>();
+    let factor = EigenSparseLdlt::new(&matrix);
+    factor.analyze();
+    factor.factorize();
+    let rhs = stack_rhs::<N, T>();
+    let mut solution = Matrix::<N, 1, T>::zeros();
+    let mut group = criterion.benchmark_group(format!("sparse-ldlt/eigen/{scalar_name}/tridiag"));
+    group.bench_with_input(BenchmarkId::new("eigen-analyze", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.analyze();
+            }
+        });
+    });
+    group.bench_with_input(BenchmarkId::new("eigen-factor-reuse", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.factorize();
+            }
+        });
+    });
+    group.bench_with_input(BenchmarkId::new("eigen-solve", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.solve(&rhs, &mut solution);
             }
             black_box(&solution);
         });
@@ -300,6 +654,51 @@ fn bench_faer<const N: usize, T: ComplexField + FromPrimitive>(
     bench_faer_matrix::<N, T>(criterion, scalar_name, "tridiag", faer_matrix::<N, T>());
 }
 
+#[cfg(feature = "eigen-compare")]
+fn bench_eigen_matrix<const N: usize, T: EigenSparseScalar + FromPrimitive>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+    matrix: StaticCscMatrix<N, N, MAX_NNZ, T>,
+) {
+    let factor = EigenSparseLlt::new(&matrix);
+    factor.analyze();
+    factor.factorize();
+    let rhs = stack_rhs::<N, T>();
+    let mut solution = Matrix::<N, 1, T>::zeros();
+    let mut group = criterion.benchmark_group(format!("sparse-llt/eigen/{scalar_name}/tridiag"));
+    group.bench_with_input(BenchmarkId::new("eigen-analyze", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.analyze();
+            }
+        });
+    });
+    group.bench_with_input(BenchmarkId::new("eigen-factor-reuse", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.factorize();
+            }
+        });
+    });
+    group.bench_with_input(BenchmarkId::new("eigen-solve", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.solve(&rhs, &mut solution);
+            }
+            black_box(&solution);
+        });
+    });
+    group.finish();
+}
+
+#[cfg(feature = "eigen-compare")]
+fn bench_eigen<const N: usize, T: EigenSparseScalar + FromPrimitive>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+) {
+    bench_eigen_matrix(criterion, scalar_name, stack_matrix::<N, T>());
+}
+
 fn bench_pattern<const N: usize, T: Real + ComplexField + FromPrimitive>(
     criterion: &mut Criterion,
     scalar_name: &str,
@@ -339,9 +738,7 @@ fn bench_stack_ordered_star<const N: usize, T: Real + FromPrimitive>(
         |bench, _| {
             bench.iter(|| {
                 for _ in 0..BATCH_SIZE {
-                    symbolic
-                        .factor_into(black_box(&matrix), black_box(&mut factor_with_permutation))
-                        .unwrap();
+                    factor_with_permutation = symbolic.factor(black_box(&matrix)).unwrap();
                 }
                 black_box(&factor_with_permutation);
             });
@@ -353,11 +750,8 @@ fn bench_stack_ordered_star<const N: usize, T: Real + FromPrimitive>(
         |bench, _| {
             bench.iter(|| {
                 for _ in 0..BATCH_SIZE {
-                    symbolic
-                        .factor_reuse_into(
-                            black_box(&matrix),
-                            black_box(&mut factor_with_permutation),
-                        )
+                    factor_with_permutation
+                        .recompute(black_box(&matrix))
                         .unwrap();
                 }
                 black_box(&factor_with_permutation);
@@ -370,9 +764,7 @@ fn bench_stack_ordered_star<const N: usize, T: Real + FromPrimitive>(
         |bench, _| {
             bench.iter(|| {
                 for _ in 0..BATCH_SIZE {
-                    symbolic
-                        .factor_ordered_into(black_box(&ordered), black_box(&mut factor))
-                        .unwrap();
+                    factor.recompute_ordered(black_box(&ordered)).unwrap();
                 }
                 black_box(&factor);
             });
@@ -397,10 +789,18 @@ fn bench_all(criterion: &mut Criterion) {
             bench_stack::<15, f32>(criterion, scalar_name);
             bench_stack::<32, f32>(criterion, scalar_name);
             bench_stack_ldlt::<15, f32>(criterion, scalar_name);
+            #[cfg(feature = "eigen-compare")]
+            {
+                bench_eigen_ldlt::<15, f32>(criterion, scalar_name);
+            }
             bench_faer::<3, f32>(criterion, scalar_name);
             bench_faer::<6, f32>(criterion, scalar_name);
             bench_faer::<15, f32>(criterion, scalar_name);
             bench_faer::<32, f32>(criterion, scalar_name);
+            #[cfg(feature = "eigen-compare")]
+            {
+                bench_eigen::<15, f32>(criterion, scalar_name);
+            }
             bench_pattern::<15, f32>(criterion, scalar_name);
         } else {
             bench_stack::<3, f64>(criterion, scalar_name);
@@ -408,10 +808,18 @@ fn bench_all(criterion: &mut Criterion) {
             bench_stack::<15, f64>(criterion, scalar_name);
             bench_stack::<32, f64>(criterion, scalar_name);
             bench_stack_ldlt::<15, f64>(criterion, scalar_name);
+            #[cfg(feature = "eigen-compare")]
+            {
+                bench_eigen_ldlt::<15, f64>(criterion, scalar_name);
+            }
             bench_faer::<3, f64>(criterion, scalar_name);
             bench_faer::<6, f64>(criterion, scalar_name);
             bench_faer::<15, f64>(criterion, scalar_name);
             bench_faer::<32, f64>(criterion, scalar_name);
+            #[cfg(feature = "eigen-compare")]
+            {
+                bench_eigen::<15, f64>(criterion, scalar_name);
+            }
             bench_pattern::<15, f64>(criterion, scalar_name);
         }
     }
