@@ -1,4 +1,4 @@
-use crate::{Matrix, MatrixScalar, Real, Vector};
+use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 
 #[inline]
 fn column_norm<const M: usize, const N: usize, T: Real>(
@@ -45,17 +45,33 @@ pub struct Svd<const M: usize, const N: usize, T> {
 }
 
 impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
+    /// Recomputes this SVD in place with typed failure reporting.
+    #[inline]
+    pub fn try_compute(&mut self, matrix: &Matrix<M, N, T>) -> Result<(), DecompositionError> {
+        Self::try_factorize_into(matrix, self)
+    }
+
     /// Computes a fixed-size SVD for any matrix shape.
     ///
     /// For wide matrices (`M < N`), the final `N - M` singular values and
     /// corresponding columns of `U` are zero-padded.
     #[inline]
     pub fn decompose(matrix: &Matrix<M, N, T>) -> Option<Self> {
+        Self::try_decompose(matrix).ok()
+    }
+
+    /// Computes a fixed-size SVD and reports numerical failures explicitly.
+    #[inline]
+    pub fn try_decompose(matrix: &Matrix<M, N, T>) -> Result<Self, DecompositionError> {
+        if matrix.iter().any(|value| !value.is_finite()) {
+            return Err(DecompositionError::NonFinite);
+        }
         let mut u = *matrix;
         let mut v = Matrix::<N, N, T>::eye();
         let dimension = T::from(core::cmp::max(M, N)).unwrap_or(T::one());
         let tolerance = T::epsilon() * dimension;
         const MAX_SWEEPS: usize = 32;
+        let mut converged = false;
 
         for _ in 0..MAX_SWEEPS {
             let mut changed = false;
@@ -71,8 +87,14 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
                         aqq = aqq + right * right;
                         apq = apq + left * right;
                     }
+                    if !app.is_finite() || !aqq.is_finite() || !apq.is_finite() {
+                        return Err(DecompositionError::NonFinite);
+                    }
                     let scale = app.sqrt() * aqq.sqrt();
-                    if !apq.is_finite() || scale == T::zero() || apq.abs() <= tolerance * scale {
+                    if !scale.is_finite() {
+                        return Err(DecompositionError::NonFinite);
+                    }
+                    if scale == T::zero() || apq.abs() <= tolerance * scale {
                         continue;
                     }
 
@@ -95,24 +117,38 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
                         let right = u[(row, q)];
                         u[(row, p)] = cosine * left - sine * right;
                         u[(row, q)] = sine * left + cosine * right;
+                        if !u[(row, p)].is_finite() || !u[(row, q)].is_finite() {
+                            return Err(DecompositionError::NonFinite);
+                        }
                     }
                     for row in 0..N {
                         let left = v[(row, p)];
                         let right = v[(row, q)];
                         v[(row, p)] = cosine * left - sine * right;
                         v[(row, q)] = sine * left + cosine * right;
+                        if !v[(row, p)].is_finite() || !v[(row, q)].is_finite() {
+                            return Err(DecompositionError::NonFinite);
+                        }
                     }
                     changed = true;
                 }
             }
             if !changed {
+                converged = true;
                 break;
             }
+        }
+
+        if !converged {
+            return Err(DecompositionError::NoConvergence);
         }
 
         let mut singular_values = Vector::<N, T>::zeros();
         for column in 0..N {
             singular_values[column] = column_norm(&u, column);
+            if !singular_values[column].is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
         }
 
         for index in 0..N {
@@ -130,6 +166,9 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
         }
 
         let max_singular_value = singular_values.iter().copied().fold(T::zero(), T::max);
+        if !max_singular_value.is_finite() {
+            return Err(DecompositionError::NonFinite);
+        }
         let cutoff = tolerance * max_singular_value;
         for column in 0..N {
             let singular_value = singular_values[column];
@@ -145,12 +184,22 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
             }
         }
 
-        Some(Self {
+        Ok(Self {
             u,
             singular_values,
             v,
             threshold: tolerance,
         })
+    }
+
+    /// Computes an SVD into caller-provided factor storage.
+    #[inline]
+    fn try_factorize_into(
+        matrix: &Matrix<M, N, T>,
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
+        *output = Self::try_decompose(matrix)?;
+        Ok(())
     }
 
     /// Returns the thin left singular vectors.
@@ -306,13 +355,19 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Matrix<M, N, T> {
     pub fn svd(&self) -> Option<Svd<M, N, T>> {
         Svd::decompose(self)
     }
+
+    /// Computes a fixed-size SVD with a typed failure result.
+    #[inline]
+    pub fn try_svd(&self) -> Result<Svd<M, N, T>, DecompositionError> {
+        Svd::try_decompose(self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{matrix, Matrix};
+    use crate::{matrix, DecompositionError, Matrix};
 
     #[test]
     fn reconstructs_square_matrix() {
@@ -333,6 +388,27 @@ mod tests {
             }
         }
         assert_relative_eq!(reconstructed, input, epsilon = 1e-10, max_relative = 1e-10);
+    }
+
+    #[test]
+    fn reuses_caller_provided_factor_storage() {
+        let first = matrix![1.0_f64, 2.0; 3.0, 4.0; 5.0, 6.0];
+        let second = matrix![2.0_f64, -1.0; 0.0, 3.0; 4.0, 5.0];
+        let mut factor = first.svd().expect("first SVD converges");
+        factor.try_compute(&second).expect("second SVD converges");
+        let diagonal = Matrix::from_fn(|row, column| {
+            if row == column {
+                factor.singular_values()[row]
+            } else {
+                0.0
+            }
+        });
+        assert_relative_eq!(
+            *factor.u() * diagonal * factor.v().transpose(),
+            second,
+            epsilon = 1e-10,
+            max_relative = 1e-10
+        );
     }
 
     #[test]
@@ -377,5 +453,12 @@ mod tests {
         let svd = input.svd().expect("tall matrix is supported");
         assert_eq!(svd.rank(), 2);
         assert_eq!(svd.with_threshold(1.0e-8).rank(), 1);
+    }
+
+    #[test]
+    fn typed_svd_reports_non_finite_input() {
+        let input = matrix![1.0_f64, f64::NAN; 2.0, 3.0];
+        assert_eq!(input.try_svd(), Err(DecompositionError::NonFinite));
+        assert!(input.svd().is_none());
     }
 }

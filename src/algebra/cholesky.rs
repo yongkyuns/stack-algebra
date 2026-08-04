@@ -1,5 +1,5 @@
 use crate::kernels::matmul;
-use crate::{Matrix, MatrixScalar, Real};
+use crate::{DecompositionError, Matrix, MatrixScalar, Real};
 
 /// Cholesky factorization of a symmetric positive-definite matrix.
 ///
@@ -11,23 +11,57 @@ pub struct Cholesky<const D: usize, T> {
 }
 
 impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
+    /// Recomputes this factorization in place with typed failure reporting.
+    #[inline]
+    pub fn try_compute(&mut self, matrix: &Matrix<D, D, T>) -> Result<(), DecompositionError> {
+        Self::try_factorize_into(matrix, self)
+    }
+
     /// Computes a Cholesky factorization, returning `None` when the input is
     /// not finite positive-definite.
     #[inline]
     pub fn decompose(matrix: &Matrix<D, D, T>) -> Option<Self> {
+        Self::try_decompose(matrix).ok()
+    }
+
+    /// Computes a Cholesky factorization with a typed failure result.
+    #[inline]
+    pub fn try_decompose(matrix: &Matrix<D, D, T>) -> Result<Self, DecompositionError> {
+        let mut output = Self {
+            lower: Matrix::zeros(),
+        };
         const BLOCKED_THRESHOLD: usize = 64;
         if D < BLOCKED_THRESHOLD {
-            return Self::decompose_unblocked(matrix);
+            Self::decompose_unblocked(matrix, &mut output)?;
+        } else {
+            Self::decompose_blocked(matrix, &mut output)?;
+        }
+        Ok(output)
+    }
+
+    /// Computes a Cholesky factorization into existing factor storage.
+    /// On failure, `output` may contain a partial factorization.
+    #[inline]
+    fn try_factorize_into(
+        matrix: &Matrix<D, D, T>,
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
+        const BLOCKED_THRESHOLD: usize = 64;
+        output.lower = Matrix::zeros();
+        if D < BLOCKED_THRESHOLD {
+            return Self::decompose_unblocked(matrix, output);
         }
 
-        Self::decompose_blocked(matrix)
+        Self::decompose_blocked(matrix, output)
     }
 
     #[inline]
-    fn decompose_unblocked(matrix: &Matrix<D, D, T>) -> Option<Self> {
-        let mut lower = Matrix::zeros();
+    fn decompose_unblocked(
+        matrix: &Matrix<D, D, T>,
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
         let input = matrix.as_slice();
-        let output = lower.as_mut_slice();
+        let lower = output.lower.as_mut_slice();
 
         for column in 0..D {
             let column_offset = column * D;
@@ -35,29 +69,37 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
                 let mut value = input[column_offset + row];
                 for previous in 0..column {
                     let previous_offset = previous * D;
-                    value =
-                        value - output[previous_offset + row] * output[previous_offset + column];
+                    value = value - lower[previous_offset + row] * lower[previous_offset + column];
                 }
 
                 if row == column {
-                    if !value.is_finite() || value <= T::zero() {
-                        return None;
+                    if !value.is_finite() {
+                        return Err(DecompositionError::NonFinite);
                     }
-                    output[column_offset + row] = value.sqrt();
+                    if value <= T::zero() {
+                        return Err(DecompositionError::NotPositiveDefinite);
+                    }
+                    lower[column_offset + row] = value.sqrt();
                 } else {
-                    output[column_offset + row] = value / output[column_offset + column];
+                    let multiplier = value / lower[column_offset + column];
+                    if !multiplier.is_finite() {
+                        return Err(DecompositionError::NonFinite);
+                    }
+                    lower[column_offset + row] = multiplier;
                 }
             }
         }
 
-        Some(Self { lower })
+        Ok(())
     }
 
     #[inline]
-    fn decompose_blocked(matrix: &Matrix<D, D, T>) -> Option<Self> {
+    fn decompose_blocked(
+        matrix: &Matrix<D, D, T>,
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
         const BLOCK_SIZE: usize = 8;
         let mut residual = *matrix;
-        let mut lower = Matrix::zeros();
 
         let mut block_start = 0;
         while block_start < D {
@@ -67,21 +109,25 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
                 for row in column..block_end {
                     let mut value = residual[(row, column)];
                     for previous in block_start..column {
-                        value = value - lower[(row, previous)] * lower[(column, previous)];
+                        value = value
+                            - output.lower[(row, previous)] * output.lower[(column, previous)];
                     }
 
                     if row == column {
-                        if !value.is_finite() || value <= T::zero() {
-                            return None;
+                        if !value.is_finite() {
+                            return Err(DecompositionError::NonFinite);
                         }
-                        lower[(row, column)] = value.sqrt();
+                        if value <= T::zero() {
+                            return Err(DecompositionError::NotPositiveDefinite);
+                        }
+                        output.lower[(row, column)] = value.sqrt();
                     } else {
-                        let diagonal = lower[(column, column)];
+                        let diagonal = output.lower[(column, column)];
                         let multiplier = value / diagonal;
                         if !multiplier.is_finite() {
-                            return None;
+                            return Err(DecompositionError::NonFinite);
                         }
-                        lower[(row, column)] = multiplier;
+                        output.lower[(row, column)] = multiplier;
                     }
                 }
             }
@@ -90,22 +136,23 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
                 for column in block_start..block_end {
                     let mut value = residual[(row, column)];
                     for previous in block_start..column {
-                        value = value - lower[(row, previous)] * lower[(column, previous)];
+                        value = value
+                            - output.lower[(row, previous)] * output.lower[(column, previous)];
                     }
-                    let multiplier = value / lower[(column, column)];
+                    let multiplier = value / output.lower[(column, column)];
                     if !multiplier.is_finite() {
-                        return None;
+                        return Err(DecompositionError::NonFinite);
                     }
-                    lower[(row, column)] = multiplier;
+                    output.lower[(row, column)] = multiplier;
                 }
             }
 
-            Self::update_trailing(&mut residual, &lower, block_start, block_end);
+            Self::update_trailing(&mut residual, &output.lower, block_start, block_end);
 
             block_start = block_end;
         }
 
-        Some(Self { lower })
+        Ok(())
     }
 
     #[inline]
@@ -233,6 +280,12 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
 }
 
 impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
+    /// Computes a Cholesky factorization with a typed failure result.
+    #[inline]
+    pub fn try_cholesky(&self) -> Result<Cholesky<D, T>, DecompositionError> {
+        Cholesky::try_decompose(self)
+    }
+
     /// Computes a Cholesky factorization of this matrix.
     #[inline]
     pub fn cholesky(&self) -> Option<Cholesky<D, T>> {
@@ -244,7 +297,20 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{eye, matrix, Matrix};
+    use crate::{eye, matrix, DecompositionError, Matrix};
+
+    #[test]
+    fn typed_errors_distinguish_cholesky_failures() {
+        assert_eq!(
+            matrix![f64::NAN].try_cholesky(),
+            Err(DecompositionError::NonFinite)
+        );
+        assert_eq!(
+            matrix![0.0_f64].try_cholesky(),
+            Err(DecompositionError::NotPositiveDefinite)
+        );
+        assert!(matrix![0.0_f64].cholesky().is_none());
+    }
 
     #[test]
     fn reconstructs_spd_matrix() {
@@ -280,6 +346,21 @@ mod tests {
         assert_relative_eq!(
             matrix * factor.inverse(),
             eye!(3, f64),
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
+    fn reuses_caller_provided_factor_storage() {
+        let first = matrix![4.0_f64, 1.0; 1.0, 3.0];
+        let second = matrix![9.0_f64, 2.0; 2.0, 5.0];
+        let mut factor = first.cholesky().expect("first matrix is positive-definite");
+        factor
+            .try_compute(&second)
+            .expect("second matrix is positive-definite");
+        assert_relative_eq!(
+            factor.lower() * factor.lower().transpose(),
+            second,
             max_relative = 1e-12
         );
     }

@@ -1,6 +1,7 @@
 #define EIGEN_DONT_PARALLELIZE
 #define EIGEN_NO_DEBUG
 #include <Eigen/Dense>
+#include <Eigen/Sparse>
 
 #include <algorithm>
 #include <array>
@@ -105,6 +106,64 @@ Matrix<Scalar, Dimension, Dimension> make_ldlt_system() {
       }
     }
   }
+  return matrix;
+}
+
+template <typename Scalar, int Dimension>
+Eigen::SparseMatrix<Scalar> make_sparse_spd_system() {
+  Eigen::SparseMatrix<Scalar> matrix(Dimension, Dimension);
+  matrix.reserve(2 * Dimension - 1);
+  for (int column = 0; column < Dimension; ++column) {
+    matrix.insert(column, column) = Scalar(4);
+    if (column + 1 < Dimension) {
+      matrix.insert(column + 1, column) = Scalar(1);
+    }
+  }
+  matrix.makeCompressed();
+  return matrix;
+}
+
+template <typename Scalar, int Dimension, int Band>
+Eigen::SparseMatrix<Scalar> make_sparse_banded_spd_system() {
+  Eigen::SparseMatrix<Scalar> matrix(Dimension, Dimension);
+  matrix.reserve((Band + 1) * Dimension);
+  for (int column = 0; column < Dimension; ++column) {
+    const int end = std::min(Dimension, column + Band + 1);
+    for (int row = column; row < end; ++row) {
+      matrix.insert(row, column) = row == column ? Scalar(4) : Scalar(1);
+    }
+  }
+  matrix.makeCompressed();
+  return matrix;
+}
+
+template <typename Scalar, int Dimension>
+Eigen::SparseMatrix<Scalar> make_sparse_star_spd_system() {
+  Eigen::SparseMatrix<Scalar> matrix(Dimension, Dimension);
+  matrix.reserve(2 * Dimension - 1);
+  for (int column = 0; column < Dimension; ++column) {
+    matrix.insert(column, column) = Scalar(4);
+    if (column == 0) {
+      for (int row = 1; row < Dimension; ++row) {
+        matrix.insert(row, column) = Scalar(1);
+      }
+    }
+  }
+  matrix.makeCompressed();
+  return matrix;
+}
+
+template <typename Scalar, int Dimension>
+Eigen::SparseMatrix<Scalar> make_sparse_indefinite_system() {
+  Eigen::SparseMatrix<Scalar> matrix(Dimension, Dimension);
+  matrix.reserve(2 * Dimension - 1);
+  for (int column = 0; column < Dimension; ++column) {
+    matrix.insert(column, column) = column % 2 == 0 ? Scalar(4) : Scalar(-3);
+    if (column + 1 < Dimension) {
+      matrix.insert(column + 1, column) = Scalar(1);
+    }
+  }
+  matrix.makeCompressed();
   return matrix;
 }
 
@@ -228,6 +287,40 @@ void benchmark_llt_factor(const char* name) {
 }
 
 template <typename Scalar, int Dimension>
+void benchmark_sparse_llt_analyze(const char* name) {
+  auto input = make_sparse_spd_system<Scalar, Dimension>();
+  benchmark_case(name, [&] {
+    Eigen::SimplicialLLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+    factor.analyzePattern(*opaque(&input));
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_sparse_llt_factor(const char* name) {
+  auto input = make_sparse_spd_system<Scalar, Dimension>();
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+  factor.analyzePattern(input);
+  benchmark_case(name, [&] {
+    factor.factorize(*opaque(&input));
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_sparse_llt_solve(const char* name) {
+  auto input = make_sparse_spd_system<Scalar, Dimension>();
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+  factor.compute(input);
+  Matrix<Scalar, Dimension, 1> rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    solution = factor.solve(*opaque(&rhs));
+    opaque(&solution);
+  });
+}
+
+template <typename Scalar, int Dimension>
 void benchmark_ldlt_factor(const char* name) {
   auto input = make_ldlt_system<Scalar, Dimension>();
   benchmark_case(name, [&] {
@@ -281,6 +374,54 @@ void benchmark_lu_solve(const char* name) {
   opaque(&solution);
 }
 
+template <typename Scalar, int Dimension, int Band>
+void benchmark_sparse_banded_llt_factor(const char* name) {
+  auto input = make_sparse_banded_spd_system<Scalar, Dimension, Band>();
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+  factor.analyzePattern(input);
+  benchmark_case(name, [&] {
+    factor.factorize(*opaque(&input));
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Dimension, int Band>
+void benchmark_sparse_banded_llt_solve(const char* name) {
+  auto input = make_sparse_banded_spd_system<Scalar, Dimension, Band>();
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+  factor.compute(input);
+  Matrix<Scalar, Dimension, 1> rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    solution = factor.solve(*opaque(&rhs));
+    opaque(&solution);
+  });
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_sparse_star_llt_factor(const char* name) {
+  auto input = make_sparse_star_spd_system<Scalar, Dimension>();
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+  factor.analyzePattern(input);
+  benchmark_case(name, [&] {
+    factor.factorize(*opaque(&input));
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_sparse_star_llt_solve(const char* name) {
+  auto input = make_sparse_star_spd_system<Scalar, Dimension>();
+  Eigen::SimplicialLLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+  factor.compute(input);
+  Matrix<Scalar, Dimension, 1> rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    solution = factor.solve(*opaque(&rhs));
+    opaque(&solution);
+  });
+}
+
 template <typename Scalar, int Dimension>
 void benchmark_qr_factor(const char* name) {
   auto input = make_system<Scalar, Dimension>();
@@ -305,6 +446,30 @@ void benchmark_qr_solve(const char* name) {
     *solution_pointer = factor_pointer->solve(*rhs_pointer);
   });
   opaque(&solution);
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_sparse_ldlt_factor(const char* name) {
+  auto input = make_sparse_indefinite_system<Scalar, Dimension>();
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+  factor.analyzePattern(input);
+  benchmark_case(name, [&] {
+    factor.factorize(*opaque(&input));
+    opaque(&factor);
+  });
+}
+
+template <typename Scalar, int Dimension>
+void benchmark_sparse_ldlt_solve(const char* name) {
+  auto input = make_sparse_indefinite_system<Scalar, Dimension>();
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<Scalar>, Eigen::Lower> factor;
+  factor.compute(input);
+  Matrix<Scalar, Dimension, 1> rhs = make_rhs<Scalar, Dimension, 1>();
+  Matrix<Scalar, Dimension, 1> solution;
+  benchmark_case(name, [&] {
+    solution = factor.solve(*opaque(&rhs));
+    opaque(&solution);
+  });
 }
 
 template <typename Scalar, int Dimension>
@@ -459,6 +624,19 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_llt_factor<Scalar, 6>("LLT factor 6x6");
   benchmark_llt_factor<Scalar, 15>("LLT factor 15x15");
   benchmark_llt_factor<Scalar, 32>("LLT factor 32x32");
+  benchmark_sparse_llt_analyze<Scalar, 3>("Sparse LLT analyze 3x3");
+  benchmark_sparse_llt_analyze<Scalar, 6>("Sparse LLT analyze 6x6");
+  benchmark_sparse_llt_analyze<Scalar, 15>("Sparse LLT analyze 15x15");
+  benchmark_sparse_llt_analyze<Scalar, 32>("Sparse LLT analyze 32x32");
+  benchmark_sparse_llt_factor<Scalar, 3>("Sparse LLT factor 3x3");
+  benchmark_sparse_llt_factor<Scalar, 6>("Sparse LLT factor 6x6");
+  benchmark_sparse_llt_factor<Scalar, 15>("Sparse LLT factor 15x15");
+  benchmark_sparse_llt_factor<Scalar, 32>("Sparse LLT factor 32x32");
+  benchmark_sparse_banded_llt_factor<Scalar, 15, 2>("Sparse band2 LLT factor 15x15");
+  benchmark_sparse_banded_llt_solve<Scalar, 15, 2>("Sparse band2 LLT solve 15x15");
+  benchmark_sparse_star_llt_factor<Scalar, 15>("Sparse star LLT factor 15x15");
+  benchmark_sparse_star_llt_solve<Scalar, 15>("Sparse star LLT solve 15x15");
+  benchmark_sparse_ldlt_factor<Scalar, 15>("Sparse LDLT factor 15x15");
   benchmark_ldlt_factor<Scalar, 3>("LDLT factor 3x3");
   benchmark_ldlt_factor<Scalar, 6>("LDLT factor 6x6");
   benchmark_ldlt_factor<Scalar, 15>("LDLT factor 15x15");
@@ -508,6 +686,11 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_llt_solve<Scalar, 6>("LLT solve 6x6");
   benchmark_llt_solve<Scalar, 15>("LLT solve 15x15");
   benchmark_llt_solve<Scalar, 32>("LLT solve 32x32");
+  benchmark_sparse_llt_solve<Scalar, 3>("Sparse LLT solve 3x3");
+  benchmark_sparse_llt_solve<Scalar, 6>("Sparse LLT solve 6x6");
+  benchmark_sparse_llt_solve<Scalar, 15>("Sparse LLT solve 15x15");
+  benchmark_sparse_llt_solve<Scalar, 32>("Sparse LLT solve 32x32");
+  benchmark_sparse_ldlt_solve<Scalar, 15>("Sparse LDLT solve 15x15");
   benchmark_ldlt_solve<Scalar, 3>("LDLT solve 3x3");
   benchmark_ldlt_solve<Scalar, 6>("LDLT solve 6x6");
   benchmark_ldlt_solve<Scalar, 15>("LDLT solve 15x15");

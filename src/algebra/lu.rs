@@ -9,53 +9,69 @@ use crate::{Matrix, MatrixScalar, Real};
 pub struct PartialPivLu<const D: usize, T> {
     lower: Matrix<D, D, T>,
     upper: Matrix<D, D, T>,
-    permutation: Matrix<D, D, T>,
+    permutation: [usize; D],
     row_swaps: usize,
 }
 
 impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
+    /// Recomputes this partial-pivot factorization in place.
+    #[inline]
+    pub fn compute(&mut self, matrix: &Matrix<D, D, T>) {
+        Self::factorize_into(matrix, self);
+    }
+
     /// Computes a partial-pivot LU decomposition of `matrix`.
     #[inline]
     pub fn decompose(matrix: &Matrix<D, D, T>) -> Self {
-        let mut lower = Matrix::eye();
-        let mut upper = *matrix;
-        let mut permutation = Matrix::eye();
-        let mut row_swaps = 0;
+        let mut output = Self {
+            lower: Matrix::eye(),
+            upper: *matrix,
+            permutation: core::array::from_fn(|index| index),
+            row_swaps: 0,
+        };
+        Self::factorize(&mut output);
+        output
+    }
 
+    /// Computes a partial-pivot LU decomposition into caller-provided storage.
+    #[inline]
+    fn factorize_into(matrix: &Matrix<D, D, T>, output: &mut Self) {
+        output.lower = Matrix::eye();
+        output.upper = *matrix;
+        output.permutation = core::array::from_fn(|index| index);
+        output.row_swaps = 0;
+        Self::factorize(output);
+    }
+
+    #[inline]
+    fn factorize(output: &mut Self) {
         for diagonal in 0..D {
-            let pivot_row = Self::pivot_row(&upper, diagonal);
+            let pivot_row = Self::pivot_row(&output.upper, diagonal);
             if pivot_row != diagonal {
-                upper.swap_rows(diagonal, pivot_row);
-                permutation.swap_rows(diagonal, pivot_row);
+                output.upper.swap_rows(diagonal, pivot_row);
+                output.permutation.swap(diagonal, pivot_row);
                 for column in 0..diagonal {
-                    let value = lower[(diagonal, column)];
-                    lower[(diagonal, column)] = lower[(pivot_row, column)];
-                    lower[(pivot_row, column)] = value;
+                    let value = output.lower[(diagonal, column)];
+                    output.lower[(diagonal, column)] = output.lower[(pivot_row, column)];
+                    output.lower[(pivot_row, column)] = value;
                 }
-                row_swaps += 1;
+                output.row_swaps += 1;
             }
 
-            let pivot = upper[(diagonal, diagonal)];
+            let pivot = output.upper[(diagonal, diagonal)];
             if pivot == T::zero() {
                 continue;
             }
 
             for row in (diagonal + 1)..D {
-                let multiplier = upper[(row, diagonal)] / pivot;
-                lower[(row, diagonal)] = multiplier;
-                upper[(row, diagonal)] = T::zero();
+                let multiplier = output.upper[(row, diagonal)] / pivot;
+                output.lower[(row, diagonal)] = multiplier;
+                output.upper[(row, diagonal)] = T::zero();
                 for column in (diagonal + 1)..D {
-                    upper[(row, column)] =
-                        upper[(row, column)] - multiplier * upper[(diagonal, column)];
+                    output.upper[(row, column)] =
+                        output.upper[(row, column)] - multiplier * output.upper[(diagonal, column)];
                 }
             }
-        }
-
-        Self {
-            lower,
-            upper,
-            permutation,
-            row_swaps,
         }
     }
 
@@ -72,8 +88,24 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
     }
 
     /// Returns the row-permutation matrix such that `P * A = L * U`.
+    ///
+    /// The matrix is materialized on demand; the factorization stores only the
+    /// compact row-index permutation. Use [`Self::permutation_indices`] when
+    /// the index representation is sufficient.
     #[inline]
-    pub fn permutation(&self) -> &Matrix<D, D, T> {
+    pub fn permutation(&self) -> Matrix<D, D, T> {
+        Matrix::from_fn(|row, column| {
+            if self.permutation[row] == column {
+                T::one()
+            } else {
+                T::zero()
+            }
+        })
+    }
+
+    /// Returns the compact row permutation as ordered-to-original indices.
+    #[inline]
+    pub fn permutation_indices(&self) -> &[usize; D] {
         &self.permutation
     }
 
@@ -102,13 +134,10 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
     /// Solves `A * X = B` into a caller-provided output matrix.
     #[inline]
     pub fn solve_into<const P: usize>(&self, rhs: &Matrix<D, P, T>, output: &mut Matrix<D, P, T>) {
-        let mut permuted_rhs: Matrix<D, P, T> = Matrix::zeros();
-        self.permutation.mul_into(rhs, &mut permuted_rhs);
-
         let mut intermediate: Matrix<D, P, T> = Matrix::zeros();
         for column in 0..P {
             for row in 0..D {
-                let mut value = permuted_rhs[(row, column)];
+                let mut value = rhs[(self.permutation[row], column)];
                 for previous in 0..row {
                     value = value - self.lower[(row, previous)] * intermediate[(previous, column)];
                 }
@@ -193,6 +222,22 @@ mod tests {
     }
 
     #[test]
+    fn stores_compact_row_permutation() {
+        let matrix = matrix![
+            0.0_f64, 1.0, 2.0;
+            3.0, 4.0, 5.0;
+            6.0, 7.0, 8.0;
+        ];
+        let factor = matrix.partial_piv_lu();
+        assert_eq!(factor.permutation_indices(), &[2, 0, 1]);
+        assert_relative_eq!(
+            factor.permutation() * matrix,
+            factor.lower() * factor.upper(),
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
     fn determinant_uses_actual_swap_parity() {
         assert_eq!(eye!(3, f64).determinant(), 1.0);
 
@@ -214,5 +259,18 @@ mod tests {
         let inverse = matrix.inverse();
         assert_relative_eq!(matrix * inverse, eye!(3, f64), max_relative = 1e-12);
         assert_abs_diff_eq!(matrix.determinant(), 24.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn reuses_caller_provided_factor_storage() {
+        let first = matrix![2.0_f64, 1.0; 4.0, 3.0];
+        let second = matrix![0.0_f64, 1.0; 2.0, 3.0];
+        let mut factor = first.partial_piv_lu();
+        factor.compute(&second);
+        assert_relative_eq!(
+            factor.permutation() * second,
+            factor.lower() * factor.upper(),
+            max_relative = 1e-12
+        );
     }
 }

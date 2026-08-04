@@ -1,4 +1,4 @@
-use crate::{Matrix, MatrixScalar, Real, Vector};
+use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 
 /// Self-adjoint eigendecomposition of a fixed-size real symmetric matrix.
 ///
@@ -11,6 +11,12 @@ pub struct SelfAdjointEigen<const D: usize, T> {
 }
 
 impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
+    /// Recomputes this eigendecomposition in place with typed failure reporting.
+    #[inline]
+    pub fn try_compute(&mut self, matrix: &Matrix<D, D, T>) -> Result<(), DecompositionError> {
+        Self::try_factorize_into(matrix, self)
+    }
+
     /// Computes the eigendecomposition of a symmetric matrix.
     ///
     /// The input is accepted when its symmetry error is within a scaled
@@ -18,6 +24,13 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
     /// returns `None`.
     #[inline]
     pub fn decompose(matrix: &Matrix<D, D, T>) -> Option<Self> {
+        Self::try_decompose(matrix).ok()
+    }
+
+    /// Computes an eigendecomposition and reports numerical failures
+    /// explicitly.
+    #[inline]
+    pub fn try_decompose(matrix: &Matrix<D, D, T>) -> Result<Self, DecompositionError> {
         let dimension = T::from(D).unwrap_or(T::one());
         let tolerance = T::epsilon() * dimension;
         for row in 0..D {
@@ -25,21 +38,22 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
                 let left = matrix[(row, column)];
                 let right = matrix[(column, row)];
                 if !left.is_finite() || !right.is_finite() {
-                    return None;
+                    return Err(DecompositionError::NonFinite);
                 }
                 let scale = T::one().max(left.abs()).max(right.abs());
                 if (left - right).abs() > tolerance * scale {
-                    return None;
+                    return Err(DecompositionError::NotSymmetric);
                 }
             }
             if !matrix[(row, row)].is_finite() {
-                return None;
+                return Err(DecompositionError::NonFinite);
             }
         }
 
         let mut work = *matrix;
         let mut eigenvectors = Matrix::<D, D, T>::eye();
         const MAX_SWEEPS: usize = 64;
+        let mut converged = false;
 
         for _ in 0..MAX_SWEEPS {
             let mut changed = false;
@@ -60,7 +74,7 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
                     let root = (T::one() + tau * tau).sqrt();
                     let denominator = tau.abs() + root;
                     if !denominator.is_finite() || denominator == T::zero() {
-                        return None;
+                        return Err(DecompositionError::NonFinite);
                     }
                     let tangent = if tau >= T::zero() {
                         T::one() / denominator
@@ -89,6 +103,9 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
                         let value_q = work[(index, q)];
                         let rotated_p = cosine * value_p - sine * value_q;
                         let rotated_q = sine * value_p + cosine * value_q;
+                        if !rotated_p.is_finite() || !rotated_q.is_finite() {
+                            return Err(DecompositionError::NonFinite);
+                        }
                         work[(index, p)] = rotated_p;
                         work[(p, index)] = rotated_p;
                         work[(index, q)] = rotated_q;
@@ -100,18 +117,31 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
                         let value_q = eigenvectors[(row, q)];
                         eigenvectors[(row, p)] = cosine * value_p - sine * value_q;
                         eigenvectors[(row, q)] = sine * value_p + cosine * value_q;
+                        if !eigenvectors[(row, p)].is_finite()
+                            || !eigenvectors[(row, q)].is_finite()
+                        {
+                            return Err(DecompositionError::NonFinite);
+                        }
                     }
                     changed = true;
                 }
             }
             if !changed {
+                converged = true;
                 break;
             }
+        }
+
+        if !converged {
+            return Err(DecompositionError::NoConvergence);
         }
 
         let mut eigenvalues = Vector::<D, T>::zeros();
         for index in 0..D {
             eigenvalues[index] = work[(index, index)];
+            if !eigenvalues[index].is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
         }
         for index in 0..D {
             let mut smallest = index;
@@ -126,10 +156,20 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
             }
         }
 
-        Some(Self {
+        Ok(Self {
             eigenvalues,
             eigenvectors,
         })
+    }
+
+    /// Computes an eigendecomposition into caller-provided factor storage.
+    #[inline]
+    fn try_factorize_into(
+        matrix: &Matrix<D, D, T>,
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
+        *output = Self::try_decompose(matrix)?;
+        Ok(())
     }
 
     /// Returns the eigenvalues in nondecreasing order.
@@ -168,13 +208,19 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
     pub fn self_adjoint_eigen(&self) -> Option<SelfAdjointEigen<D, T>> {
         SelfAdjointEigen::decompose(self)
     }
+
+    /// Computes the eigendecomposition with a typed failure result.
+    #[inline]
+    pub fn try_self_adjoint_eigen(&self) -> Result<SelfAdjointEigen<D, T>, DecompositionError> {
+        SelfAdjointEigen::try_decompose(self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{matrix, Matrix};
+    use crate::{matrix, DecompositionError, Matrix};
 
     #[test]
     fn reconstructs_symmetric_matrix() {
@@ -206,6 +252,24 @@ mod tests {
     }
 
     #[test]
+    fn reuses_caller_provided_factor_storage() {
+        let first = matrix![4.0_f64, 1.0; 1.0, 3.0];
+        let second = matrix![2.0_f64, -1.0; -1.0, 5.0];
+        let mut factor = first
+            .self_adjoint_eigen()
+            .expect("first matrix is symmetric");
+        factor
+            .try_compute(&second)
+            .expect("second matrix is symmetric");
+        assert_relative_eq!(
+            factor.reconstruct(),
+            second,
+            epsilon = 1e-10,
+            max_relative = 1e-10
+        );
+    }
+
+    #[test]
     fn handles_repeated_eigenvalues() {
         let input =
             Matrix::<3, 3, f64>::from_rows([[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, -1.0]]);
@@ -225,11 +289,19 @@ mod tests {
     fn rejects_asymmetric_matrix() {
         let input = matrix![1.0_f64, 2.0; 0.0, 1.0];
         assert!(input.self_adjoint_eigen().is_none());
+        assert_eq!(
+            input.try_self_adjoint_eigen(),
+            Err(DecompositionError::NotSymmetric)
+        );
     }
 
     #[test]
     fn rejects_non_finite_matrix() {
         let input = matrix![1.0_f64, f64::NAN; f64::NAN, 1.0];
         assert!(input.self_adjoint_eigen().is_none());
+        assert_eq!(
+            input.try_self_adjoint_eigen(),
+            Err(DecompositionError::NonFinite)
+        );
     }
 }

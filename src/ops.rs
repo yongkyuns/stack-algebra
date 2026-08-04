@@ -6,7 +6,67 @@ use core::ops::{
 use crate::index::MatrixIndex;
 use crate::kernels::{matmul, matvec, MatrixScalar, ReductionScalar};
 use crate::num::Zero;
+use crate::view::MatrixRead;
 use crate::{Matrix, Vector};
+
+/// Computes `matrix * vector` directly from a fixed-size matrix view.
+#[inline]
+pub fn matvec_view<const M: usize, const N: usize, T, V>(
+    matrix: &V,
+    vector: &Vector<N, T>,
+) -> Option<Vector<M, T>>
+where
+    T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
+    V: MatrixRead<M, N, T>,
+{
+    let mut output = Vector::<M, T>::zeros();
+    matvec_view_into(matrix, vector, &mut output).map(|()| output)
+}
+
+/// Computes `matrix * vector` directly from a fixed-size matrix view.
+#[inline]
+pub fn matvec_view_into<const M: usize, const N: usize, T, V>(
+    matrix: &V,
+    vector: &Vector<N, T>,
+    output: &mut Vector<M, T>,
+) -> Option<()>
+where
+    T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
+    V: MatrixRead<M, N, T>,
+{
+    for row in 0..M {
+        let mut value = T::zero();
+        for column in 0..N {
+            value = value + *matrix.get(row, column)? * vector[column];
+        }
+        output[row] = value;
+    }
+    Some(())
+}
+
+/// Computes `lhs * rhs` directly from fixed-size matrix views.
+#[inline]
+pub fn matmul_view_into<const M: usize, const N: usize, const P: usize, T, Lhs, Rhs>(
+    lhs: &Lhs,
+    rhs: &Rhs,
+    output: &mut Matrix<M, P, T>,
+) -> Option<()>
+where
+    T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
+    Lhs: MatrixRead<M, N, T>,
+    Rhs: MatrixRead<N, P, T>,
+{
+    for column in 0..P {
+        for row in 0..M {
+            let mut value = T::zero();
+            for shared in 0..N {
+                value = value + *lhs.get(row, shared)? * *rhs.get(shared, column)?;
+            }
+            output[(row, column)] = value;
+        }
+    }
+    Some(())
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Indexing

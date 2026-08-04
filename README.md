@@ -16,6 +16,9 @@ applications in rust. This means several things:
 4. Users are not experts in rust but often familiar with scientific tools 
 (e.g. python or matlab)
 
+The implementation roadmap and release gates are tracked in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 Implementing numerical algorithms in rust can be made much more productive and ergonomic
 if simple abstractions and necessary algebra routines are available. This library is
 a growing collection of addressing those needs. It is heavily based on 
@@ -220,7 +223,7 @@ let vector64 = vector.cast::<f64>();
   let solution = factor.solve(&vector![1.0; 2.0; 3.0]);
   ```
 
-- `.ldlt()` for symmetric indefinite systems with pivoting
+- `.ldlt()` for symmetric systems with Eigen-compatible diagonal pivoting
   ```rust
   let matrix = matrix![0.0_f64, 2.0; 2.0, 3.0];
   let factor = matrix.ldlt().expect("matrix is nonsingular");
@@ -231,6 +234,11 @@ let vector64 = vector.cast::<f64>();
   ```rust
   let factor = matrix.ldlt_no_pivot().expect("matrix is nonsingular");
   ```
+
+The dense LDLT path stores a diagonal `D` and supports 1x1 diagonal pivots,
+matching Eigen's standard `LDLT`. It does not implement LAPACK-style
+Bunch–Kaufman 2x2 pivot blocks; inputs that require one return a zero-pivot
+error through `try_ldlt()`.
 
 - `.householder_qr()` for full-rank square or overdetermined least-squares systems
   ```rust
@@ -270,6 +278,9 @@ let vector64 = vector.cast::<f64>();
 All decompositions provide reusable-output solve variants: use `solve_into` for
 LU, Cholesky, LDLT, and SVD, or `solve_least_squares_into` for QR. Cholesky and
 LDLT also retain `solve_in_place` when the right-hand side itself can be reused.
+All factor types support Eigen-style recomputation: use `try_compute` for
+fallible factorizations and `compute` for infallible ones. Factor storage is
+owned by the factor object and reused by these methods.
 
 - `.self_adjoint_eigen()` for fixed-size symmetric eigendecomposition
   ```rust
@@ -278,6 +289,12 @@ LDLT also retain `solve_in_place` when the right-hand side itself can be reused.
   let vectors = eig.eigenvectors();
   ```
   Eigenvalues are sorted in ascending order and eigenvectors are orthonormal.
+
+- `.self_adjoint_lower()` and `.self_adjoint_upper()` for zero-copy Eigen-style
+  views that mirror one authoritative triangle without reading the other.
+  Use `try_self_adjoint_lower(tolerance)` or
+  `try_self_adjoint_upper(tolerance)` when symmetry validation is required;
+  `validate_symmetric` and `is_symmetric` expose the same scaled check.
 
 - `PartialPivLu` for allocation-free linear solves
   ```rust
@@ -302,6 +319,47 @@ LDLT also retain `solve_in_place` when the right-hand side itself can be reused.
   `lower_triangular()` and `upper_triangular()` with in-place solves and
   `mul_into` operations.
 
+- `Map` and `MapMut` for zero-copy fixed-size views over external column-major
+  buffers, with checked construction and mutable indexing. `StridedMap` and
+  `StridedMapMut` cover padded or row-major buffers without repacking.
+  `MatrixRead` and `MatrixWrite` provide a shared compile-time-dimension view
+  interface, and `Matrix::from_view` copies any compatible view into owned
+  storage.
+
+- `MatrixBuf<MAX_ROWS, MAX_COLS, T>` for bounded runtime dimensions without
+  heap allocation. It reserves a compile-time capacity, tracks active rows and
+  columns, supports checked resizing and column access, and can round-trip to
+  fixed-size `Matrix` values.
+
+- `StaticBlockCscMatrix` for fixed-capacity block CSC storage. Block patterns
+  are validated once, dense blocks remain stack-owned, and block matvec writes
+  into caller-provided scalar slices without allocation.
+
+- `StaticCscPattern` and `StaticCscMatrix` for allocation-free, bounded sparse
+  CSC storage. Symbolic structure can be validated once and numeric values
+  updated repeatedly; fixed-size sparse matrix-vector products are supported.
+  `StaticCscCholeskyPattern` and `StaticCscCholesky` add reusable symbolic and
+  numeric sparse LLT factorization with bounded fill-in storage. LLT consumes
+  the lower triangle (optional mirrored upper entries are checked for symmetry).
+
+- `Quaternion<T>` and `RotationMatrix<T>` for generic 3D rotations
+  ```rust
+  let rotation = Quaternion::from_axis_angle(&axis, angle)
+      .expect("axis is nonzero")
+      .to_rotation_matrix()
+      .expect("quaternion is nonzero");
+  let rotated = rotation.apply(&point);
+  ```
+  These types use existing fixed-size `Matrix`/`Vector` storage and do not
+  depend on robotics or code-generation crates.
+
+- `Isometry<T>` for fixed-size rigid transforms, with point/direction
+  application, composition, inverse, and homogeneous `4x4` conversion.
+
+- `AngleAxis<T>` and quaternion `slerp` provide interpolation-friendly
+  rotation APIs; `AffineTransform<T>` adds validated homogeneous affine
+  transforms with composition, point/direction application, and inversion.
+
 Fixed-size multiplication selects its kernel at compile time. On
 x86-64, `f32` and `f64` use AVX2 when enabled by the target and otherwise use
 an SSE2 kernel; AArch64 targets with NEON use the ARM NEON packet kernel;
@@ -323,8 +381,10 @@ performance comparisons are opt-in and require Eigen headers discoverable via
 ```sh
 cargo test --features eigen-compare
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench robotics
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench sparse
 # Focus on decomposition cases:
 RUSTFLAGS="-C target-cpu=native" cargo bench --bench robotics -- 'llt|ldlt'
+CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 "Sparse LLT"
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 QR
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 SVD
 CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 "Self-adjoint eigen"
@@ -357,6 +417,19 @@ Self-adjoint eigendecomposition benchmarks cover symmetric `3x3`, `6x6`,
 `15x15`, and `32x32` systems.
 Triangular solve benchmarks cover lower and upper `3x3`, `6x6`, and `15x15`
 systems using the same static column-major inputs as Eigen.
+Sparse LLT and no-pivot LDLT benchmarks use lower-triangular tridiagonal,
+band-2, and star patterns at representative fixed sizes in both `f32` and `f64`; analysis,
+numeric refactorization with a reused symbolic pattern, and solve are reported
+separately for stack-algebra, faer, and Eigen. Fixed-capacity sparse Cholesky
+also exposes deterministic minimum-degree ordering for reducing fill-in before
+reusing a symbolic pattern. Stack-algebra factor benchmarks reuse the numeric
+factor buffer, matching Eigen's in-place `factorize` model.
+Repeated ordered refactorization can validate and prepare the ordered CSC
+matrix once with `prepare_ordered`, then use `factor_ordered_into` for numeric
+updates without repeating permutation or structural checks.
+Sparse LDLT provides a fast no-pivot path plus analysis-time 1x1 diagonal
+pivoting; matrices requiring 2x2 pivot blocks are reported as zero-pivot
+failures.
 
 ## QEMU target validation
 

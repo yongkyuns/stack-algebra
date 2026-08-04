@@ -1,4 +1,4 @@
-use crate::{MatmulBackend, Matrix, MatrixScalar, Real, Vector};
+use crate::{DecompositionError, MatmulBackend, Matrix, MatrixScalar, Real, Vector};
 
 #[inline]
 fn column_norm<const M: usize, const N: usize, T: Real>(
@@ -31,6 +31,11 @@ fn column_norm<const M: usize, const N: usize, T: Real>(
         scaled_sum = scaled_sum + ratio * ratio;
     }
     max_abs * scaled_sum.sqrt()
+}
+
+#[inline]
+fn finite_matrix<const M: usize, const N: usize, T: Real>(matrix: &Matrix<M, N, T>) -> bool {
+    matrix.as_slice().iter().all(|value| value.is_finite())
 }
 
 #[inline]
@@ -99,14 +104,38 @@ pub struct HouseholderQr<const M: usize, const N: usize, T> {
 }
 
 impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N, T> {
+    /// Recomputes this factorization in place.
+    #[inline]
+    pub fn compute(&mut self, matrix: &Matrix<M, N, T>) {
+        Self::factorize_into(matrix, self);
+    }
+
     /// Computes a Householder QR factorization.
     #[inline]
     pub fn decompose(matrix: &Matrix<M, N, T>) -> Self {
-        let mut factors = *matrix;
-        let mut coefficients = Vector::<N, T>::zeros();
+        let mut output = Self {
+            factors: *matrix,
+            coefficients: Vector::<N, T>::zeros(),
+        };
+        Self::factorize(&mut output);
+        output
+    }
+
+    /// Computes a Householder QR factorization into caller-provided storage.
+    #[inline]
+    fn factorize_into(matrix: &Matrix<M, N, T>, output: &mut Self) {
+        output.factors = *matrix;
+        output.coefficients = Vector::<N, T>::zeros();
+        Self::factorize(output);
+    }
+
+    #[inline]
+    fn factorize(output: &mut Self) {
+        let factors = &mut output.factors;
+        let coefficients = &mut output.coefficients;
         let limit = core::cmp::min(M, N);
         for column in 0..limit {
-            let norm = column_norm(&factors, column, column);
+            let norm = column_norm(factors, column, column);
             if !norm.is_finite() || norm == T::zero() {
                 continue;
             }
@@ -151,11 +180,6 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
                     scale,
                 );
             }
-        }
-
-        Self {
-            factors,
-            coefficients,
         }
     }
 
@@ -214,9 +238,18 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
         &self,
         rhs: &Matrix<M, P, T>,
     ) -> Option<Matrix<N, P, T>> {
+        self.try_solve_least_squares(rhs).ok()
+    }
+
+    /// Solves a full-rank least-squares problem with a typed failure result.
+    #[inline]
+    pub fn try_solve_least_squares<const P: usize>(
+        &self,
+        rhs: &Matrix<M, P, T>,
+    ) -> Result<Matrix<N, P, T>, DecompositionError> {
         let mut solution = Matrix::<N, P, T>::zeros();
-        self.solve_least_squares_into(rhs, &mut solution)?;
-        Some(solution)
+        self.try_solve_least_squares_into(rhs, &mut solution)?;
+        Ok(solution)
     }
 
     /// Solves a full-rank least-squares problem into a caller-provided output.
@@ -226,16 +259,33 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
         rhs: &Matrix<M, P, T>,
         output: &mut Matrix<N, P, T>,
     ) -> Option<()> {
+        self.try_solve_least_squares_into(rhs, output).ok()
+    }
+
+    /// Solves a full-rank least-squares problem into caller-provided storage
+    /// with a typed failure result.
+    #[inline]
+    pub fn try_solve_least_squares_into<const P: usize>(
+        &self,
+        rhs: &Matrix<M, P, T>,
+        output: &mut Matrix<N, P, T>,
+    ) -> Result<(), DecompositionError> {
         if M < N {
-            return None;
+            return Err(DecompositionError::Singular);
+        }
+        if !finite_matrix(rhs) {
+            return Err(DecompositionError::NonFinite);
         }
 
         let transformed = self.apply_q_transpose(rhs);
+        if !finite_matrix(&transformed) {
+            return Err(DecompositionError::NonFinite);
+        }
         let mut diagonal_scale = T::one();
         for row in 0..N {
             let diagonal = self.factors[(row, row)];
             if !diagonal.is_finite() {
-                return None;
+                return Err(DecompositionError::NonFinite);
             }
             diagonal_scale = diagonal_scale.max(diagonal.abs());
         }
@@ -245,16 +295,20 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
             for row in (0..N).rev() {
                 let diagonal = self.factors[(row, row)];
                 if diagonal.abs() <= tolerance {
-                    return None;
+                    return Err(DecompositionError::Singular);
                 }
                 let mut value = transformed[(row, rhs_column)];
                 for next in (row + 1)..N {
                     value = value - self.factors[(row, next)] * output[(next, rhs_column)];
                 }
-                output[(row, rhs_column)] = value / diagonal;
+                let result = value / diagonal;
+                if !result.is_finite() {
+                    return Err(DecompositionError::NonFinite);
+                }
+                output[(row, rhs_column)] = result;
             }
         }
-        Some(())
+        Ok(())
     }
 }
 
@@ -287,14 +341,42 @@ pub struct ColPivHouseholderQr<const M: usize, const N: usize, T> {
 }
 
 impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr<M, N, T> {
+    /// Recomputes this column-pivoted factorization in place.
+    #[inline]
+    pub fn compute(&mut self, matrix: &Matrix<M, N, T>) {
+        Self::factorize_into(matrix, self);
+    }
+
     /// Computes a column-pivoted Householder QR factorization.
     #[inline]
     pub fn decompose(matrix: &Matrix<M, N, T>) -> Self {
-        let mut factors = *matrix;
-        let mut coefficients = Vector::<N, T>::zeros();
-        let mut permutation = core::array::from_fn(|index| index);
+        let mut output = Self {
+            factors: *matrix,
+            coefficients: Vector::<N, T>::zeros(),
+            permutation: core::array::from_fn(|index| index),
+            max_pivot: T::zero(),
+            threshold: T::zero(),
+        };
+        Self::factorize(&mut output);
+        output
+    }
+
+    /// Computes a column-pivoted Householder QR factorization into caller-provided storage.
+    #[inline]
+    fn factorize_into(matrix: &Matrix<M, N, T>, output: &mut Self) {
+        output.factors = *matrix;
+        output.coefficients = Vector::<N, T>::zeros();
+        output.permutation = core::array::from_fn(|index| index);
+        Self::factorize(output);
+    }
+
+    #[inline]
+    fn factorize(output: &mut Self) {
+        let factors = &mut output.factors;
+        let coefficients = &mut output.coefficients;
+        let permutation = &mut output.permutation;
         let mut direct_norms: [T; N] =
-            core::array::from_fn(|column| column_norm(&factors, column, 0));
+            core::array::from_fn(|column| column_norm(factors, column, 0));
         let mut updated_norms = direct_norms;
         let limit = core::cmp::min(M, N);
 
@@ -371,7 +453,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
                     let update_ratio = old_updated_norm / direct_norms[trailing_column];
                     let accuracy = product * update_ratio * update_ratio;
                     if accuracy <= T::epsilon().sqrt() {
-                        let direct_norm = column_norm(&factors, trailing_column, column + 1);
+                        let direct_norm = column_norm(factors, trailing_column, column + 1);
                         direct_norms[trailing_column] = direct_norm;
                         updated_norms[trailing_column] = direct_norm;
                     } else {
@@ -387,13 +469,8 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
         }
         let dimension = T::from(core::cmp::max(M, N)).unwrap_or(T::one());
 
-        Self {
-            factors,
-            coefficients,
-            permutation,
-            max_pivot,
-            threshold: T::epsilon() * dimension,
-        }
+        output.max_pivot = max_pivot;
+        output.threshold = T::epsilon() * dimension;
     }
 
     /// Returns the numerical rank detected from the triangular factor.
@@ -503,13 +580,20 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
         &self,
         rhs: &Matrix<M, P, T>,
     ) -> Option<Matrix<N, P, T>> {
-        if M < N || self.rank() < N {
-            return None;
-        }
-
         let mut solution = Matrix::<N, P, T>::zeros();
-        self.solve_least_squares_into(rhs, &mut solution)?;
+        self.try_solve_least_squares_into(rhs, &mut solution).ok()?;
         Some(solution)
+    }
+
+    /// Solves a full-rank least-squares problem with a typed failure result.
+    #[inline]
+    pub fn try_solve_least_squares<const P: usize>(
+        &self,
+        rhs: &Matrix<M, P, T>,
+    ) -> Result<Matrix<N, P, T>, DecompositionError> {
+        let mut solution = Matrix::<N, P, T>::zeros();
+        self.try_solve_least_squares_into(rhs, &mut solution)?;
+        Ok(solution)
     }
 
     /// Solves a full-rank least-squares problem into a caller-provided output.
@@ -519,11 +603,62 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
         rhs: &Matrix<M, P, T>,
         output: &mut Matrix<N, P, T>,
     ) -> Option<()> {
-        if M < N || self.rank() < N {
-            return None;
+        self.try_solve_least_squares_into(rhs, output).ok()
+    }
+
+    /// Solves a full-rank least-squares problem into caller-provided storage
+    /// with a typed failure result.
+    #[inline]
+    pub fn try_solve_least_squares_into<const P: usize>(
+        &self,
+        rhs: &Matrix<M, P, T>,
+        output: &mut Matrix<N, P, T>,
+    ) -> Result<(), DecompositionError> {
+        if M < N {
+            return Err(DecompositionError::Singular);
+        }
+        if !finite_matrix(rhs) || !finite_matrix(&self.factors) {
+            return Err(DecompositionError::NonFinite);
+        }
+        if !self.max_pivot.is_finite() || !self.threshold.is_finite() {
+            return Err(DecompositionError::NonFinite);
+        }
+        if self.rank() < N {
+            return Err(DecompositionError::Singular);
         }
 
-        self.solve_least_squares_basic_into(rhs, output)
+        let transformed = self.apply_q_transpose(rhs);
+        if !finite_matrix(&transformed) {
+            return Err(DecompositionError::NonFinite);
+        }
+        let mut permuted_solution = Matrix::<N, P, T>::zeros();
+        for rhs_column in 0..P {
+            for row in (0..N).rev() {
+                let diagonal = self.factors[(row, row)];
+                if diagonal == T::zero() {
+                    return Err(DecompositionError::Singular);
+                }
+                let mut value = transformed[(row, rhs_column)];
+                for next in (row + 1)..N {
+                    value =
+                        value - self.factors[(row, next)] * permuted_solution[(next, rhs_column)];
+                }
+                let result = value / diagonal;
+                if !result.is_finite() {
+                    return Err(DecompositionError::NonFinite);
+                }
+                permuted_solution[(row, rhs_column)] = result;
+            }
+        }
+
+        *output = Matrix::zeros();
+        for column in 0..N {
+            for rhs_column in 0..P {
+                output[(self.permutation[column], rhs_column)] =
+                    permuted_solution[(column, rhs_column)];
+            }
+        }
+        Ok(())
     }
 
     /// Solves a least-squares problem using the detected independent pivots.
@@ -582,7 +717,77 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{matrix, Matrix};
+    use crate::{matrix, DecompositionError, Matrix};
+
+    #[test]
+    fn typed_householder_qr_errors_are_distinguishable() {
+        let rank_deficient = matrix![
+            1.0_f64, 2.0;
+            2.0, 4.0;
+            3.0, 6.0;
+        ];
+        let rhs = Matrix::<3, 1, f64>::ones();
+        assert_eq!(
+            rank_deficient
+                .householder_qr()
+                .try_solve_least_squares(&rhs),
+            Err(DecompositionError::Singular)
+        );
+        assert!(rank_deficient
+            .householder_qr()
+            .solve_least_squares(&rhs)
+            .is_none());
+
+        let underdetermined = Matrix::<2, 3, f64>::ones();
+        let rhs = Matrix::<2, 1, f64>::ones();
+        assert_eq!(
+            underdetermined
+                .householder_qr()
+                .try_solve_least_squares(&rhs),
+            Err(DecompositionError::Singular)
+        );
+
+        let non_finite = matrix![f64::NAN; 1.0; 2.0];
+        let rhs = Matrix::<3, 1, f64>::ones();
+        assert_eq!(
+            non_finite.householder_qr().try_solve_least_squares(&rhs),
+            Err(DecompositionError::NonFinite)
+        );
+    }
+
+    #[test]
+    fn typed_col_pivoted_qr_errors_are_distinguishable() {
+        let rank_deficient = matrix![
+            1.0_f64, 2.0;
+            2.0, 4.0;
+            3.0, 6.0;
+        ];
+        let rhs = Matrix::<3, 1, f64>::ones();
+        assert_eq!(
+            rank_deficient
+                .col_piv_householder_qr()
+                .try_solve_least_squares(&rhs),
+            Err(DecompositionError::Singular)
+        );
+
+        let underdetermined = Matrix::<2, 3, f64>::ones();
+        let rhs = Matrix::<2, 1, f64>::ones();
+        assert_eq!(
+            underdetermined
+                .col_piv_householder_qr()
+                .try_solve_least_squares(&rhs),
+            Err(DecompositionError::Singular)
+        );
+
+        let non_finite = matrix![f64::NAN; 1.0; 2.0];
+        let rhs = Matrix::<3, 1, f64>::ones();
+        assert_eq!(
+            non_finite
+                .col_piv_householder_qr()
+                .try_solve_least_squares(&rhs),
+            Err(DecompositionError::NonFinite)
+        );
+    }
 
     #[test]
     fn reconstructs_square_matrix() {
@@ -614,6 +819,35 @@ mod tests {
         assert_relative_eq!(actual, expected, epsilon = 1e-12, max_relative = 1e-12);
         qr.apply_q_transpose_in_place(&mut actual);
         assert_relative_eq!(actual, rhs, epsilon = 1e-12, max_relative = 1e-12);
+    }
+
+    #[test]
+    fn reuses_caller_provided_householder_storage() {
+        let first = matrix![1.0_f64, 2.0; 3.0, 4.0; 5.0, 7.0];
+        let second = matrix![2.0_f64, -1.0; 0.0, 3.0; 4.0, 5.0];
+        let mut factor = first.householder_qr();
+        factor.compute(&second);
+        assert_relative_eq!(
+            factor.apply_q(&factor.r()),
+            second,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
+    fn reuses_caller_provided_pivoted_householder_storage() {
+        let first = matrix![1.0_f64, 2.0; 3.0, 4.0; 5.0, 7.0];
+        let second = matrix![0.0_f64, 1.0; 1.0, 2.0; 2.0, 3.0];
+        let mut factor = first.col_piv_householder_qr();
+        factor.compute(&second);
+        let permuted = Matrix::from_fn(|row, column| second[(row, factor.permutation()[column])]);
+        assert_relative_eq!(
+            factor.apply_q(&factor.r()),
+            permuted,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
     }
 
     #[test]

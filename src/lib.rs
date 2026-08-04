@@ -1,13 +1,17 @@
 #![no_std]
 
 mod algebra;
+mod block_sparse;
+mod bounded;
 mod fmt;
+mod geometry;
 mod index;
 mod iter;
 mod kernels;
 mod new;
 mod num;
 mod ops;
+mod sparse;
 mod util;
 mod view;
 
@@ -18,15 +22,26 @@ use core::{
 };
 
 pub use algebra::{
-    Cholesky, ColPivHouseholderQr, HouseholderQr, Ldlt, LowerTriangular, PartialPivLu,
-    SelfAdjointEigen, Svd, UpperTriangular,
+    Cholesky, ColPivHouseholderQr, DecompositionError, HouseholderQr, Ldlt, LowerTriangular,
+    PartialPivLu, SelfAdjointEigen, SelfAdjointLower, SelfAdjointUpper, SelfAdjointView, Svd,
+    UpperTriangular,
 };
+pub use block_sparse::StaticBlockCscMatrix;
+pub use bounded::MatrixBuf;
+pub use geometry::{AffineTransform, AngleAxis, Isometry, Quaternion, RotationMatrix};
 pub use index::MatrixIndex;
 #[doc(hidden)]
 pub use kernels::{MatmulBackend, ReductionBackend, ScalarMatmul, ScalarReduction};
 pub use kernels::{MatrixScalar, ReductionScalar};
 pub use num::{AsPrimitive, Float, One, Real, Zero};
-pub use view::{Block, BlockMut, Column, Row};
+pub use ops::{matmul_view_into, matvec_view, matvec_view_into};
+pub use sparse::{
+    CscError, SparseCholeskyError, StaticCscCholesky, StaticCscCholeskyPattern, StaticCscLdlt,
+    StaticCscLdltPattern, StaticCscMatrix, StaticCscOrdering, StaticCscPattern,
+};
+pub use view::{
+    Block, BlockMut, Column, Map, MapMut, MatrixRead, MatrixWrite, Row, StridedMap, StridedMapMut,
+};
 
 #[doc(hidden)]
 pub use vectrix_macro as proc_macro;
@@ -44,6 +59,20 @@ pub struct Matrix<const M: usize, const N: usize, T = f32> {
 }
 
 impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
+    /// Copies a fixed-size matrix view into an owning matrix.
+    #[inline]
+    pub fn from_view<V>(view: &V) -> Self
+    where
+        T: Copy,
+        V: view::MatrixRead<M, N, T>,
+    {
+        Self::from_fn(|row, column| {
+            *view
+                .get(row, column)
+                .expect("matrix view dimensions match the destination")
+        })
+    }
+
     /// Returns a raw pointer to the underlying data.
     #[inline]
     fn as_ptr(&self) -> *const T {

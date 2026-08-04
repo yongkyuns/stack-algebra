@@ -1,4 +1,5 @@
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
 
 #include <cstddef>
 
@@ -158,6 +159,47 @@ void triangular_mul(const Scalar* input, const Scalar* rhs, std::size_t dimensio
 }
 
 template <typename Scalar>
+void quaternion_rotation(const Scalar* quaternion, Scalar* matrix_output, Scalar* vector_output,
+                         const Scalar* vector_input) {
+  Eigen::Quaternion<Scalar> rotation(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
+  Eigen::Map<DynamicMatrix<Scalar>> matrix_map(matrix_output, 3, 3);
+  Eigen::Map<const DynamicVector<Scalar>> vector_map(vector_input, 3);
+  Eigen::Map<DynamicVector<Scalar>> output_map(vector_output, 3);
+  rotation.normalize();
+  matrix_map = rotation.toRotationMatrix();
+  output_map = rotation * vector_map;
+}
+
+template <typename Scalar>
+void isometry_transform(const Scalar* quaternion, const Scalar* translation,
+                        const Scalar* point, Scalar* matrix_output, Scalar* point_output) {
+  Eigen::Quaternion<Scalar> rotation(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
+  Eigen::Transform<Scalar, 3, Eigen::Isometry> transform =
+      Eigen::Transform<Scalar, 3, Eigen::Isometry>::Identity();
+  using Vector3 = Eigen::Matrix<Scalar, 3, 1>;
+  Eigen::Map<const Vector3> translation_map(translation);
+  Eigen::Map<const Vector3> point_map(point);
+  Eigen::Map<DynamicMatrix<Scalar>> matrix_map(matrix_output, 4, 4);
+  Eigen::Map<Vector3> output_map(point_output);
+  rotation.normalize();
+  transform.linear() = rotation.toRotationMatrix();
+  transform.translation() = translation_map;
+  matrix_map = transform.matrix();
+  output_map = transform * point_map;
+}
+
+template <typename Scalar>
+void affine_transform(const Scalar* matrix, const Scalar* point, Scalar* point_output) {
+  using Matrix4 = Eigen::Matrix<Scalar, 4, 4, Eigen::ColMajor>;
+  using Vector3 = Eigen::Matrix<Scalar, 3, 1>;
+  Eigen::Map<const Matrix4> matrix_map(matrix);
+  Eigen::Map<const Vector3> point_map(point);
+  Eigen::Map<Vector3> output_map(point_output);
+  Eigen::Transform<Scalar, 3, Eigen::Affine> transform(matrix_map);
+  output_map = transform * point_map;
+}
+
+template <typename Scalar>
 int llt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, std::size_t columns,
               Scalar* output) {
   Eigen::Map<const DynamicMatrix<Scalar>> input_map(input, dimension, dimension);
@@ -273,6 +315,20 @@ int ldlt_solve(const Scalar* input, const Scalar* rhs, std::size_t dimension, st
       const SCALAR* input, const SCALAR* rhs, std::size_t dimension, std::size_t columns,          \
       SCALAR* output) {                                                                             \
     triangular_mul(input, rhs, dimension, columns, false, output);                                  \
+  }                                                                                                \
+  extern "C" void sa_eigen_quaternion_rotation_##SUFFIX(                                           \
+      const SCALAR* quaternion, SCALAR* matrix_output, SCALAR* vector_output,                     \
+      const SCALAR* vector_input) {                                                                \
+    quaternion_rotation(quaternion, matrix_output, vector_output, vector_input);                   \
+  }                                                                                                \
+  extern "C" void sa_eigen_isometry_transform_##SUFFIX(                                            \
+      const SCALAR* quaternion, const SCALAR* translation, const SCALAR* point,                   \
+      SCALAR* matrix_output, SCALAR* point_output) {                                               \
+    isometry_transform(quaternion, translation, point, matrix_output, point_output);               \
+  }                                                                                                \
+  extern "C" void sa_eigen_affine_transform_##SUFFIX(                                              \
+      const SCALAR* matrix, const SCALAR* point, SCALAR* point_output) {                            \
+    affine_transform(matrix, point, point_output);                                                 \
   }                                                                                                \
   extern "C" int sa_eigen_llt_solve_##SUFFIX(const SCALAR* input, const SCALAR* rhs,             \
                                                 std::size_t dimension, std::size_t columns,         \

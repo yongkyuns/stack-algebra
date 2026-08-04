@@ -1,12 +1,15 @@
 use crate::kernels::MatmulBackend;
-use crate::{Matrix, MatrixScalar, Real};
+use crate::{DecompositionError, Matrix, MatrixScalar, Real};
 
-/// Symmetric-indefinite LDLᵀ factorization with diagonal pivoting.
+/// Symmetric LDLᵀ factorization with Eigen-compatible diagonal pivoting.
 ///
 /// The factorization has the form `P * A * Pᵀ = L * D * Lᵀ`, where `D` is
 /// diagonal, `L` is unit lower-triangular, and `P` is represented internally
 /// by a fixed-size permutation index array. The factor matrix stores `L` below
 /// the diagonal and `D` on the diagonal, matching Eigen's compact layout.
+/// This is the diagonal-`D` variant; matrices that require a 2x2 pivot block
+/// return [`DecompositionError::ZeroPivot`] rather than using a
+/// Bunch–Kaufman block.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ldlt<const D: usize, T> {
     factor: Matrix<D, D, T>,
@@ -14,13 +17,52 @@ pub struct Ldlt<const D: usize, T> {
 }
 
 impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
-    /// Computes a symmetric diagonal-pivot LDLᵀ decomposition.
+    /// Recomputes this diagonal-pivot factorization in place.
+    #[inline]
+    pub fn try_compute(&mut self, matrix: &Matrix<D, D, T>) -> Result<(), DecompositionError> {
+        Self::try_factorize_into(matrix, self)
+    }
+
+    /// Recomputes this no-pivot factorization in place.
+    #[inline]
+    pub fn try_compute_no_pivot(
+        &mut self,
+        matrix: &Matrix<D, D, T>,
+    ) -> Result<(), DecompositionError> {
+        Self::try_factorize_no_pivot_into(matrix, self)
+    }
+
+    /// Computes an Eigen-compatible symmetric diagonal-pivot LDLᵀ decomposition.
     ///
     /// Returns `None` for non-finite or singular input. The input is expected
     /// to be symmetric; only its lower triangle is read.
     #[inline]
     pub fn decompose(matrix: &Matrix<D, D, T>) -> Option<Self> {
-        Self::decompose_impl::<true>(matrix)
+        Self::try_decompose(matrix).ok()
+    }
+
+    /// Computes a symmetric diagonal-pivot LDLᵀ decomposition with a typed
+    /// failure result.
+    #[inline]
+    pub fn try_decompose(matrix: &Matrix<D, D, T>) -> Result<Self, DecompositionError> {
+        let mut output = Self {
+            factor: *matrix,
+            permutation: core::array::from_fn(|index| index),
+        };
+        Self::decompose_impl::<true>(&mut output)?;
+        Ok(output)
+    }
+
+    /// Computes a symmetric diagonal-pivot LDLᵀ decomposition into caller-provided storage.
+    /// On failure, `output` may contain a partial factorization.
+    #[inline]
+    fn try_factorize_into(
+        matrix: &Matrix<D, D, T>,
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
+        output.factor = *matrix;
+        output.permutation = core::array::from_fn(|index| index);
+        Self::decompose_impl::<true>(output)
     }
 
     /// Computes an LDLᵀ decomposition without diagonal pivoting.
@@ -30,13 +72,37 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
     /// when the matrix may need pivoting for numerical stability.
     #[inline]
     pub fn decompose_no_pivot(matrix: &Matrix<D, D, T>) -> Option<Self> {
-        Self::decompose_impl::<false>(matrix)
+        Self::try_decompose_no_pivot(matrix).ok()
+    }
+
+    /// Computes an LDLᵀ decomposition without diagonal pivoting with a typed
+    /// failure result.
+    #[inline]
+    pub fn try_decompose_no_pivot(matrix: &Matrix<D, D, T>) -> Result<Self, DecompositionError> {
+        let mut output = Self {
+            factor: *matrix,
+            permutation: core::array::from_fn(|index| index),
+        };
+        Self::decompose_impl::<false>(&mut output)?;
+        Ok(output)
+    }
+
+    /// Computes an LDLᵀ decomposition without pivoting into caller-provided storage.
+    /// On failure, `output` may contain a partial factorization.
+    #[inline]
+    fn try_factorize_no_pivot_into(
+        matrix: &Matrix<D, D, T>,
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
+        output.factor = *matrix;
+        output.permutation = core::array::from_fn(|index| index);
+        Self::decompose_impl::<false>(output)
     }
 
     #[inline]
-    fn decompose_impl<const PIVOTING: bool>(matrix: &Matrix<D, D, T>) -> Option<Self> {
-        let mut factor = *matrix;
-        let mut permutation = core::array::from_fn(|index| index);
+    fn decompose_impl<const PIVOTING: bool>(output: &mut Self) -> Result<(), DecompositionError> {
+        let factor = &mut output.factor;
+        let permutation = &mut output.permutation;
 
         const BLOCK_SIZE: usize = 16;
         let mut block_start = 0;
@@ -44,23 +110,29 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             let block_end = core::cmp::min(block_start + BLOCK_SIZE, D);
             for diagonal in block_start..block_end {
                 let pivot = if PIVOTING {
-                    Self::pivot_index(&factor, diagonal)
+                    Self::pivot_index(factor, diagonal)
                 } else {
                     diagonal
                 };
                 let pivot_value = factor[(pivot, pivot)];
-                if !pivot_value.is_finite() || pivot_value == T::zero() {
-                    return None;
+                if !pivot_value.is_finite() {
+                    return Err(DecompositionError::NonFinite);
+                }
+                if pivot_value == T::zero() {
+                    return Err(DecompositionError::ZeroPivot);
                 }
                 if pivot != diagonal {
-                    Self::swap_lower_rows(&mut factor, diagonal, pivot, diagonal);
-                    Self::swap_symmetric_lower(&mut factor, diagonal, pivot, diagonal);
+                    Self::swap_lower_rows(factor, diagonal, pivot, diagonal);
+                    Self::swap_symmetric_lower(factor, diagonal, pivot, diagonal);
                     permutation.swap(diagonal, pivot);
                 }
 
                 let diagonal_value = factor[(diagonal, diagonal)];
-                if !diagonal_value.is_finite() || diagonal_value == T::zero() {
-                    return None;
+                if !diagonal_value.is_finite() {
+                    return Err(DecompositionError::NonFinite);
+                }
+                if diagonal_value == T::zero() {
+                    return Err(DecompositionError::ZeroPivot);
                 }
                 factor[(diagonal, diagonal)] = diagonal_value;
 
@@ -69,7 +141,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                     let column = &mut data[diagonal * D + diagonal + 1..diagonal * D + D];
                     T::Matmul::scale_divide(column, diagonal_value);
                     if column.iter().any(|value| !value.is_finite()) {
-                        return None;
+                        return Err(DecompositionError::NonFinite);
                     }
                 }
 
@@ -84,14 +156,11 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                 }
             }
 
-            T::Matmul::symmetric_rank_k_update(&mut factor, block_start, block_end);
+            T::Matmul::symmetric_rank_k_update(factor, block_start, block_end);
             block_start = block_end;
         }
 
-        Some(Self {
-            factor,
-            permutation,
-        })
+        Ok(())
     }
 
     #[inline]
@@ -247,6 +316,13 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
 }
 
 impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
+    /// Computes a symmetric diagonal-pivot LDLᵀ factorization with a typed
+    /// failure result.
+    #[inline]
+    pub fn try_ldlt(&self) -> Result<Ldlt<D, T>, DecompositionError> {
+        Ldlt::try_decompose(self)
+    }
+
     /// Computes a symmetric diagonal-pivot LDLᵀ factorization of this matrix.
     #[inline]
     pub fn ldlt(&self) -> Option<Ldlt<D, T>> {
@@ -258,13 +334,33 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
     pub fn ldlt_no_pivot(&self) -> Option<Ldlt<D, T>> {
         Ldlt::decompose_no_pivot(self)
     }
+
+    /// Computes an LDLᵀ factorization without diagonal pivoting with a typed
+    /// failure result.
+    #[inline]
+    pub fn try_ldlt_no_pivot(&self) -> Result<Ldlt<D, T>, DecompositionError> {
+        Ldlt::try_decompose_no_pivot(self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{matrix, Matrix};
+    use crate::{matrix, DecompositionError, Matrix};
+
+    #[test]
+    fn typed_errors_distinguish_ldlt_failures() {
+        assert_eq!(
+            matrix![f64::NAN].try_ldlt(),
+            Err(DecompositionError::NonFinite)
+        );
+        assert_eq!(
+            matrix![0.0_f64].try_ldlt_no_pivot(),
+            Err(DecompositionError::ZeroPivot)
+        );
+        assert!(matrix![0.0_f64].ldlt_no_pivot().is_none());
+    }
 
     #[test]
     fn reconstructs_symmetric_indefinite_matrix() {
@@ -291,6 +387,22 @@ mod tests {
     }
 
     #[test]
+    fn reuses_caller_provided_factor_storage() {
+        let first = matrix![4.0_f64, 1.0; 1.0, 3.0];
+        let second = matrix![0.0_f64, 2.0; 2.0, 3.0];
+        let mut factor = first.ldlt().expect("first matrix is nonsingular");
+        factor
+            .try_compute(&second)
+            .expect("second matrix is nonsingular");
+        let transformed = factor.permutation() * second * factor.permutation().transpose();
+        assert_relative_eq!(
+            transformed,
+            factor.lower() * factor.diagonal_matrix() * factor.lower().transpose(),
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
     fn no_pivot_reconstructs_stable_matrix() {
         let matrix = matrix![
             4.0_f64, 1.0, 0.5;
@@ -311,6 +423,13 @@ mod tests {
         let matrix = matrix![0.0_f64, 1.0; 1.0, 2.0];
         assert!(matrix.ldlt_no_pivot().is_none());
         assert!(matrix.ldlt().is_some());
+    }
+
+    #[test]
+    fn diagonal_pivoting_rejects_matrix_requiring_two_by_two_pivot() {
+        let matrix = matrix![0.0_f64, 1.0; 1.0, 0.0];
+        assert_eq!(matrix.try_ldlt(), Err(DecompositionError::ZeroPivot));
+        assert!(matrix.ldlt().is_none());
     }
 
     #[test]

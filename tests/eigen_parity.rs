@@ -1,6 +1,9 @@
 #![cfg(feature = "eigen-compare")]
 
-use stack_algebra::{Matrix, Vector};
+use stack_algebra::{
+    AffineTransform, Isometry, Matrix, Quaternion, StaticCscCholesky, StaticCscCholeskyPattern,
+    StaticCscLdlt, StaticCscMatrix, StaticCscOrdering, Vector,
+};
 
 unsafe extern "C" {
     fn sa_eigen_add_f32(
@@ -165,6 +168,20 @@ unsafe extern "C" {
         columns: usize,
         output: *mut f64,
     );
+    fn sa_eigen_quaternion_rotation_f64(
+        quaternion: *const f64,
+        matrix_output: *mut f64,
+        vector_output: *mut f64,
+        vector_input: *const f64,
+    );
+    fn sa_eigen_isometry_transform_f64(
+        quaternion: *const f64,
+        translation: *const f64,
+        point: *const f64,
+        matrix_output: *mut f64,
+        point_output: *mut f64,
+    );
+    fn sa_eigen_affine_transform_f64(matrix: *const f64, point: *const f64, point_output: *mut f64);
     fn sa_eigen_self_adjoint_eigenvectors_f64(
         input: *const f64,
         dimension: usize,
@@ -333,7 +350,7 @@ fn elementary_operations_match_eigen_bits() {
             eigen.as_mut_slice().as_mut_ptr(),
         );
     }
-    assert_eq!((&lhs + &rhs).as_slice(), eigen.as_slice());
+    assert_eq!((lhs + rhs).as_slice(), eigen.as_slice());
 
     let mut eigen_transpose = Matrix::<3, 2, f64>::zeros();
     unsafe {
@@ -462,6 +479,110 @@ fn cholesky_solves_match_eigen() {
 }
 
 #[test]
+fn sparse_cholesky_solves_match_eigen() {
+    let dense = Matrix::<3, 3, f64>::from_rows([[4.0, 1.0, 1.0], [1.0, 3.0, 0.0], [1.0, 0.0, 2.0]]);
+    let sparse = StaticCscMatrix::<3, 3, 5, f64>::from_pattern(
+        &[4.0, 1.0, 1.0, 3.0, 2.0],
+        &[0, 1, 2, 1, 2],
+        &[0, 3, 4, 5],
+    )
+    .expect("lower CSC pattern is valid");
+    let rhs = Vector::<3, f64>::from_columns([[1.0, 2.0, 3.0]]);
+    let mut eigen_solution = Vector::<3, f64>::zeros();
+    let eigen_status = unsafe {
+        sa_eigen_llt_solve_f64(
+            dense.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            3,
+            1,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        )
+    };
+    assert_eq!(eigen_status, 1);
+    let sparse_solution = StaticCscCholesky::<3, 6, f64>::decompose(&sparse)
+        .expect("sparse matrix is positive-definite")
+        .solve(&rhs);
+    assert_close_f64(sparse_solution.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn sparse_banded_cholesky_solves_match_eigen() {
+    let dense = Matrix::<4, 4, f64>::from_rows([
+        [4.0, 1.0, 1.0, 0.0],
+        [1.0, 4.0, 1.0, 1.0],
+        [1.0, 1.0, 4.0, 1.0],
+        [0.0, 1.0, 1.0, 4.0],
+    ]);
+    let sparse = StaticCscMatrix::<4, 4, 9, f64>::from_pattern(
+        &[4.0, 1.0, 1.0, 4.0, 1.0, 1.0, 4.0, 1.0, 4.0],
+        &[0, 1, 2, 1, 2, 3, 2, 3, 3],
+        &[0, 3, 6, 8, 9],
+    )
+    .expect("banded lower CSC pattern is valid");
+    let rhs = Vector::<4, f64>::from_columns([[1.0, 2.0, 3.0, 4.0]]);
+    let mut eigen_solution = Vector::<4, f64>::zeros();
+    let eigen_status = unsafe {
+        sa_eigen_llt_solve_f64(
+            dense.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            4,
+            1,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        )
+    };
+    assert_eq!(eigen_status, 1);
+    let sparse_solution = stack_algebra::StaticCscCholesky::<4, 16, f64>::decompose(&sparse)
+        .expect("sparse matrix is positive-definite")
+        .solve(&rhs);
+    assert_close_f64(sparse_solution.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
+fn sparse_star_fill_cholesky_solves_match_eigen() {
+    let dense = Matrix::<4, 4, f64>::from_rows([
+        [4.0, 1.0, 1.0, 1.0],
+        [1.0, 4.0, 0.0, 0.0],
+        [1.0, 0.0, 4.0, 0.0],
+        [1.0, 0.0, 0.0, 4.0],
+    ]);
+    let sparse = StaticCscMatrix::<4, 4, 10, f64>::from_pattern(
+        &[4.0, 1.0, 1.0, 1.0, 4.0, 4.0, 4.0],
+        &[0, 1, 2, 3, 1, 2, 3],
+        &[0, 4, 5, 6, 7],
+    )
+    .expect("star lower CSC pattern is valid");
+    let rhs = Vector::<4, f64>::from_columns([[1.0, 2.0, 3.0, 4.0]]);
+    let mut eigen_solution = Vector::<4, f64>::zeros();
+    let eigen_status = unsafe {
+        sa_eigen_llt_solve_f64(
+            dense.as_slice().as_ptr(),
+            rhs.as_slice().as_ptr(),
+            4,
+            1,
+            eigen_solution.as_mut_slice().as_mut_ptr(),
+        )
+    };
+    assert_eq!(eigen_status, 1);
+    let sparse_solution = stack_algebra::StaticCscCholesky::<4, 10, f64>::decompose(&sparse)
+        .expect("sparse matrix is positive-definite")
+        .solve(&rhs);
+    assert_close_f64(sparse_solution.as_slice(), eigen_solution.as_slice());
+
+    let ordering = StaticCscOrdering::minimum_degree(&sparse);
+    let ordered_pattern =
+        StaticCscCholeskyPattern::<4, 10>::analyze_with_ordering(&sparse, ordering)
+            .expect("ordered star pattern is valid");
+    let ordered = ordered_pattern
+        .prepare_ordered(&sparse)
+        .expect("ordered star matrix is valid");
+    let ordered_solution = ordered_pattern
+        .factor_ordered(&ordered)
+        .expect("ordered star matrix is positive-definite")
+        .solve(&rhs);
+    assert_close_f64(ordered_solution.as_slice(), eigen_solution.as_slice());
+}
+
+#[test]
 fn ldlt_solves_match_eigen() {
     let matrix_f64 =
         Matrix::<3, 3, f64>::from_rows([[0.0, 2.0, 1.0], [2.0, 3.0, 4.0], [1.0, 4.0, 5.0]]);
@@ -503,6 +624,43 @@ fn ldlt_solves_match_eigen() {
     factor_f32.solve_into(&rhs_f32, &mut output_f32);
     assert_close_f32(solution_f32.as_slice(), eigen_solution_f32.as_slice());
     assert_close_f32(output_f32.as_slice(), eigen_solution_f32.as_slice());
+
+    let sparse_dense =
+        Matrix::<3, 3, f64>::from_rows([[4.0, 1.0, 2.0], [1.0, -3.0, 1.0], [2.0, 1.0, 2.0]]);
+    let sparse = StaticCscMatrix::<3, 3, 6, f64>::from_pattern(
+        &[4.0, 1.0, 2.0, -3.0, 1.0, 2.0],
+        &[0, 1, 2, 1, 2, 2],
+        &[0, 3, 5, 6],
+    )
+    .expect("sparse indefinite CSC pattern is valid");
+    let sparse_rhs = Vector::<3, f64>::from_columns([[1.0, 2.0, 3.0]]);
+    let mut sparse_eigen_solution = Vector::<3, f64>::zeros();
+    let sparse_eigen_status = unsafe {
+        sa_eigen_ldlt_solve_f64(
+            sparse_dense.as_slice().as_ptr(),
+            sparse_rhs.as_slice().as_ptr(),
+            3,
+            1,
+            sparse_eigen_solution.as_mut_slice().as_mut_ptr(),
+        )
+    };
+    assert_eq!(sparse_eigen_status, 1);
+    let sparse_solution = StaticCscLdlt::<3, 6, f64>::decompose(&sparse)
+        .expect("sparse indefinite matrix is nonsingular")
+        .solve(&sparse_rhs);
+    assert_close_f64(sparse_solution.as_slice(), sparse_eigen_solution.as_slice());
+
+    let pivoted_sparse = StaticCscMatrix::<3, 3, 6, f64>::from_pattern(
+        &[0.0, 2.0, 1.0, 3.0, 4.0, 5.0],
+        &[0, 1, 2, 1, 2, 2],
+        &[0, 3, 5, 6],
+    )
+    .expect("pivoted sparse CSC pattern is valid");
+    let pivoted_solution =
+        StaticCscLdlt::<3, 6, f64>::decompose_with_diagonal_pivoting(&pivoted_sparse, 1e-12)
+            .expect("diagonal pivoting should recover the sparse factorization")
+            .solve(&rhs_f64);
+    assert_close_f64(pivoted_solution.as_slice(), eigen_solution_f64.as_slice());
 }
 
 fn compare_matvec_f64<const M: usize, const N: usize>(seed: u64) {
@@ -716,7 +874,7 @@ fn compare_square_matmul<const D: usize>() {
             eigen.as_mut_slice().as_mut_ptr(),
         );
     }
-    assert_close_f64((&lhs * &rhs).as_slice(), eigen.as_slice());
+    assert_close_f64((lhs * rhs).as_slice(), eigen.as_slice());
 }
 
 fn compare_rectangular_f64<const M: usize, const N: usize, const P: usize>() {
@@ -733,7 +891,7 @@ fn compare_rectangular_f64<const M: usize, const N: usize, const P: usize>() {
             eigen.as_mut_slice().as_mut_ptr(),
         );
     }
-    assert_close_f64((&lhs * &rhs).as_slice(), eigen.as_slice());
+    assert_close_f64((lhs * rhs).as_slice(), eigen.as_slice());
 }
 
 fn compare_rectangular_f32<const M: usize, const N: usize, const P: usize>() {
@@ -750,7 +908,7 @@ fn compare_rectangular_f32<const M: usize, const N: usize, const P: usize>() {
             eigen.as_mut_slice().as_mut_ptr(),
         );
     }
-    assert_close_f32((&lhs * &rhs).as_slice(), eigen.as_slice());
+    assert_close_f32((lhs * rhs).as_slice(), eigen.as_slice());
 }
 
 #[test]
@@ -801,7 +959,7 @@ fn f32_products_match_eigen() {
             eigen.as_mut_slice().as_mut_ptr(),
         );
     }
-    assert_close_f32((&lhs * &rhs).as_slice(), eigen.as_slice());
+    assert_close_f32((lhs * rhs).as_slice(), eigen.as_slice());
 
     let mut eigen_add = Matrix::<3, 2, f32>::zeros();
     unsafe {
@@ -813,7 +971,7 @@ fn f32_products_match_eigen() {
             eigen_add.as_mut_slice().as_mut_ptr(),
         );
     }
-    assert_eq!((&lhs + &lhs).as_slice(), eigen_add.as_slice());
+    assert_eq!((lhs + lhs).as_slice(), eigen_add.as_slice());
 }
 
 #[test]
@@ -1170,6 +1328,100 @@ fn triangular_views_match_eigen() {
     upper_view.mul_into(&rhs, &mut upper_product);
     assert_close_f64(lower_product.as_slice(), eigen_lower_product.as_slice());
     assert_close_f64(upper_product.as_slice(), eigen_upper_product.as_slice());
+}
+
+#[test]
+fn quaternion_rotation_matches_eigen() {
+    let axis = Vector::<3, f64>::from_columns([[0.0, 0.0, 1.0]]);
+    let quaternion =
+        Quaternion::from_axis_angle(&axis, core::f64::consts::FRAC_PI_2).expect("axis is nonzero");
+    let vector = Vector::<3, f64>::from_columns([[1.0, 0.0, 0.0]]);
+    let quaternion_input = [
+        quaternion.scalar(),
+        quaternion.vector()[0],
+        quaternion.vector()[1],
+        quaternion.vector()[2],
+    ];
+    let mut eigen_matrix = Matrix::<3, 3, f64>::zeros();
+    let mut eigen_vector = Vector::<3, f64>::zeros();
+    unsafe {
+        sa_eigen_quaternion_rotation_f64(
+            quaternion_input.as_ptr(),
+            eigen_matrix.as_mut_slice().as_mut_ptr(),
+            eigen_vector.as_mut_slice().as_mut_ptr(),
+            vector.as_slice().as_ptr(),
+        );
+    }
+
+    let rotation = quaternion
+        .to_rotation_matrix()
+        .expect("quaternion is valid");
+    assert_close_f64(rotation.matrix().as_slice(), eigen_matrix.as_slice());
+    assert_close_f64(rotation.apply(&vector).as_slice(), eigen_vector.as_slice());
+}
+
+#[test]
+fn isometry_transform_matches_eigen() {
+    let quaternion = Quaternion::from_axis_angle(
+        &Vector::<3, f64>::from_columns([[0.0, 0.0, 1.0]]),
+        core::f64::consts::FRAC_PI_2,
+    )
+    .expect("axis is nonzero");
+    let translation = Vector::<3, f64>::from_columns([[1.0, 2.0, 3.0]]);
+    let point = Vector::<3, f64>::from_columns([[0.5, -1.0, 2.0]]);
+    let quaternion_input = [
+        quaternion.scalar(),
+        quaternion.vector()[0],
+        quaternion.vector()[1],
+        quaternion.vector()[2],
+    ];
+    let rotation = quaternion
+        .to_rotation_matrix()
+        .expect("quaternion is valid");
+    let isometry = Isometry::from_parts(rotation, translation);
+    let mut eigen_matrix = Matrix::<4, 4, f64>::zeros();
+    let mut eigen_point = Vector::<3, f64>::zeros();
+    unsafe {
+        sa_eigen_isometry_transform_f64(
+            quaternion_input.as_ptr(),
+            translation.as_slice().as_ptr(),
+            point.as_slice().as_ptr(),
+            eigen_matrix.as_mut_slice().as_mut_ptr(),
+            eigen_point.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    assert_close_f64(
+        isometry.to_homogeneous().as_slice(),
+        eigen_matrix.as_slice(),
+    );
+    assert_close_f64(
+        isometry.apply_point(&point).as_slice(),
+        eigen_point.as_slice(),
+    );
+}
+
+#[test]
+fn affine_transform_matches_eigen() {
+    let affine_matrix = Matrix::<4, 4, f64>::from_rows([
+        [2.0, 0.25, 0.0, 1.0],
+        [0.0, 3.0, -0.5, -2.0],
+        [0.25, 0.0, 1.5, 0.75],
+        [0.0, 0.0, 0.0, 1.0],
+    ]);
+    let point = Vector::<3, f64>::from_columns([[0.5, -1.0, 2.0]]);
+    let affine = AffineTransform::from_matrix(affine_matrix).expect("valid affine matrix");
+    let mut eigen_point = Vector::<3, f64>::zeros();
+    unsafe {
+        sa_eigen_affine_transform_f64(
+            affine_matrix.as_slice().as_ptr(),
+            point.as_slice().as_ptr(),
+            eigen_point.as_mut_slice().as_mut_ptr(),
+        );
+    }
+    assert_close_f64(
+        affine.apply_point(&point).as_slice(),
+        eigen_point.as_slice(),
+    );
 }
 
 #[test]
