@@ -98,6 +98,18 @@ fn apply_q_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
 /// The factorization stores the upper-triangular `R` entries in the upper
 /// triangle and the Householder vectors below the diagonal. The vectors and
 /// their coefficients are sufficient to apply `Qᵀ` without materializing `Q`.
+///
+/// # Examples
+///
+/// ```
+/// use stack_algebra::matrix;
+///
+/// let a = matrix![1.0_f64, 0.0; 0.0, 1.0; 1.0, 1.0];
+/// let rhs = matrix![2.0_f64; 3.0; 5.0];
+/// let qr = a.householder_qr();
+/// let x = qr.solve_least_squares(&rhs).expect("full column rank");
+/// assert!((a * x - rhs).norm() < 1.0e-12);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HouseholderQr<const M: usize, const N: usize, T> {
     factors: Matrix<M, N, T>,
@@ -364,6 +376,18 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Matrix<M, N, T> {
 /// The factorization satisfies `A * P = Q * R`, where `P` is represented by
 /// [`Self::permutation`]. Column pivoting improves rank detection and the
 /// numerical behavior of least-squares solves for ill-conditioned inputs.
+///
+/// # Examples
+///
+/// ```
+/// use stack_algebra::matrix;
+///
+/// let a = matrix![1.0_f64, 0.0; 0.0, 1.0; 1.0, 1.0];
+/// let rhs = matrix![2.0_f64; 3.0; 5.0];
+/// let qr = a.col_piv_householder_qr();
+/// let x = qr.solve_least_squares(&rhs).expect("full column rank");
+/// assert!((a * x - rhs).norm() < 1.0e-12);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColPivHouseholderQr<const M: usize, const N: usize, T> {
     factors: Matrix<M, N, T>,

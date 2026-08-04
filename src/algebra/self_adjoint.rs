@@ -6,6 +6,16 @@ use crate::{DecompositionError, Matrix, Real};
 /// The selected triangle is authoritative and is mirrored on reads. This
 /// matches Eigen's `SelfAdjointView`: values in the opposite triangle are not
 /// consulted by the view.
+///
+/// # Examples
+///
+/// ```
+/// use stack_algebra::matrix;
+///
+/// let storage = matrix![1.0_f64, 99.0; 2.0, 3.0];
+/// let symmetric = storage.self_adjoint_lower().to_matrix();
+/// assert_eq!(symmetric, matrix![1.0_f64, 2.0; 2.0, 3.0]);
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct SelfAdjointView<'a, const D: usize, T, const LOWER: bool> {
     matrix: &'a Matrix<D, D, T>,

@@ -55,6 +55,18 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
     ///
     /// Returns `None` for non-finite or singular input. The input is expected
     /// to be symmetric; only its lower triangle is read.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stack_algebra::matrix;
+    ///
+    /// let a = matrix![4.0_f64, 2.0; 2.0, 3.0];
+    /// let ldlt = a.try_ldlt().expect("nonsingular symmetric input");
+    /// let rhs = matrix![1.0_f64; 0.0];
+    /// let x = ldlt.solve(&rhs);
+    /// assert!((a * x - rhs).norm() < 1.0e-12);
+    /// ```
     #[inline]
     pub fn decompose(matrix: &Matrix<D, D, T>) -> Option<Self> {
         Self::try_decompose(matrix).ok()

@@ -6,6 +6,18 @@ use crate::{DecompositionError, Matrix, MatrixScalar, Real};
 /// This factorization follows Eigen's `PartialPivLU`: it assumes the input is
 /// square and invertible. Use a future rank-revealing decomposition when a
 /// singularity decision is required.
+///
+/// # Examples
+///
+/// ```
+/// use stack_algebra::{matrix, PartialPivLu};
+///
+/// let a = matrix![3.0_f64, 1.0; 1.0, 2.0];
+/// let lu: PartialPivLu<2, f64> = a.partial_piv_lu();
+/// let rhs = matrix![5.0_f64; 5.0];
+/// let x = lu.solve(&rhs);
+/// assert!((a * x - rhs).norm() < 1.0e-12);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PartialPivLu<const D: usize, T> {
     lower: Matrix<D, D, T>,

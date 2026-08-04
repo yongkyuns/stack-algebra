@@ -1,6 +1,20 @@
 use crate::{Matrix, MatrixScalar, Real};
 
 /// Lower-triangular view of a fixed-size square matrix.
+///
+/// The view borrows the matrix and ignores entries above the diagonal. Use
+/// [`Matrix::lower_triangular`] to create one without copying data.
+///
+/// # Examples
+///
+/// ```
+/// use stack_algebra::matrix;
+///
+/// let lower = matrix![2.0_f64, 0.0; 1.0, 3.0];
+/// let rhs = matrix![2.0_f64; 7.0];
+/// let x = lower.lower_triangular().solve(&rhs);
+/// assert!((lower.lower_triangular().matrix() * x - rhs).norm() < 1.0e-12);
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct LowerTriangular<'a, const D: usize, T> {
     matrix: &'a Matrix<D, D, T>,
@@ -58,6 +72,9 @@ impl<'a, const D: usize, T: Real + MatrixScalar> LowerTriangular<'a, D, T> {
 }
 
 /// Upper-triangular view of a fixed-size square matrix.
+///
+/// The view borrows the matrix and ignores entries below the diagonal. Use
+/// [`Matrix::upper_triangular`] to create one without copying data.
 #[derive(Clone, Copy, Debug)]
 pub struct UpperTriangular<'a, const D: usize, T> {
     matrix: &'a Matrix<D, D, T>,

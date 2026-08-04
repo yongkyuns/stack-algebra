@@ -13,6 +13,10 @@ mod arm;
 
 #[doc(hidden)]
 pub trait MatmulBackend<T> {
+    /// Multiplies fixed-size matrices into caller-provided output storage.
+    ///
+    /// Implementations are selected through [`MatrixScalar::Matmul`], so the
+    /// dispatch is resolved at compile time and does not add a runtime branch.
     fn run<const M: usize, const N: usize, const P: usize>(
         lhs: &Matrix<M, N, T>,
         rhs: &Matrix<N, P, T>,
@@ -70,6 +74,7 @@ pub trait MatmulBackend<T> {
 
 #[doc(hidden)]
 pub trait ReductionBackend<T> {
+    /// Computes a fixed-size vector dot product.
     fn dot<const M: usize>(lhs: &Vector<M, T>, rhs: &Vector<M, T>) -> T;
 
     fn squared_norm<const M: usize, const N: usize>(matrix: &Matrix<M, N, T>) -> T;
@@ -90,11 +95,21 @@ pub use portable::{ScalarMatmul, ScalarReduction};
 /// `ScalarMatmul` kernel provides the portable fallback; specialized kernels
 /// can be associated when the scalar type has a matching implementation.
 pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
+    /// Backend used by [`crate::Matrix::mul_into`] and matrix multiplication.
+    ///
+    /// The default scalar implementations use [`ScalarMatmul`]. Architecture
+    /// modules can provide a packet backend for a scalar type when the target
+    /// exposes a suitable SIMD instruction set.
     type Matmul: MatmulBackend<Self>;
 }
 
 /// Associates a scalar type with its compile-time reduction kernels.
 pub trait ReductionScalar: MatrixScalar {
+    /// Backend used by fixed-size dot, norm, and matrix-vector reductions.
+    ///
+    /// The default implementation is [`ScalarReduction`]. As with matrix
+    /// multiplication, choosing a backend is a type-level operation with no
+    /// runtime backend lookup.
     type Reduction: ReductionBackend<Self>;
 }
 
@@ -219,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn scalar_f64_matmul_covers_tails_and_robotics_shapes() {
+    fn scalar_f64_matmul_covers_tails_and_rectangular_shapes() {
         check_f64::<1, 1, 1>();
         check_f64::<2, 3, 4>();
         check_f64::<3, 5, 2>();
@@ -231,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn scalar_f32_matmul_covers_tails_and_robotics_shapes() {
+    fn scalar_f32_matmul_covers_tails_and_rectangular_shapes() {
         check_f32::<1, 1, 1>();
         check_f32::<2, 3, 4>();
         check_f32::<3, 5, 2>();

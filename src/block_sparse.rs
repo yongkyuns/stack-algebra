@@ -1,3 +1,33 @@
+//! Fixed-capacity block sparse storage and factorization.
+//!
+//! Block sparse matrices store dense compile-time-sized blocks in CSC or CSR
+//! structure. This is useful when a problem is naturally partitioned into
+//! state-variable blocks: the block pattern stays compact while each block
+//! retains dense, cache-friendly arithmetic. All storage is inline and bounded
+//! by `MAX_BLOCK_NNZ`.
+//!
+//! ```
+//! use stack_algebra::{Matrix, StaticBlockCscMatrix};
+//!
+//! type Blocks = StaticBlockCscMatrix<1, 1, 2, 2, 3, f64>;
+//! let a = Blocks::from_pattern(
+//!     &[
+//!         Matrix::from_rows([[4.0]]),
+//!         Matrix::from_rows([[1.0]]),
+//!         Matrix::from_rows([[3.0]]),
+//!     ],
+//!     &[0, 1, 1],
+//!     &[0, 2, 3],
+//! ).unwrap();
+//! let mut y = [0.0; 2];
+//! a.matvec_into(&[1.0, 2.0], &mut y).unwrap();
+//! assert_eq!(y, [4.0, 7.0]);
+//! ```
+//!
+//! Native block Cholesky and LDLᵀ require square blocks and square block
+//! grids. For rectangular or unsupported block layouts, use
+//! [`StaticBlockCscMatrix::to_scalar_csc`] as an explicit bounded adapter.
+
 use crate::{
     CscError, DecompositionError, Ldlt, Matrix, MatrixScalar, Real, SparseCholeskyError,
     StaticCscCholesky, StaticCscMatrix, StaticCscOrdering, StaticCscPattern, Zero,
@@ -8,6 +38,11 @@ use crate::{
 /// The CSC pattern indexes block rows and block columns. Each stored value is
 /// a dense `BLOCK_ROWS x BLOCK_COLS` block, so the scalar dimensions are
 /// `BLOCK_GRID_ROWS * BLOCK_ROWS` by `BLOCK_GRID_COLS * BLOCK_COLS`.
+///
+/// Block CSC uses block-column pointers, so `block_column_pointers` has
+/// `BLOCK_GRID_COLS + 1` entries and block row indices must be strictly
+/// increasing within each block column. Numeric updates can use
+/// [`Self::set_values`] without rebuilding the pattern.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StaticBlockCscMatrix<
     const BLOCK_ROWS: usize,
@@ -333,6 +368,11 @@ where
 }
 
 /// Symbolic pattern for a native block sparse Cholesky factor.
+///
+/// Create one with [`Self::analyze`] (or an ordering/pivoting variant), then
+/// reuse it with [`Self::factor`] for changing numeric block values. The
+/// factor pattern owns only bounded arrays and can be stored alongside a
+/// generated solver state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaticBlockCscCholeskyPattern<
     const BLOCK_ROWS: usize,
@@ -366,6 +406,10 @@ pub type StaticBlockCscLdltPattern<
 /// off-diagonal blocks. It requires square block and grid dimensions at
 /// runtime; the explicit dimensions remain part of the type so storage is
 /// still fully bounded at compile time.
+///
+/// `decompose` combines analysis and factorization. For repeated solves,
+/// retain [`Self::pattern`] and use the symbolic pattern to recompute numeric
+/// values instead of redoing fill analysis.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StaticBlockCscCholesky<
     const BLOCK_ROWS: usize,
@@ -393,6 +437,10 @@ pub struct StaticBlockCscCholesky<
 /// Diagonal blocks use compact `L·D` storage with local Bunch–Kaufman scalar
 /// pivots. Local permutations are retained separately so off-diagonal blocks
 /// remain dense and allocation-free.
+///
+/// This is the block analogue of [`crate::StaticCscLdlt`]. It supports local
+/// scalar pivoting inside diagonal blocks and exposes the selected pivots via
+/// [`Self::local_pivot_blocks`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StaticBlockCscLdlt<
     const BLOCK_ROWS: usize,
@@ -1945,6 +1993,11 @@ fn map_ldlt_error(error: DecompositionError) -> SparseCholeskyError {
 /// The CSR pattern indexes block rows and block columns. Each stored value is
 /// a dense `BLOCK_ROWS x BLOCK_COLS` block, so the scalar dimensions are
 /// `BLOCK_GRID_ROWS * BLOCK_ROWS` by `BLOCK_GRID_COLS * BLOCK_COLS`.
+///
+/// CSR is convenient for row-oriented products. Its row pointers have
+/// `BLOCK_GRID_ROWS + 1` entries and block column indices are strictly
+/// increasing within each block row. The storage is still fixed-capacity and
+/// allocation-free; use CSC when sparse factorization is required.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StaticBlockCsrMatrix<
     const BLOCK_ROWS: usize,

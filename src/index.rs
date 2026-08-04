@@ -1,3 +1,22 @@
+//! Indexing helpers for fixed-size matrices.
+//!
+//! Most users should use `matrix[row]`, `matrix[(row, column)]`, `get`, or
+//! `get_mut` directly. [`MatrixIndex`] is the sealed extension point used by
+//! those methods; it is public so generic code can name the associated output
+//! type, but external implementations are intentionally not permitted.
+//!
+//! # Example
+//!
+//! ```
+//! use stack_algebra::matrix;
+//! let mut m = matrix![1_i32, 2; 3, 4];
+//! assert_eq!(m[0], 1); // column-major flat index
+//! assert_eq!(m[(1, 0)], 3); // row, column
+//! assert_eq!(m.get((0, 2)), None);
+//! *m.get_mut((0, 1)).unwrap() = 20;
+//! assert_eq!(m[(0, 1)], 20);
+//! ```
+
 use crate::Matrix;
 
 mod private {
@@ -12,6 +31,10 @@ mod private {
 /// This is the [`Matrix`] version of [`SliceIndex`][`core::slice::SliceIndex`].
 /// You should not use or implement this trait directly but instead use the
 /// corresponding methods on [`Matrix`].
+///
+/// The built-in indices are `usize` for column-major flat access and
+/// `(usize, usize)` for `(row, column)` access. Both checked and unchecked
+/// forms use the same indexing convention.
 ///
 /// # Safety
 ///

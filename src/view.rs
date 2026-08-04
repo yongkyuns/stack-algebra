@@ -1,4 +1,27 @@
-//! Row and column slices of a matrix.
+//! Borrowed, zero-copy views into fixed-size matrices and external buffers.
+//!
+//! A [`Matrix`](crate::Matrix) is column-major, so a contiguous buffer for an
+//! `M`-by-`N` matrix stores `(row, column)` at `row + M * column`. [`Map`] and
+//! [`MapMut`] expose that layout without copying. [`StridedMap`] is useful when
+//! a producer adds padding or uses a different layout: its element address is
+//! `row * inner_stride + column * outer_stride`.
+//!
+//! Views borrow their source for their lifetime and therefore do not allocate.
+//! Use [`Block`] or [`BlockMut`] for a compile-time-sized region of an owning
+//! matrix, and [`MatrixRead`] / [`MatrixWrite`] when an algorithm should accept
+//! any of these representations.
+//!
+//! # Example
+//!
+//! ```
+//! use stack_algebra::{matrix, matmul_view_into, Map, Matrix};
+//!
+//! let storage = [1, 3, 2, 4]; // [[1, 2], [3, 4]] in column-major order
+//! let input = Map::<2, 2, _>::from_slice(&storage).unwrap();
+//! let mut output = Matrix::<2, 2, i32>::zeros();
+//! matmul_view_into(&input, &input, &mut output).unwrap();
+//! assert_eq!(output, matrix![7, 10; 15, 22]);
+//! ```
 
 use core::iter::Sum;
 use core::ops::{Deref, DerefMut, Index, IndexMut, Mul};
@@ -7,12 +30,20 @@ use crate::Matrix;
 use stride::Stride;
 
 /// Read-only access to a fixed-size matrix-shaped view.
+///
+/// Implement this trait for generic algorithms that should work with an
+/// owning [`Matrix`](crate::Matrix), a block, or an externally mapped buffer.
+/// Implementations must return `None` for coordinates outside the declared
+/// `M`-by-`N` shape.
 pub trait MatrixRead<const M: usize, const N: usize, T> {
     /// Returns the element at `(row, column)`, or `None` when out of bounds.
     fn get(&self, row: usize, column: usize) -> Option<&T>;
 }
 
 /// Mutable access to a fixed-size matrix-shaped view.
+///
+/// This trait extends [`MatrixRead`], allowing one algorithm to inspect and
+/// update a view without taking ownership of its backing storage.
 pub trait MatrixWrite<const M: usize, const N: usize, T>: MatrixRead<M, N, T> {
     /// Returns the mutable element at `(row, column)`, or `None` when out of bounds.
     fn get_mut(&mut self, row: usize, column: usize) -> Option<&mut T>;
@@ -41,6 +72,21 @@ impl<const M: usize, const N: usize, T> MatrixWrite<M, N, T> for Matrix<M, N, T>
 }
 
 /// A fixed-size block view into a matrix.
+///
+/// The block keeps a shared borrow of its source. Creating it checks the
+/// offsets once; indexing the returned view uses block-local coordinates.
+/// Call [`Matrix::block`](crate::Matrix::block) to construct one.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::{matrix, Matrix};
+///
+/// let matrix = matrix![1, 2, 3; 4, 5, 6; 7, 8, 9];
+/// let block = matrix.block::<2, 2>(1, 1).unwrap();
+/// assert_eq!(block[(0, 0)], 5);
+/// assert_eq!(block.to_matrix(), Matrix::from_rows([[5, 6], [8, 9]]));
+/// ```
 pub struct Block<'a, const M: usize, const N: usize, const R: usize, const C: usize, T> {
     matrix: &'a Matrix<M, N, T>,
     row_offset: usize,
@@ -104,6 +150,24 @@ impl<const M: usize, const N: usize, const R: usize, const C: usize, T> MatrixRe
 }
 
 /// A mutable fixed-size block view into a matrix.
+///
+/// A mutable block exclusively borrows its source until it is dropped. This
+/// makes in-place updates safe while preserving the source matrix's storage
+/// and avoiding an intermediate allocation.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::{matrix, Matrix};
+///
+/// let mut matrix = matrix![1, 2; 3, 4];
+/// {
+///     let mut block = matrix.block_mut::<1, 2>(1, 0).unwrap();
+///     block[(0, 0)] = 30;
+///     *block.get_mut(0, 1).unwrap() = 40;
+/// }
+/// assert_eq!(matrix, Matrix::from_rows([[1, 2], [30, 40]]));
+/// ```
 pub struct BlockMut<'a, const M: usize, const N: usize, const R: usize, const C: usize, T> {
     matrix: &'a mut Matrix<M, N, T>,
     row_offset: usize,
@@ -200,6 +264,21 @@ impl<const M: usize, const N: usize, const R: usize, const C: usize, T> MatrixWr
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A fixed-size, zero-copy view over an external column-major buffer.
+///
+/// `Map` borrows exactly the first `M * N` elements of the supplied slice.
+/// Extra elements remain available to the caller after the mapped view is
+/// dropped. The source must use column-major order.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::{Map, Matrix};
+///
+/// let storage = [1.0_f32, 3.0, 2.0, 4.0];
+/// let mapped = Map::<2, 2, _>::from_slice(&storage).unwrap();
+/// assert_eq!(mapped[(0, 1)], 2.0);
+/// assert_eq!(mapped.to_matrix(), Matrix::from_rows([[1.0, 2.0], [3.0, 4.0]]));
+/// ```
 pub struct Map<'a, const M: usize, const N: usize, T> {
     data: &'a [T],
 }
@@ -269,6 +348,23 @@ impl<const M: usize, const N: usize, T> MatrixRead<M, N, T> for Map<'_, M, N, T>
 }
 
 /// A mutable fixed-size, zero-copy view over an external column-major buffer.
+///
+/// `MapMut` is the allocation-free way to let an algorithm update a caller's
+/// buffer. Use [`MapMut::as_map`] to temporarily pass an immutable view while
+/// retaining ownership of the mutable mapping.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::MapMut;
+///
+/// let mut storage = [1_i32, 3, 2, 4];
+/// let mut mapped = MapMut::<2, 2, _>::from_slice(&mut storage).unwrap();
+/// mapped[(1, 1)] = 40;
+/// assert_eq!(mapped.as_map()[(1, 1)], 40);
+/// drop(mapped);
+/// assert_eq!(storage, [1, 3, 2, 40]);
+/// ```
 pub struct MapMut<'a, const M: usize, const N: usize, T> {
     data: &'a mut [T],
 }
@@ -383,6 +479,20 @@ impl<const M: usize, const N: usize, T> MatrixWrite<M, N, T> for MapMut<'_, M, N
 /// A fixed-size, zero-copy view with runtime inner and outer strides.
 ///
 /// `inner_stride` advances one row and `outer_stride` advances one column.
+/// Strides are measured in elements, not bytes. This supports row-major
+/// buffers (`inner_stride = columns`, `outer_stride = 1`) as well as padded
+/// sensor/DMA buffers. Construction validates the last accessed element before
+/// borrowing the slice.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::{matrix, StridedMap};
+///
+/// let padded = [1_i32, 2, 99, 3, 4, 5, 88, 6];
+/// let view = StridedMap::<2, 3, _>::from_slice(&padded, 4, 1).unwrap();
+/// assert_eq!(view.to_matrix(), matrix![1, 2, 99; 4, 5, 88]);
+/// ```
 pub struct StridedMap<'a, const M: usize, const N: usize, T> {
     data: &'a [T],
     inner_stride: usize,
@@ -461,6 +571,22 @@ impl<const M: usize, const N: usize, T> MatrixRead<M, N, T> for StridedMap<'_, M
 }
 
 /// A mutable fixed-size, zero-copy view with runtime inner and outer strides.
+///
+/// This is the mutable counterpart to [`StridedMap`]. It is useful for
+/// writing a fixed-size result directly into a padded or interleaved buffer;
+/// no temporary matrix is needed.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::StridedMapMut;
+///
+/// let mut padded = [0_i32; 8];
+/// let mut view = StridedMapMut::<2, 3, _>::from_slice(&mut padded, 4, 1).unwrap();
+/// view[(1, 2)] = 7;
+/// drop(view);
+/// assert_eq!(padded[6], 7);
+/// ```
 pub struct StridedMapMut<'a, const M: usize, const N: usize, T> {
     data: &'a mut [T],
     inner_stride: usize,
@@ -597,6 +723,19 @@ fn last_strided_index<const M: usize, const N: usize>(
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A row in a [`Matrix`][crate::Matrix].
+///
+/// Rows are strided because the matrix is column-major. They dereference to a
+/// [`Stride`](stride::Stride), so ordinary slice-style `get`, `iter`, and
+/// indexing operations remain available without copying.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::matrix;
+///
+/// let matrix = matrix![1, 2, 3; 4, 5, 6];
+/// assert_eq!(matrix.row(1).get(0..2).unwrap(), &[4, 5]);
+/// ```
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Row<const M: usize, const N: usize, T> {
@@ -661,6 +800,18 @@ where
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A column in a [`Matrix`][crate::Matrix].
+///
+/// Columns are contiguous in the column-major representation. A column view
+/// dereferences to a [`Stride`](stride::Stride) with unit stride.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::matrix;
+///
+/// let matrix = matrix![1, 2, 3; 4, 5, 6];
+/// assert_eq!(matrix.column(1).get(0..2).unwrap(), &[2, 5]);
+/// ```
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Column<const M: usize, const N: usize, T> {
@@ -726,6 +877,10 @@ where
 ////////////////////////////////////////////////////////////////////////////////
 
 impl<T, const M: usize, const N: usize> Row<M, N, T> {
+    /// Returns the dot product with a column of matching length.
+    ///
+    /// The row and column are borrowed views, so this operation does not copy
+    /// either operand. The column's row count must equal this row's length.
     #[inline]
     pub fn dot<const P: usize>(&self, other: &Column<N, P, T>) -> T
     where
@@ -734,7 +889,10 @@ impl<T, const M: usize, const N: usize> Row<M, N, T> {
         (0..N).map(|i| self[i] * other[i]).sum()
     }
 
-    /// Compute the dot product, but only with elements specified by the range
+    /// Computes a dot product over a selected range of entries.
+    ///
+    /// Indices outside `0..N` are ignored by the iterator; an empty range
+    /// returns the additive identity supplied by `Sum`.
     #[inline]
     pub fn dot_partial<const P: usize>(
         &self,

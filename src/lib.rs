@@ -1,4 +1,30 @@
 #![no_std]
+#![deny(missing_docs)]
+//! Fixed-size, stack-allocated linear algebra for `no_std` Rust.
+//!
+//! [`Matrix`] stores its dimensions in const generics, so a value such as
+//! `Matrix<3, 3, f64>` has no run-time shape metadata and no heap allocation.
+//! The scalar type is the final generic parameter (`f32` is the default); use
+//! `f64` explicitly when double precision is required.
+//!
+//! # Quick start
+//!
+//! ```
+//! use stack_algebra::{matrix, Matrix};
+//!
+//! let lhs: Matrix<2, 3, f32> = matrix![1.0, 2.0, 3.0; 4.0, 5.0, 6.0];
+//! let rhs: Matrix<3, 1, f32> = matrix![1.0; 0.0; -1.0];
+//! let product = lhs * rhs;
+//! assert_eq!(product, matrix![-2.0; -2.0]);
+//!
+//! let precise: Matrix<2, 2, f64> = Matrix::eye();
+//! assert_eq!(precise[(0, 0)], 1.0);
+//! ```
+//!
+//! Matrix values are column-major, matching common numerical and Eigen-style
+//! kernels. Use `from_rows` for readable row-major literals, `from_columns`
+//! when data already comes from a column-major buffer, or `Map`/`StridedMap`
+//! to borrow external storage without copying.
 
 mod algebra;
 mod block_sparse;
@@ -49,12 +75,24 @@ pub use view::{
 #[doc(hidden)]
 pub use vectrix_macro as proc_macro;
 
-/// Represents a matrix with constant `M` rows and constant `N` columns.
+/// A fixed-size matrix with `M` rows and `N` columns.
 ///
 /// The underlying data is represented as an array and is always stored in
-/// column-major order.
+/// column-major order. `M` and `N` are compile-time dimensions, while `T` is
+/// the scalar type (`f32` by default). Matrix operations therefore remain
+/// allocation-free and dimension mismatches are rejected by the compiler.
 ///
-/// See the [crate root][crate] for usage examples.
+/// # Examples
+///
+/// ```
+/// use stack_algebra::{matrix, Matrix};
+///
+/// let a: Matrix<2, 2, f64> = matrix![2.0, 1.0; 1.0, 3.0];
+/// let b = Matrix::<2, 2, f64>::eye();
+/// let product = a * b;
+/// assert_eq!(product, a);
+/// assert_eq!(a.as_slice(), &[2.0, 1.0, 1.0, 3.0]);
+/// ```
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Matrix<const M: usize, const N: usize, T = f32> {
@@ -63,12 +101,18 @@ pub struct Matrix<const M: usize, const N: usize, T = f32> {
 
 impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Returns the exact inline storage footprint of this fixed-size matrix.
+    ///
+    /// This is `M * N * size_of::<T>()` for the current representation and is
+    /// useful when budgeting stack or embedded static storage.
     #[inline]
     pub const fn storage_bytes() -> usize {
         core::mem::size_of::<Self>()
     }
 
     /// Copies a fixed-size matrix view into an owning matrix.
+    ///
+    /// This is useful when a borrowed `Map`, `StridedMap`, or block needs to
+    /// be retained after the source storage is released.
     #[inline]
     pub fn from_view<V>(view: &V) -> Self
     where
@@ -94,19 +138,25 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         self.data.as_mut_ptr() as *mut T
     }
 
-    /// Views the underlying data as a contiguous slice.
+    /// Views the underlying data as a contiguous column-major slice.
+    ///
+    /// Element `(row, column)` is at `column * M + row`.
     #[inline]
     pub fn as_slice(&self) -> &[T] {
         unsafe { slice::from_raw_parts(self.as_ptr(), M * N) }
     }
 
-    /// Views the underlying data as a contiguous mutable slice.
+    /// Views the underlying data as a mutable contiguous column-major slice.
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), M * N) }
     }
 
     /// Converts every matrix element to `U` using Rust's primitive cast semantics.
+    ///
+    /// This is an explicit conversion; arithmetic never mixes scalar types
+    /// implicitly. For example, convert an `f32` matrix to `f64` with
+    /// `let wide: Matrix<2, 2, f64> = matrix.cast();`.
     #[inline]
     pub fn cast<U>(&self) -> Matrix<M, N, U>
     where
@@ -117,6 +167,9 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     }
 
     /// Returns a reference to the `i`-th row of this matrix.
+    ///
+    /// Rows are strided in column-major storage; use [`Self::as_slice`] when a
+    /// contiguous buffer is required.
     #[inline]
     pub fn row(&self, i: usize) -> &Row<M, N, T> {
         Row::new(&self.as_slice()[i..])
@@ -129,6 +182,8 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     }
 
     /// Returns a reference to the `i`-th column of this matrix.
+    ///
+    /// A column is contiguous and can be passed to APIs that consume a slice.
     #[inline]
     pub fn column(&self, i: usize) -> &Column<M, N, T> {
         Column::new(&self.data[i])
@@ -141,6 +196,9 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     }
 
     /// Returns a fixed-size block view, or `None` when it exceeds the matrix.
+    ///
+    /// The returned view borrows `self` and preserves compile-time block
+    /// dimensions; no elements are copied.
     #[inline]
     pub fn block<const R: usize, const C: usize>(
         &self,
@@ -284,7 +342,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     //     clone
     // }
 
-    /// Transpose of the current matrix.
+    /// Returns a transposed copy of the matrix.
     #[inline]
     pub fn transpose(&self) -> Matrix<N, M, T>
     where
@@ -306,7 +364,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         }
     }
 
-    /// Transpose of the current matrix.
+    /// Shorthand for [`Self::transpose`].
     #[allow(non_snake_case)]
     #[inline]
     pub fn T(&self) -> Matrix<N, M, T>
@@ -325,7 +383,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         T::Reduction::squared_norm(self)
     }
 
-    /// Compute the Frobenius norm
+    /// Returns the Frobenius norm, `sqrt(sum(aᵢⱼ²))`.
     #[inline]
     pub fn norm(&self) -> T
     where
@@ -334,7 +392,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         self.squared_norm().sqrt()
     }
 
-    /// Compute the Frobenius norm
+    /// Returns a normalized copy divided by the Frobenius norm.
     pub fn normalize(self) -> Self
     where
         T: Real + ReductionScalar,
@@ -397,6 +455,8 @@ where
     T: ReductionScalar,
 {
     /// Computes the dot product of two fixed-size vectors.
+    ///
+    /// Both vectors must have the same compile-time length and scalar type.
     #[inline]
     pub fn dot(&self, other: &Self) -> T {
         T::Reduction::dot(self, other)
@@ -423,7 +483,7 @@ where
 // Square matrix functions
 ////////////////////////////////////////////////////////////////////////////////
 impl<const N: usize, T> Matrix<N, N, T> {
-    /// Compute the sum of diagonal elements
+    /// Computes the sum of the diagonal elements.
     pub fn trace(&self) -> T
     where
         T: Zero,
@@ -438,6 +498,7 @@ impl<const N: usize, T> Matrix<N, N, T> {
 }
 
 impl<T> Matrix<3, 1, T> {
+    /// Computes the 3D cross product.
     pub fn cross(&self, other: &Self) -> Self
     where
         for<'a> &'a T: Mul<&'a T, Output = T> + Sub<&'a T, Output = T>,
@@ -450,6 +511,10 @@ impl<T> Matrix<3, 1, T> {
     }
 }
 
+/// Computes the 3D cross product of two column vectors.
+///
+/// This free function is equivalent to [`Matrix::cross`] and is convenient in
+/// generic code where the method form would be less readable.
 pub fn cross<T>(a: &Matrix<3, 1, T>, b: &Matrix<3, 1, T>) -> Matrix<3, 1, T>
 where
     for<'a> &'a T: Mul<&'a T, Output = T> + Sub<&'a T, Output = T>,

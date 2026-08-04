@@ -22,6 +22,15 @@ jobs:
       - run: EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo test --features eigen-compare
       - run: cargo test --no-default-features --lib --tests
 
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --doc --all-features
+      - run: cargo doc --no-deps --all-features
+
   embedded:
     name: Embedded targets and QEMU
     runs-on: ubuntu-latest

@@ -1,3 +1,22 @@
+//! Arithmetic operations for fixed-size matrices and matrix-shaped views.
+//!
+//! Operators such as `+`, `-`, and `*` return a new fixed-size value. The
+//! `*_into` methods and view functions write into caller-provided storage,
+//! which is useful in control loops where avoiding an intermediate is
+//! important. All dimensions are checked by the type system at compile time.
+//!
+//! # Example
+//!
+//! ```
+//! use stack_algebra::{matrix, Matrix};
+//!
+//! let lhs = matrix![1.0_f32, 2.0; 3.0, 4.0];
+//! let rhs = matrix![2.0_f32, 0.0; 1.0, 2.0];
+//! let mut product = Matrix::<2, 2, f32>::zeros();
+//! lhs.mul_into(&rhs, &mut product);
+//! assert_eq!(product, matrix![4.0, 4.0; 10.0, 8.0]);
+//! ```
+
 use core::ops::{
     Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Not, Rem, RemAssign, Sub,
     SubAssign,
@@ -10,6 +29,21 @@ use crate::view::MatrixRead;
 use crate::{Matrix, Vector};
 
 /// Computes `matrix * vector` directly from a fixed-size matrix view.
+///
+/// The view is read through [`MatrixRead`](crate::MatrixRead), so this works
+/// for an owning matrix, block, map, or strided map. The returned vector is
+/// fixed-size and stack allocated.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::{matrix, matvec_view, vector, Map};
+///
+/// let storage = [1_i32, 3, 2, 4];
+/// let matrix = Map::<2, 2, _>::from_slice(&storage).unwrap();
+/// let result = matvec_view(&matrix, &vector![5; 6]).unwrap();
+/// assert_eq!(result, vector![17; 39]);
+/// ```
 #[inline]
 pub fn matvec_view<const M: usize, const N: usize, T, V>(
     matrix: &V,
@@ -24,6 +58,10 @@ where
 }
 
 /// Computes `matrix * vector` directly from a fixed-size matrix view.
+///
+/// This is the allocation-free counterpart to [`matvec_view`]. `output` may
+/// be reused across iterations; it must have the matrix's compile-time row
+/// count.
 #[inline]
 pub fn matvec_view_into<const M: usize, const N: usize, T, V>(
     matrix: &V,
@@ -45,6 +83,24 @@ where
 }
 
 /// Computes `lhs * rhs` directly from fixed-size matrix views.
+///
+/// Both operands may be borrowed views with different backing layouts. The
+/// destination is an owning fixed-size matrix supplied by the caller, and the
+/// function returns `None` only if a view violates its declared dimensions.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::{matmul_view_into, matrix, Map, Matrix};
+///
+/// let lhs_storage = [1_i32, 3, 2, 4];
+/// let rhs_storage = [5_i32, 7, 6, 8];
+/// let lhs = Map::<2, 2, _>::from_slice(&lhs_storage).unwrap();
+/// let rhs = Map::<2, 2, _>::from_slice(&rhs_storage).unwrap();
+/// let mut output = Matrix::<2, 2, i32>::zeros();
+/// matmul_view_into(&lhs, &rhs, &mut output).unwrap();
+/// assert_eq!(output, matrix![19, 22; 43, 50]);
+/// ```
 #[inline]
 pub fn matmul_view_into<const M: usize, const N: usize, const P: usize, T, Lhs, Rhs>(
     lhs: &Lhs,
@@ -326,6 +382,8 @@ where
     /// Multiplies this matrix by `rhs` and writes the result into `output`.
     ///
     /// The inputs and output use column-major traversal and do not allocate.
+    /// `output` may alias neither input; pass a separate matrix when updating
+    /// in place is required.
     #[inline]
     pub fn mul_into<const P: usize>(&self, rhs: &Matrix<N, P, T>, output: &mut Matrix<M, P, T>) {
         matmul(self, rhs, output);
@@ -338,6 +396,9 @@ where
 {
     /// Multiplies this matrix by a fixed-size vector without allocating
     /// intermediate storage.
+    ///
+    /// The result has one entry per matrix row. For repeated operations, use
+    /// [`Matrix::matvec_into`](Self::matvec_into) to reuse an output buffer.
     #[inline]
     pub fn matvec(&self, vector: &Vector<N, T>) -> Vector<M, T> {
         let mut output = Vector::<M, T>::zeros();
@@ -346,6 +407,9 @@ where
     }
 
     /// Multiplies this matrix by a fixed-size vector and writes into `output`.
+    ///
+    /// This method is suitable for allocation-free control-loop code. The
+    /// matrix and output dimensions are encoded in their types.
     #[inline]
     pub fn matvec_into(&self, vector: &Vector<N, T>, output: &mut Vector<M, T>) {
         matvec(self, vector, output);

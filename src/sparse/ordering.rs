@@ -4,6 +4,12 @@ use super::errors::CscError;
 use super::storage::StaticCscMatrix;
 
 /// A fixed-capacity symmetric permutation for sparse factorization.
+///
+/// The permutation is represented as an ordered-to-original map. Use
+/// [`Self::minimum_degree`] for a deterministic fill-reducing heuristic, or
+/// [`Self::from_permutation`] when an application already has an ordering.
+/// The inverse map is retained so factor solves can move right-hand sides
+/// back to the caller's original coordinates without allocating.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaticCscOrdering<const N: usize> {
     permutation: [usize; N],

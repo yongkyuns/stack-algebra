@@ -37,6 +37,23 @@ fn column_norm<const M: usize, const N: usize, T: Real>(
 /// `A = U * diag(S) * Vᵀ`, where `U` is `M x N`, `S` has `N` entries, and `V`
 /// is `N x N`. The implementation uses one-sided Jacobi rotations and does
 /// not allocate from the heap.
+///
+/// Singular values are returned in descending order. A relative threshold
+/// controls rank decisions; use [`Self::with_threshold`] when the default
+/// machine-precision cutoff is not appropriate for the problem scale.
+///
+/// # Examples
+///
+/// ```
+/// use stack_algebra::matrix;
+///
+/// let a = matrix![1.0_f64, 0.0; 0.0, 1.0; 1.0, 1.0];
+/// let rhs = matrix![2.0_f64; 3.0; 5.0];
+/// let svd = a.svd().expect("finite matrix");
+/// let x = svd.solve(&rhs);
+/// assert!((a * x - rhs).norm() < 1.0e-12);
+/// assert_eq!(svd.rank(), 2);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Svd<const M: usize, const N: usize, T> {
     u: Matrix<M, N, T>,

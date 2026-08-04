@@ -1,8 +1,53 @@
+//! Fixed-size 3D rotation and rigid/affine transform primitives.
+//!
+//! The geometry types use the same compile-time dimensions and scalar generic
+//! as [`Matrix`](crate::Matrix). Constructors validate inputs that represent a
+//! rotation and return `Option` when the value is degenerate or non-finite.
+//! All values are plain fixed-size structs: creating or composing them does
+//! not require a heap allocation.
+//!
+//! # Example
+//!
+//! ```
+//! use stack_algebra::{vector, Isometry, Quaternion};
+//!
+//! let rotation = Quaternion::from_axis_angle(
+//!     &vector![0.0_f64; 0.0; 1.0],
+//!     core::f64::consts::FRAC_PI_2,
+//! )
+//! .unwrap();
+//! let pose = Isometry::from_parts(
+//!     rotation.to_rotation_matrix().unwrap(),
+//!     vector![1.0_f64; 2.0; 3.0],
+//! );
+//! let point = pose.apply_point(&vector![1.0_f64; 0.0; 0.0]);
+//! assert!((point[0] - 1.0).abs() < 1e-12);
+//! assert!((point[1] - 3.0).abs() < 1e-12);
+//! ```
+
 use core::ops::Mul;
 
 use crate::{Matrix, MatrixScalar, Real, ReductionScalar, Vector};
 
 /// A scalar-first quaternion `(w, x, y, z)`.
+///
+/// Quaternions are preferred for composing rotations and interpolation. Use
+/// [`Quaternion::from_axis_angle`] or [`Quaternion::from_rotation_matrix`] to
+/// construct validated rotations, then [`Quaternion::rotate_vector`] to apply
+/// one without manually expanding the formula.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::{vector, Quaternion};
+/// let q = Quaternion::from_axis_angle(
+///     &vector![0.0_f32; 0.0; 1.0],
+///     core::f32::consts::FRAC_PI_2,
+/// )
+/// .unwrap();
+/// let result = q.rotate_vector(&vector![1.0_f32; 0.0; 0.0]).unwrap();
+/// assert!(result[1] > 0.99);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quaternion<T> {
     scalar: T,
@@ -227,6 +272,11 @@ impl<T: Real + MatrixScalar + ReductionScalar> Quaternion<T> {
 }
 
 /// An angle-axis representation of a 3D rotation.
+///
+/// The axis is normalized during construction. This representation is useful
+/// at API boundaries where a rotation is naturally expressed as an axis and a
+/// signed angle; convert it to a [`Quaternion`] or [`RotationMatrix`] for
+/// repeated application.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AngleAxis<T> {
     angle: T,
@@ -299,12 +349,29 @@ impl<T: Real + MatrixScalar + ReductionScalar> Mul for Quaternion<T> {
 }
 
 /// A validated 3D rotation matrix.
+///
+/// A `RotationMatrix` can only be constructed from an orthonormal, finite
+/// 3-by-3 matrix or a valid quaternion. Its [`RotationMatrix::apply`] method
+/// applies the rotation to a direction without translation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RotationMatrix<T> {
     matrix: Matrix<3, 3, T>,
 }
 
 /// A fixed-size rigid transform consisting of a rotation and translation.
+///
+/// `Isometry` models a pose in 3D. `apply_point` includes translation while
+/// `apply_direction` intentionally omits it. Composition follows the usual
+/// frame convention: `a.compose(&b)` applies `b` first, then `a`.
+///
+/// # Example
+///
+/// ```
+/// use stack_algebra::{vector, Isometry, RotationMatrix};
+/// let pose = Isometry::from_parts(RotationMatrix::identity(), vector![1.0_f32; 2.0; 3.0]);
+/// assert_eq!(pose.apply_point(&vector![4.0_f32; 5.0; 6.0]), vector![5.0; 7.0; 9.0]);
+/// assert_eq!(pose.apply_direction(&vector![4.0_f32; 5.0; 6.0]), vector![4.0; 5.0; 6.0]);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Isometry<T> {
     rotation: RotationMatrix<T>,
@@ -312,6 +379,11 @@ pub struct Isometry<T> {
 }
 
 /// A fixed-size affine transform represented by a homogeneous 4-by-4 matrix.
+///
+/// Affine transforms support a general 3-by-3 linear part (for example,
+/// scaling or shear) plus translation. `from_matrix` validates the homogeneous
+/// bottom row; use [`AffineTransform::from_parts`] when the two components are
+/// already available separately.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AffineTransform<T> {
     matrix: Matrix<4, 4, T>,

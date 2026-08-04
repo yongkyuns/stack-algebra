@@ -5,6 +5,12 @@ use super::{SparseCholeskyError, StaticCscMatrix, StaticCscOrdering};
 
 /// Numeric fixed-capacity simplicial sparse LDLᵀ factorization without
 /// diagonal pivoting.
+///
+/// `StaticCscLdlt` stores a unit lower factor and diagonal `D` such that
+/// `A = L * D * Lᵀ`. Use [`Self::decompose_with_diagonal_pivoting`] when
+/// diagonal scaling is needed; that mode selects a fixed ordering during
+/// analysis and still reports [`SparseCholeskyError::ZeroPivot`] when a
+/// 2-by-2 pivot is required.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StaticCscLdlt<const N: usize, const MAX_L_NNZ: usize, T = f32> {
     pub(crate) lower: StaticCscMatrix<N, N, MAX_L_NNZ, T>,

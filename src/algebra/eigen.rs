@@ -5,6 +5,22 @@ use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 ///
 /// The decomposition satisfies `A = V * diag(λ) * Vᵀ`. Eigenvalues are sorted
 /// in nondecreasing order and the columns of `V` are orthonormal.
+///
+/// The input must be finite and symmetric (within the implementation's
+/// scaled tolerance). This decomposition is for real self-adjoint matrices;
+/// use LU, QR, or SVD for a general non-symmetric matrix.
+///
+/// # Examples
+///
+/// ```
+/// use stack_algebra::matrix;
+///
+/// let a = matrix![2.0_f64, 1.0; 1.0, 2.0];
+/// let eigen = a.self_adjoint_eigen().expect("symmetric input");
+/// assert!((eigen.eigenvalues()[0] - 1.0).abs() < 1.0e-12);
+/// assert!((eigen.eigenvalues()[1] - 3.0).abs() < 1.0e-12);
+/// assert!((eigen.reconstruct() - a).norm() < 1.0e-12);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SelfAdjointEigen<const D: usize, T> {
     eigenvalues: Vector<D, T>,

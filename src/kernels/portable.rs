@@ -6,6 +6,8 @@ use crate::{Matrix, Vector};
 use super::{MatmulBackend, ReductionBackend};
 
 #[doc(hidden)]
+/// Portable scalar reduction kernels used when no architecture-specific
+/// implementation is selected.
 pub struct ScalarReduction;
 
 impl<T> ReductionBackend<T> for ScalarReduction
@@ -49,6 +51,7 @@ where
 }
 
 #[doc(hidden)]
+/// Portable scalar matrix-multiplication kernels used as the fallback backend.
 pub struct ScalarMatmul;
 
 impl<T> MatmulBackend<T> for ScalarMatmul

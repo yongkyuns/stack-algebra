@@ -8,6 +8,17 @@ use super::errors::CscError;
 ///
 /// Keeping the symbolic structure separate allows generated code to reuse a
 /// validated pattern while replacing numeric values at every iteration.
+///
+/// The arrays use canonical CSC ordering. For a `2 x 2` diagonal pattern,
+/// `row_indices = [0, 1]` and `column_pointers = [0, 1, 2]`:
+///
+/// ```
+/// use stack_algebra::StaticCscPattern;
+///
+/// let pattern = StaticCscPattern::<2, 2, 2>::from_arrays(&[0, 1], &[0, 1, 2]).unwrap();
+/// assert_eq!(pattern.nnz(), 2);
+/// assert_eq!(pattern.column_end(1), Some(2));
+/// ```
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaticCscPattern<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize> {
@@ -123,6 +134,22 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize> Default
 /// strictly increasing within each column. `MAX_NNZ` bounds the number of
 /// stored entries; unused capacity remains in the backing arrays but is not
 /// exposed through the active slices.
+///
+/// Use [`Self::from_pattern`] when a complete canonical pattern is available,
+/// or [`Self::new`] and [`Self::insert`] when assembling a small pattern. The
+/// latter keeps row indices sorted and returns an error instead of allocating
+/// when `MAX_NNZ` is full.
+///
+/// ```
+/// use stack_algebra::{Matrix, StaticCscMatrix};
+///
+/// let mut a = StaticCscMatrix::<2, 2, 3, f32>::new();
+/// a.insert(1, 0, 2.0).unwrap();
+/// a.insert(0, 0, 4.0).unwrap();
+/// a.insert(1, 1, 3.0).unwrap();
+/// let x = Matrix::<2, 1, f32>::from_rows([[1.0], [2.0]]);
+/// assert_eq!(a.matvec(&x), Matrix::from_rows([[4.0], [8.0]]));
+/// ```
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StaticCscMatrix<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize, T = f32> {

@@ -1,3 +1,27 @@
+//! Constructors and literal macros for fixed-size matrices.
+//!
+//! Matrices store columns in column-major order, but [`Matrix::from_rows`]
+//! accepts the more familiar row-major notation. The `matrix!` and `vector!`
+//! macros are usually the most readable choice in application code; use
+//! `from_fn` when values come from an index-based formula.
+//!
+//! # Example
+//!
+//! ```
+//! use stack_algebra::{diag, eye, matrix, vector, Matrix};
+//!
+//! let a = matrix![1_i32, 2; 3, 4];
+//! let b = Matrix::<2, 2, i32>::from_fn(|row, column| (row + column) as i32);
+//! let unit = eye!(3, f32);
+//! let diagonal = diag!(1.0_f32, 2.0, 3.0);
+//! let point = vector![1.0_f32; 2.0; 3.0];
+//! assert_eq!(a[(1, 0)], 3);
+//! assert_eq!(b[(1, 1)], 2);
+//! assert_eq!(unit[(2, 2)], 1.0);
+//! assert_eq!(diagonal[(1, 1)], 2.0);
+//! assert_eq!(point[2], 3.0);
+//! ```
+
 use crate::num::{One, Zero};
 use crate::Matrix;
 
@@ -10,12 +34,18 @@ use core::ptr;
 ////////////////////////////////////////////////////////////////////////////////
 impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Creates a new matrix from its columns in column-major order.
+    ///
+    /// The outer array has `N` columns and each inner array has `M` rows. For
+    /// row-major input, prefer [`Matrix::from_rows`] or [`matrix!`](crate::matrix!).
     #[inline]
     pub const fn from_columns(data: [[T; M]; N]) -> Self {
         Self { data }
     }
 
     /// Creates a new matrix by evaluating `f` for each `(row, column)` pair.
+    ///
+    /// The closure is called exactly `M * N` times and the result is fully
+    /// initialized without an intermediate heap allocation.
     #[inline]
     pub fn from_fn(mut f: impl FnMut(usize, usize) -> T) -> Self {
         let mut matrix = Matrix::<M, N, MaybeUninit<T>>::uninit();
@@ -30,6 +60,8 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     }
 
     /// Creates a new matrix from rows in row-major order.
+    ///
+    /// This is often the clearest constructor for hand-written constants.
     #[inline]
     pub fn from_rows(data: [[T; N]; M]) -> Self
     where
@@ -86,7 +118,16 @@ where
     }
 }
 
-/// A macro for creating a matrix.
+/// Creates a matrix from row-major literal syntax.
+///
+/// A semicolon separates rows; commas separate values within each row. The
+/// dimensions and scalar type are inferred from the literal.
+///
+/// ```
+/// use stack_algebra::{matrix, Matrix};
+/// let m: Matrix<2, 3, i32> = matrix![1, 2, 3; 4, 5, 6];
+/// assert_eq!(m[(1, 2)], 6);
+/// ```
 #[macro_export]
 macro_rules! matrix {
     ($($data:tt)*) => {
@@ -94,7 +135,18 @@ macro_rules! matrix {
     };
 }
 
-/// A macro for composing vectors.
+/// Creates a row or column vector from literal syntax.
+///
+/// Commas produce a one-row [`RowVector`](crate::RowVector); semicolons
+/// produce a one-column [`Vector`](crate::Vector).
+///
+/// ```
+/// use stack_algebra::{vector, RowVector, Vector};
+/// let row: RowVector<3, i32> = vector![1, 2, 3];
+/// let column: Vector<3, i32> = vector![1; 2; 3];
+/// assert_eq!(row[(0, 2)], 3);
+/// assert_eq!(column[2], 3);
+/// ```
 #[macro_export]
 macro_rules! vector {
     ($($data:tt)*) => {
@@ -102,6 +154,11 @@ macro_rules! vector {
     };
 }
 
+/// Creates a zero-filled square or rectangular matrix.
+///
+/// `zeros!(n)` creates `n`-by-`n`; `zeros!(rows, columns)` creates a
+/// rectangular matrix; and `zeros!(rows, columns, Scalar)` selects the scalar
+/// type explicitly.
 #[macro_export]
 macro_rules! zeros {
     ($cols:expr) => {
@@ -115,6 +172,9 @@ macro_rules! zeros {
     }};
 }
 
+/// Creates a one-filled square or rectangular matrix.
+///
+/// The argument forms mirror [`zeros!`].
 #[macro_export]
 macro_rules! ones {
     ($cols:expr) => {
@@ -128,6 +188,10 @@ macro_rules! ones {
     }};
 }
 
+/// Creates an identity matrix with ones on the main diagonal.
+///
+/// The matrix is always square. Pass a scalar type as the second argument when
+/// inference cannot determine whether `f32` or `f64` is desired.
 #[macro_export]
 macro_rules! eye {
     ($dim:expr) => {
@@ -138,6 +202,10 @@ macro_rules! eye {
     }};
 }
 
+/// Creates a diagonal matrix for two through six diagonal values.
+///
+/// Values not supplied on the diagonal are zero. This macro is intended for
+/// small fixed-size matrices; use [`Matrix::from_fn`] for larger dimensions.
 #[macro_export]
 macro_rules! diag {
     ($d1:expr, $d2:expr) => {{

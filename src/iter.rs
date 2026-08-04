@@ -1,3 +1,28 @@
+//! Iteration design notes.
+//!
+//! Matrix element iteration is currently exposed through the stable slice
+//! accessors [`Matrix::iter`](crate::Matrix::iter) and
+//! [`Matrix::iter_mut`](crate::Matrix::iter_mut). They traverse the underlying
+//! column-major storage and are allocation-free. Row and column views also
+//! dereference to `stride::Stride`, which provides slice-style iteration.
+//!
+//! The commented iterator implementations below are retained as design notes
+//! for a future public row/column iterator API; they are not part of the
+//! current surface and should not be relied upon.
+//!
+//! # Example
+//!
+//! ```
+//! use stack_algebra::matrix;
+//! let mut m = matrix![1_i32, 2; 3, 4];
+//! let sum: i32 = m.iter().copied().sum();
+//! assert_eq!(sum, 10);
+//! for value in m.iter_mut() {
+//!     *value *= 2;
+//! }
+//! assert_eq!(m.as_slice(), &[2, 6, 4, 8]);
+//! ```
+
 // use core::fmt;
 // use core::iter::{FusedIterator, Sum};
 // use core::marker::PhantomData;

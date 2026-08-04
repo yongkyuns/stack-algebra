@@ -6,6 +6,20 @@ use crate::{DecompositionError, Matrix, MatrixScalar, Real};
 ///
 /// The factorization stores the lower-triangular matrix `L` such that
 /// `A = L * L.transpose()`. Only the lower triangle of the input is read.
+/// The factor and all solve workspaces have fixed capacity determined by `D`.
+///
+/// # Examples
+///
+/// ```
+/// use stack_algebra::{matrix, Cholesky};
+///
+/// let a = matrix![4.0_f64, 2.0; 2.0, 3.0];
+/// let factor: Cholesky<2, f64> = a.try_cholesky().expect("positive definite");
+/// let rhs = matrix![1.0_f64; 0.0];
+/// let x = factor.solve(&rhs);
+/// let residual = a * x - rhs;
+/// assert!(residual.norm() < 1.0e-12);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cholesky<const D: usize, T> {
     lower: Matrix<D, D, T>,

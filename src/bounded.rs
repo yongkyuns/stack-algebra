@@ -1,3 +1,27 @@
+//! Stack-backed matrices with runtime active dimensions.
+//!
+//! [`MatrixBuf`] is useful when a device receives a matrix size at runtime but
+//! has a known upper bound. It reserves its complete capacity inline and only
+//! tracks the active rectangle, so construction and resizing never allocate.
+//! The active values are still column-major, matching [`Matrix`](crate::Matrix).
+//!
+//! # Example
+//!
+//! ```
+//! use stack_algebra::{matrix, MatrixBuf};
+//!
+//! let mut buffer = MatrixBuf::<4, 4, f32>::new(2, 3).unwrap();
+//! buffer[(1, 2)] = 7.0;
+//! buffer.resize(3, 2).unwrap();
+//! assert_eq!(buffer.rows(), 3);
+//! assert_eq!(buffer.columns(), 2);
+//! assert!(buffer.get(1, 2).is_none());
+//!
+//! let source = matrix![1_i32, 2, 3; 4, 5, 6];
+//! let bounded = MatrixBuf::<4, 4, _>::from_matrix(&source).unwrap();
+//! assert_eq!(bounded.to_matrix::<2, 3>(), Some(source));
+//! ```
+
 use core::ops::{Index, IndexMut};
 
 use crate::{Matrix, Zero};
@@ -19,6 +43,9 @@ where
     T: Copy + Zero,
 {
     /// Creates a zero-filled buffer with the requested active dimensions.
+    ///
+    /// Returns `None` when either requested dimension exceeds the type-level
+    /// capacity. The entire backing array is initialized inline.
     #[inline]
     pub fn new(rows: usize, columns: usize) -> Option<Self> {
         if rows > MAX_ROWS || columns > MAX_COLS {
@@ -88,6 +115,10 @@ where
     }
 
     /// Changes the active dimensions without reallocating or clearing storage.
+    ///
+    /// Newly exposed elements retain whatever values were previously stored in
+    /// the inline capacity. Initialize them before reading when growing a
+    /// buffer.
     #[inline]
     pub fn resize(&mut self, rows: usize, columns: usize) -> Option<()> {
         if rows > MAX_ROWS || columns > MAX_COLS {

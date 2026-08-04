@@ -1,3 +1,40 @@
+//! Fixed-capacity sparse matrices and factorizations.
+//!
+//! The sparse types use compile-time dimensions and inline arrays.  `MAX_NNZ`
+//! is a storage bound, not a request to allocate that many entries at runtime;
+//! constructors and insertions return an error when the bound is exceeded.
+//! This makes the API suitable for `no_std` and embedded applications while
+//! still supporting the symbolic/numeric split used by sparse solvers.
+//!
+//! A typical CSC workflow is to validate a pattern once, analyze it once, and
+//! then refactorize new numeric values during each control or estimation step:
+//!
+//! ```
+//! use stack_algebra::{Matrix, StaticCscCholeskyPattern, StaticCscMatrix};
+//!
+//! type Matrix3 = StaticCscMatrix<2, 2, 3, f64>;
+//! let a = Matrix3::from_pattern(
+//!     &[4.0, 1.0, 3.0],
+//!     &[0, 1, 1],
+//!     &[0, 2, 3],
+//! ).unwrap();
+//! let pattern = StaticCscCholeskyPattern::<2, 3>::analyze(&a).unwrap();
+//! let mut factor = pattern.factor(&a).unwrap();
+//!
+//! let b = Matrix::<2, 1, f64>::from_rows([[1.0], [2.0]]);
+//! let x = factor.solve(&b);
+//! assert!((x[(0, 0)] - 1.0 / 11.0).abs() < 1.0e-12);
+//!
+//! // Keep `pattern` and `factor` and update only values on later iterations.
+//! let next = Matrix3::from_pattern(&[5.0, 1.0, 4.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+//! factor.recompute(&next).unwrap();
+//! ```
+//!
+//! CSC arrays are column-major: row indices are strictly increasing within a
+//! column and the pointer array has `COLS + 1` entries.  Symmetric
+//! factorizations consume the lower triangle; store that triangle in the
+//! pattern even when an application also keeps an upper-triangle view.
+
 use crate::Zero;
 
 mod cholesky;
@@ -13,6 +50,9 @@ pub use ordering::StaticCscOrdering;
 pub use storage::{StaticCscMatrix, StaticCscPattern};
 
 /// Symbolic CSC pattern shared by sparse LLT and no-pivot LDLᵀ.
+///
+/// This alias is useful when a generated solver may switch between Cholesky
+/// and LDLᵀ while retaining the same fill pattern.
 pub type StaticCscLdltPattern<const N: usize, const MAX_L_NNZ: usize> =
     StaticCscCholeskyPattern<N, MAX_L_NNZ>;
 
