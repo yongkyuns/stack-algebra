@@ -12,6 +12,10 @@ SymForce or any other robotics framework.
   kernel dispatch into the embedded path.
 - Preserve explicit `f32`/`f64` types and explicit casts for mixed precision.
 - Add bounded runtime dimensions before adding heap-backed dynamic matrices.
+- Keep heap-backed dynamic owning matrices out of the core roadmap until a
+  concrete workload cannot be served by fixed, bounded, mapped, or sparse
+  storage. If eventually needed, add them only as an explicit `alloc`/`std`
+  layer rather than changing the embedded core contract.
 - Treat Eigen and faer as external correctness and performance references only.
 
 ## Current status
@@ -90,7 +94,9 @@ SymForce or any other robotics framework.
 - Extend fixed-capacity block CSC/CSR with additional block-level ordering
   strategies and native cross-block pivot handling; local pivoted LDLT and an
   explicit dense global-pivot fallback are implemented.
-- Add heap-backed dynamic matrices only behind an optional `alloc`/`std` layer.
+- Revisit heap-backed dynamic matrices only after bounded, mapped, and sparse
+  storage are demonstrably insufficient for a concrete application; any future
+  implementation must remain behind an optional `alloc`/`std` layer.
 
 ### P5 — release and target gates
 

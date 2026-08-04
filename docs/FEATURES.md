@@ -21,6 +21,11 @@ references in optional tests and benchmarks.
 Every bounded storage type exposes `storage_bytes()` as a `const fn`, so an
 application can budget RAM at compile time.
 
+Heap-backed dynamic owning matrices are intentionally outside the current core
+scope. They will only be considered for a concrete workload that cannot use
+fixed-size, bounded, mapped, or sparse storage, and would be isolated behind an
+optional `alloc`/`std` layer.
+
 ## Dense core
 
 ### Matrix and vector types
