@@ -198,7 +198,6 @@ mod tests {
         let mut output = Matrix::<M, P, f64>::zeros();
         matmul_scalar(&lhs, &rhs, &mut reference);
         lhs.mul_into(&rhs, &mut output);
-        assert_eq!(output, reference);
 
         for column in 0..P {
             for row in 0..M {
@@ -208,6 +207,8 @@ mod tests {
                 }
                 let actual = reference[(row, column)];
                 assert!((actual - expected).abs() <= 1e-14 + 1e-14 * expected.abs());
+                let actual = output[(row, column)];
+                assert!((actual - expected).abs() <= 1e-13 + 1e-13 * expected.abs());
             }
         }
     }
@@ -219,7 +220,6 @@ mod tests {
         let mut output = Matrix::<M, P, f32>::zeros();
         matmul_scalar(&lhs, &rhs, &mut reference);
         lhs.mul_into(&rhs, &mut output);
-        assert_eq!(output, reference);
 
         for column in 0..P {
             for row in 0..M {
@@ -229,6 +229,8 @@ mod tests {
                 }
                 let actual = reference[(row, column)] as f64;
                 assert!((actual - expected).abs() <= 1e-6 + 1e-6 * expected.abs());
+                let actual = output[(row, column)] as f64;
+                assert!((actual - expected).abs() <= 2e-6 + 2e-6 * expected.abs());
             }
         }
     }
@@ -243,6 +245,8 @@ mod tests {
         check_f64::<9, 6, 5>();
         check_f64::<15, 3, 6>();
         check_f64::<6, 15, 6>();
+        check_f64::<15, 15, 15>();
+        check_f64::<16, 16, 16>();
     }
 
     #[test]
@@ -255,5 +259,7 @@ mod tests {
         check_f32::<9, 6, 5>();
         check_f32::<15, 3, 6>();
         check_f32::<6, 15, 6>();
+        check_f32::<15, 15, 15>();
+        check_f32::<16, 16, 16>();
     }
 }
