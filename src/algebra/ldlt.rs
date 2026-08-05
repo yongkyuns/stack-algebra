@@ -81,7 +81,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             permutation: core::array::from_fn(|index| index),
             pivots: [1; D],
         };
-        Self::decompose_impl::<true>(&mut output)?;
+        Self::decompose_with_fallback(&mut output)?;
         Ok(output)
     }
 
@@ -92,7 +92,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         V: MatrixRead<D, D, T>,
     {
         let mut output = Self::view_storage(matrix)?;
-        Self::decompose_impl::<true>(&mut output)?;
+        Self::decompose_with_fallback(&mut output)?;
         Ok(output)
     }
 
@@ -106,7 +106,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         output.factor = *matrix;
         output.permutation = core::array::from_fn(|index| index);
         output.pivots = [1; D];
-        Self::decompose_impl::<true>(output)
+        Self::decompose_with_fallback(output)
     }
 
     /// Computes an LDLᵀ decomposition without diagonal pivoting.
@@ -128,7 +128,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             permutation: core::array::from_fn(|index| index),
             pivots: [1; D],
         };
-        Self::decompose_impl::<false>(&mut output)?;
+        Self::decompose_impl::<false, false>(&mut output)?;
         Ok(output)
     }
 
@@ -139,7 +139,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         V: MatrixRead<D, D, T>,
     {
         let mut output = Self::view_storage(matrix)?;
-        Self::decompose_impl::<false>(&mut output)?;
+        Self::decompose_impl::<false, false>(&mut output)?;
         Ok(output)
     }
 
@@ -172,16 +172,19 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         output.factor = *matrix;
         output.permutation = core::array::from_fn(|index| index);
         output.pivots = [1; D];
-        Self::decompose_impl::<false>(output)
+        Self::decompose_impl::<false, false>(output)
     }
 
     #[inline]
-    fn decompose_impl<const PIVOTING: bool>(output: &mut Self) -> Result<(), DecompositionError> {
+    fn decompose_impl<const PIVOTING: bool, const CHECK_STABILITY: bool>(
+        output: &mut Self,
+    ) -> Result<(), DecompositionError> {
         if PIVOTING {
             return Self::decompose_bunch_kaufman(output);
         }
         let factor = &mut output.factor;
         let permutation = &mut output.permutation;
+        let stability_alpha = T::from(0.6403882032022076).unwrap_or(T::one());
 
         const BLOCK_SIZE: usize = 16;
         let mut block_start = 0;
@@ -195,6 +198,20 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                 }
                 if pivot_value == T::zero() {
                     return Err(DecompositionError::ZeroPivot);
+                }
+                if CHECK_STABILITY {
+                    let mut column_max = T::zero();
+                    let data = factor.as_slice();
+                    let column = &data[diagonal * D + diagonal + 1..diagonal * D + D];
+                    for value in column {
+                        column_max = column_max.max(value.abs());
+                    }
+                    if !column_max.is_finite() {
+                        return Err(DecompositionError::NonFinite);
+                    }
+                    if column_max != T::zero() && pivot_value.abs() < stability_alpha * column_max {
+                        return Err(DecompositionError::ZeroPivot);
+                    }
                 }
                 if pivot != diagonal {
                     Self::swap_lower_rows(factor, diagonal, pivot, diagonal);
@@ -236,6 +253,17 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         }
 
         Ok(())
+    }
+
+    fn decompose_with_fallback(output: &mut Self) -> Result<(), DecompositionError> {
+        let original_factor = output.factor;
+        if Self::decompose_impl::<false, true>(output).is_ok() {
+            return Ok(());
+        }
+        output.factor = original_factor;
+        output.permutation = core::array::from_fn(|index| index);
+        output.pivots = [1; D];
+        Self::decompose_impl::<true, false>(output)
     }
 
     fn decompose_bunch_kaufman(output: &mut Self) -> Result<(), DecompositionError> {
@@ -775,6 +803,13 @@ mod tests {
         let matrix = matrix![0.0_f64, 1.0; 1.0, 2.0];
         assert!(matrix.ldlt_no_pivot().is_none());
         assert!(matrix.ldlt().is_some());
+    }
+
+    #[test]
+    fn pivoted_factorization_rejects_unstable_nonzero_leading_pivot() {
+        let matrix = matrix![1.0e-12_f64, 1.0; 1.0, 2.0];
+        let factor = matrix.ldlt().expect("nonsingular input");
+        assert_eq!(factor.permutation_indices(), &[1, 0]);
     }
 
     #[test]
