@@ -28,8 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --doc --all-features
-      - run: cargo doc --no-deps --all-features
+      - run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
+      - run: EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo test --doc --all-features
+      - run: EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo doc --no-deps --all-features
 
   embedded:
     name: Embedded targets and QEMU

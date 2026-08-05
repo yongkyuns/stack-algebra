@@ -20,12 +20,25 @@ if [[ -n "${CXXFLAGS:-}" ]]; then
 fi
 
 mkdir -p "${root_dir}/target"
+binary="${root_dir}/target/eigen-native-bench"
 compile_command=("${compiler}" -std=c++17 -O3 -DNDEBUG)
 if ((${#user_flags[@]})); then
   compile_command+=("${user_flags[@]}")
 fi
 compile_command+=("${eigen_flags[@]}" "${root_dir}/eigen/native_bench.cpp" \
-  -o "${root_dir}/target/eigen-native-bench")
-"${compile_command[@]}"
+  -o "${binary}")
 
-exec "${root_dir}/target/eigen-native-bench" "$@"
+# The executable accepts the scalar type at runtime, so f32 and f64 can share
+# one compilation. Rebuild when the source changed unless explicitly skipped.
+needs_build=0
+if [[ ! -x "${binary}" ]]; then
+  needs_build=1
+elif [[ "${EIGEN_BENCH_SKIP_BUILD:-0}" != "1" &&
+        "${root_dir}/eigen/native_bench.cpp" -nt "${binary}" ]]; then
+  needs_build=1
+fi
+if [[ "${needs_build}" == "1" ]]; then
+  "${compile_command[@]}"
+fi
+
+exec "${binary}" "$@"

@@ -1,0 +1,100 @@
+name: Nightly benchmark comparison
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-C target-cpu=native"
+
+jobs:
+  benchmark:
+    name: Run comparison benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Cache Rust benchmark build
+        uses: actions/cache@v4
+        with:
+          path: target/release
+          key: ${{ runner.os }}-${{ runner.arch }}-rust-bench-native-${{ hashFiles('Cargo.lock') }}
+      - name: Cache native Eigen benchmark
+        uses: actions/cache@v4
+        with:
+          path: target/eigen-native-bench
+          key: ${{ runner.os }}-${{ runner.arch }}-eigen-native-${{ hashFiles('eigen/native_bench.cpp') }}-march-native
+      - name: Install Eigen
+        run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
+      - name: Run Rust benchmarks
+        env:
+          EIGEN3_INCLUDE_DIR: /usr/include/eigen3
+        run: |
+          cargo bench --locked --bench comparison -- \
+            --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
+          for bench in sparse block_sparse; do
+            cargo bench --locked --all-features --bench "$bench" -- \
+              --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
+          done
+      - name: Run native Eigen benchmark
+        run: |
+          mkdir -p benchmark-report/raw
+          CXXFLAGS="-march=native" EIGEN3_INCLUDE_DIR=/usr/include/eigen3 \
+            EIGEN_BENCH_SAMPLES=5 EIGEN_BENCH_MIN_SAMPLE_MS=5 EIGEN_BENCH_SKIP_BUILD=1 \
+            EIGEN_BENCH_CSV=benchmark-report/raw/eigen-f32.csv \
+            ./eigen/run_native_bench.sh f32 > benchmark-report/raw/eigen-f32.txt
+          CXXFLAGS="-march=native" EIGEN3_INCLUDE_DIR=/usr/include/eigen3 \
+            EIGEN_BENCH_SAMPLES=5 EIGEN_BENCH_MIN_SAMPLE_MS=5 \
+            EIGEN_BENCH_SKIP_BUILD=1 \
+            EIGEN_BENCH_CSV=benchmark-report/raw/eigen-f64.csv \
+            ./eigen/run_native_bench.sh f64 > benchmark-report/raw/eigen-f64.txt
+      - name: Generate report
+        env:
+          REPORT_SHA: ${{ github.sha }}
+          REPORT_REF: ${{ github.ref_name }}
+        run: >-
+          python3 scripts/generate_benchmark_report.py
+          --criterion-dir target/criterion
+          --eigen-csv benchmark-report/raw/eigen-f32.csv
+          --eigen-csv benchmark-report/raw/eigen-f64.csv
+          --output benchmark-report/index.html
+          --csv-output benchmark-report/results.csv
+          --metadata "commit=${REPORT_SHA}; ref=${REPORT_REF}; runner=${RUNNER_OS}/${RUNNER_ARCH}"
+          --require-eigen
+      - name: Upload nightly report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-benchmark-report
+          path: benchmark-report
+          if-no-files-found: error
+
+  # Pages publishing is deliberately opt-in. Set the repository variable
+  # PUBLISH_BENCHMARKS=true and configure Pages to use GitHub Actions.
+  publish:
+    name: Publish report to GitHub Pages
+    needs: benchmark
+    if: ${{ github.event_name == 'schedule' && vars.PUBLISH_BENCHMARKS == 'true' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-benchmark-report
+          path: benchmark-report
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: benchmark-report
+      - id: deployment
+        uses: actions/deploy-pages@v4

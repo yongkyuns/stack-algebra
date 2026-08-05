@@ -7,16 +7,56 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <string>
 #include <string_view>
 
 namespace {
 
 constexpr std::size_t kBatchSize = 64;
-constexpr std::size_t kSamples = 15;
-constexpr auto kMinimumSampleDuration = std::chrono::milliseconds(25);
+constexpr std::size_t kMaxSamples = 15;
+constexpr std::size_t kDefaultSamples = 15;
 std::string_view g_filter;
+std::string_view g_scalar;
+std::ofstream g_csv;
+
+std::size_t environment_size(const char* name, std::size_t fallback, std::size_t minimum,
+                             std::size_t maximum) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || *value == '\0') {
+    return fallback;
+  }
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(value, &end, 10);
+  if (end == value || *end != '\0') {
+    return fallback;
+  }
+  const std::size_t result = static_cast<std::size_t>(parsed);
+  return result < minimum || result > maximum ? fallback : result;
+}
+
+std::chrono::milliseconds minimum_sample_duration() {
+  return std::chrono::milliseconds(
+      environment_size("EIGEN_BENCH_MIN_SAMPLE_MS", 25, 1, 1000));
+}
+
+std::size_t sample_count() {
+  return environment_size("EIGEN_BENCH_SAMPLES", kDefaultSamples, 3, kMaxSamples);
+}
+
+void write_csv_field(std::ostream& output, std::string_view value) {
+  output << '"';
+  for (const char character : value) {
+    if (character == '"') {
+      output << '"';
+    }
+    output << character;
+  }
+  output << '"';
+}
 
 template <typename Value>
 inline Value* opaque(Value* pointer) {
@@ -187,7 +227,7 @@ std::size_t calibrated_batches(Operation& operation) {
     const double nanoseconds_per_operation = sample(operation, batches);
     const auto elapsed = std::chrono::duration<double, std::nano>(
         nanoseconds_per_operation * static_cast<double>(batches * kBatchSize));
-    if (elapsed >= kMinimumSampleDuration) {
+    if (elapsed >= minimum_sample_duration()) {
       return batches;
     }
     batches *= 2;
@@ -201,16 +241,26 @@ void benchmark_case(const char* name, Operation operation) {
     return;
   }
   const std::size_t batches = calibrated_batches(operation);
-  std::array<double, kSamples> samples{};
-  for (double& result : samples) {
-    result = sample(operation, batches);
+  const std::size_t samples_to_collect = sample_count();
+  std::array<double, kMaxSamples> samples{};
+  for (std::size_t index = 0; index < samples_to_collect; ++index) {
+    samples[index] = sample(operation, batches);
   }
-  std::sort(samples.begin(), samples.end());
+  std::sort(samples.begin(), samples.begin() + samples_to_collect);
 
-  const double nanoseconds_per_operation = samples[kSamples / 2];
+  const double nanoseconds_per_operation = samples[samples_to_collect / 2];
   std::cout << std::left << std::setw(24) << name << std::right << std::setw(14) << std::fixed
             << std::setprecision(2) << nanoseconds_per_operation * kBatchSize << std::setw(12)
             << nanoseconds_per_operation << '\n';
+  if (g_csv.is_open()) {
+    write_csv_field(g_csv, g_scalar);
+    g_csv << ',';
+    write_csv_field(g_csv, name);
+    g_csv << ',' << std::setprecision(17) << nanoseconds_per_operation << ','
+          << nanoseconds_per_operation * kBatchSize << ',' << kBatchSize << ','
+          << samples_to_collect
+          << ',' << batches << '\n';
+  }
 }
 
 template <typename Scalar, int Rows, int Shared, int Columns>
@@ -595,6 +645,7 @@ void benchmark_ldlt_solve(const char* name) {
 
 template <typename Scalar>
 void benchmark_scalar(const char* scalar_name) {
+  g_scalar = scalar_name;
   std::cout << '\n' << scalar_name << " fixed-size operations\n"
             << std::left << std::setw(24) << "operation" << std::right << std::setw(14)
             << "ns/batch" << std::setw(12) << "ns/op\n";
@@ -602,27 +653,44 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_product<Scalar, 3, 3, 3>("matmul 3x3 * 3x3");
   benchmark_product<Scalar, 4, 4, 4>("matmul 4x4 * 4x4");
   benchmark_product<Scalar, 6, 6, 6>("matmul 6x6 * 6x6");
+  benchmark_product<Scalar, 8, 8, 8>("matmul 8x8 * 8x8");
   benchmark_product<Scalar, 9, 9, 9>("matmul 9x9 * 9x9");
   benchmark_product<Scalar, 15, 15, 15>("matmul 15x15 * 15x15");
+  benchmark_product<Scalar, 16, 16, 16>("matmul 16x16 * 16x16");
+  benchmark_product<Scalar, 32, 32, 32>("matmul 32x32 * 32x32");
   benchmark_product<Scalar, 2, 3, 2>("matmul 2x3 * 3x2");
   benchmark_product<Scalar, 3, 6, 3>("matmul 3x6 * 6x3");
   benchmark_product<Scalar, 6, 15, 6>("matmul 6x15 * 15x6");
   benchmark_product<Scalar, 3, 3, 1>("matvec 3x3");
   benchmark_product<Scalar, 6, 6, 1>("matvec 6x6");
+  benchmark_product<Scalar, 8, 8, 1>("matvec 8x8");
   benchmark_product<Scalar, 15, 15, 1>("matvec 15x15");
+  benchmark_product<Scalar, 16, 16, 1>("matvec 16x16");
+  benchmark_product<Scalar, 32, 32, 1>("matvec 32x32");
   benchmark_norm<Scalar, 3, 3>("norm 3x3");
   benchmark_norm<Scalar, 6, 6>("norm 6x6");
+  benchmark_norm<Scalar, 8, 8>("norm 8x8");
   benchmark_norm<Scalar, 15, 15>("norm 15x15");
+  benchmark_norm<Scalar, 16, 16>("norm 16x16");
+  benchmark_norm<Scalar, 32, 32>("norm 32x32");
   benchmark_norm<Scalar, 6, 15>("norm 6x15");
   benchmark_dot<Scalar, 3>("dot 3");
   benchmark_dot<Scalar, 6>("dot 6");
+  benchmark_dot<Scalar, 8>("dot 8");
   benchmark_dot<Scalar, 15>("dot 15");
+  benchmark_dot<Scalar, 16>("dot 16");
+  benchmark_dot<Scalar, 32>("dot 32");
   benchmark_lu_factor<Scalar, 3>("LU factor 3x3");
   benchmark_lu_factor<Scalar, 6>("LU factor 6x6");
+  benchmark_lu_factor<Scalar, 8>("LU factor 8x8");
   benchmark_lu_factor<Scalar, 15>("LU factor 15x15");
+  benchmark_lu_factor<Scalar, 16>("LU factor 16x16");
+  benchmark_lu_factor<Scalar, 32>("LU factor 32x32");
   benchmark_llt_factor<Scalar, 3>("LLT factor 3x3");
   benchmark_llt_factor<Scalar, 6>("LLT factor 6x6");
+  benchmark_llt_factor<Scalar, 8>("LLT factor 8x8");
   benchmark_llt_factor<Scalar, 15>("LLT factor 15x15");
+  benchmark_llt_factor<Scalar, 16>("LLT factor 16x16");
   benchmark_llt_factor<Scalar, 32>("LLT factor 32x32");
   benchmark_sparse_llt_analyze<Scalar, 3>("Sparse LLT analyze 3x3");
   benchmark_sparse_llt_analyze<Scalar, 6>("Sparse LLT analyze 6x6");
@@ -639,26 +707,39 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_sparse_ldlt_factor<Scalar, 15>("Sparse LDLT factor 15x15");
   benchmark_ldlt_factor<Scalar, 3>("LDLT factor 3x3");
   benchmark_ldlt_factor<Scalar, 6>("LDLT factor 6x6");
+  benchmark_ldlt_factor<Scalar, 8>("LDLT factor 8x8");
   benchmark_ldlt_factor<Scalar, 15>("LDLT factor 15x15");
+  benchmark_ldlt_factor<Scalar, 16>("LDLT factor 16x16");
   benchmark_ldlt_factor<Scalar, 32>("LDLT factor 32x32");
   benchmark_lu_solve<Scalar, 3>("LU solve 3x3");
   benchmark_lu_solve<Scalar, 6>("LU solve 6x6");
+  benchmark_lu_solve<Scalar, 8>("LU solve 8x8");
   benchmark_lu_solve<Scalar, 15>("LU solve 15x15");
+  benchmark_lu_solve<Scalar, 16>("LU solve 16x16");
+  benchmark_lu_solve<Scalar, 32>("LU solve 32x32");
   benchmark_qr_factor<Scalar, 3>("QR factor 3x3");
   benchmark_qr_factor<Scalar, 6>("QR factor 6x6");
+  benchmark_qr_factor<Scalar, 8>("QR factor 8x8");
   benchmark_qr_factor<Scalar, 15>("QR factor 15x15");
+  benchmark_qr_factor<Scalar, 16>("QR factor 16x16");
   benchmark_qr_factor<Scalar, 32>("QR factor 32x32");
   benchmark_qr_solve<Scalar, 3>("QR solve 3x3");
   benchmark_qr_solve<Scalar, 6>("QR solve 6x6");
+  benchmark_qr_solve<Scalar, 8>("QR solve 8x8");
   benchmark_qr_solve<Scalar, 15>("QR solve 15x15");
+  benchmark_qr_solve<Scalar, 16>("QR solve 16x16");
   benchmark_qr_solve<Scalar, 32>("QR solve 32x32");
   benchmark_col_piv_qr_factor<Scalar, 3>("ColPiv QR factor 3x3");
   benchmark_col_piv_qr_factor<Scalar, 6>("ColPiv QR factor 6x6");
+  benchmark_col_piv_qr_factor<Scalar, 8>("ColPiv QR factor 8x8");
   benchmark_col_piv_qr_factor<Scalar, 15>("ColPiv QR factor 15x15");
+  benchmark_col_piv_qr_factor<Scalar, 16>("ColPiv QR factor 16x16");
   benchmark_col_piv_qr_factor<Scalar, 32>("ColPiv QR factor 32x32");
   benchmark_col_piv_qr_solve<Scalar, 3>("ColPiv QR solve 3x3");
   benchmark_col_piv_qr_solve<Scalar, 6>("ColPiv QR solve 6x6");
+  benchmark_col_piv_qr_solve<Scalar, 8>("ColPiv QR solve 8x8");
   benchmark_col_piv_qr_solve<Scalar, 15>("ColPiv QR solve 15x15");
+  benchmark_col_piv_qr_solve<Scalar, 16>("ColPiv QR solve 16x16");
   benchmark_col_piv_qr_solve<Scalar, 32>("ColPiv QR solve 32x32");
   benchmark_tall_qr_factor<Scalar, 6, 3>("Tall QR factor 6x3");
   benchmark_tall_qr_factor<Scalar, 15, 6>("Tall QR factor 15x6");
@@ -674,17 +755,25 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_tall_svd_solve<Scalar, 15, 6>("Tall SVD solve 15x6");
   benchmark_self_adjoint_eigen_factor<Scalar, 3>("Self-adjoint eigen factor 3x3");
   benchmark_self_adjoint_eigen_factor<Scalar, 6>("Self-adjoint eigen factor 6x6");
+  benchmark_self_adjoint_eigen_factor<Scalar, 8>("Self-adjoint eigen factor 8x8");
   benchmark_self_adjoint_eigen_factor<Scalar, 15>("Self-adjoint eigen factor 15x15");
+  benchmark_self_adjoint_eigen_factor<Scalar, 16>("Self-adjoint eigen factor 16x16");
   benchmark_self_adjoint_eigen_factor<Scalar, 32>("Self-adjoint eigen factor 32x32");
   benchmark_triangular_solve<Scalar, 3>("Lower triangular solve 3x3", true);
   benchmark_triangular_solve<Scalar, 6>("Lower triangular solve 6x6", true);
+  benchmark_triangular_solve<Scalar, 8>("Lower triangular solve 8x8", true);
   benchmark_triangular_solve<Scalar, 15>("Lower triangular solve 15x15", true);
+  benchmark_triangular_solve<Scalar, 16>("Lower triangular solve 16x16", true);
   benchmark_triangular_solve<Scalar, 3>("Upper triangular solve 3x3", false);
   benchmark_triangular_solve<Scalar, 6>("Upper triangular solve 6x6", false);
+  benchmark_triangular_solve<Scalar, 8>("Upper triangular solve 8x8", false);
   benchmark_triangular_solve<Scalar, 15>("Upper triangular solve 15x15", false);
+  benchmark_triangular_solve<Scalar, 16>("Upper triangular solve 16x16", false);
   benchmark_llt_solve<Scalar, 3>("LLT solve 3x3");
   benchmark_llt_solve<Scalar, 6>("LLT solve 6x6");
+  benchmark_llt_solve<Scalar, 8>("LLT solve 8x8");
   benchmark_llt_solve<Scalar, 15>("LLT solve 15x15");
+  benchmark_llt_solve<Scalar, 16>("LLT solve 16x16");
   benchmark_llt_solve<Scalar, 32>("LLT solve 32x32");
   benchmark_sparse_llt_solve<Scalar, 3>("Sparse LLT solve 3x3");
   benchmark_sparse_llt_solve<Scalar, 6>("Sparse LLT solve 6x6");
@@ -693,7 +782,9 @@ void benchmark_scalar(const char* scalar_name) {
   benchmark_sparse_ldlt_solve<Scalar, 15>("Sparse LDLT solve 15x15");
   benchmark_ldlt_solve<Scalar, 3>("LDLT solve 3x3");
   benchmark_ldlt_solve<Scalar, 6>("LDLT solve 6x6");
+  benchmark_ldlt_solve<Scalar, 8>("LDLT solve 8x8");
   benchmark_ldlt_solve<Scalar, 15>("LDLT solve 15x15");
+  benchmark_ldlt_solve<Scalar, 16>("LDLT solve 16x16");
   benchmark_ldlt_solve<Scalar, 32>("LDLT solve 32x32");
 }
 
@@ -709,8 +800,17 @@ int main(int argc, char** argv) {
     g_filter = argv[2];
   }
 
+  if (const char* csv_path = std::getenv("EIGEN_BENCH_CSV"); csv_path != nullptr && *csv_path != '\0') {
+    g_csv.open(csv_path);
+    if (!g_csv) {
+      std::cerr << "unable to open EIGEN_BENCH_CSV output: " << csv_path << '\n';
+      return 1;
+    }
+    g_csv << "scalar,operation,ns_per_op,ns_per_batch,batch_size,samples,calibrated_batches\n";
+  }
+
   std::cout << "Eigen native benchmark: static column-major matrices; "
-               "64 operations per batch; median of 15 samples.\n";
+               "64 operations per batch; configurable median sample count.\n";
   if (argc == 1 || std::string_view(argv[1]) == "f32") {
     benchmark_scalar<float>("f32");
   }
