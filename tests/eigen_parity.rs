@@ -766,6 +766,92 @@ fn ldlt_solves_match_eigen() {
     assert_close_f64(pivoted_solution.as_slice(), eigen_solution_f64.as_slice());
 }
 
+fn targeted_ldlt_case<const D: usize>(case: usize) -> Matrix<D, D, f64> {
+    Matrix::from_fn(|row, column| match case {
+        0 => {
+            let mut value = 0.0;
+            for shared in 0..D {
+                let left = (shared + 3 * row + 1) as f64 / 23.0;
+                let right = (shared + 3 * column + 1) as f64 / 23.0;
+                value += left * right;
+            }
+            value + if row == column { D as f64 } else { 0.0 }
+        }
+        1 => {
+            if row == column {
+                if row % 2 == 0 {
+                    -(D as f64)
+                } else {
+                    (D + 1) as f64
+                }
+            } else {
+                (row + column + 1) as f64 / 29.0
+            }
+        }
+        2 => {
+            if row == 0 && column == 0 {
+                1.0e-6
+            } else if (row == 1 && column == 0) || (row == 0 && column == 1) {
+                1.0
+            } else if row == 1 && column == 1 {
+                2.0
+            } else if row == column {
+                (D + row + 1) as f64
+            } else {
+                (row + column + 1) as f64 / 29.0
+            }
+        }
+        _ => unreachable!(),
+    })
+}
+
+#[test]
+fn targeted_ldlt_cases_match_eigen() {
+    for case in 0..3 {
+        let matrix_f64 = targeted_ldlt_case::<8>(case);
+        let rhs_f64 = Vector::<8, f64>::from_fn(|row, _| (row + 1) as f64 / 3.0);
+        let mut eigen_solution_f64 = Vector::<8, f64>::zeros();
+        assert_eq!(
+            unsafe {
+                sa_eigen_ldlt_solve_f64(
+                    matrix_f64.as_slice().as_ptr(),
+                    rhs_f64.as_slice().as_ptr(),
+                    8,
+                    1,
+                    eigen_solution_f64.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+        let solution_f64 = matrix_f64
+            .ldlt()
+            .expect("targeted matrix is nonsingular")
+            .solve(&rhs_f64);
+        assert_close_f64(solution_f64.as_slice(), eigen_solution_f64.as_slice());
+
+        let matrix_f32 = matrix_f64.cast::<f32>();
+        let rhs_f32 = rhs_f64.cast::<f32>();
+        let mut eigen_solution_f32 = Vector::<8, f32>::zeros();
+        assert_eq!(
+            unsafe {
+                sa_eigen_ldlt_solve_f32(
+                    matrix_f32.as_slice().as_ptr(),
+                    rhs_f32.as_slice().as_ptr(),
+                    8,
+                    1,
+                    eigen_solution_f32.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+        let solution_f32 = matrix_f32
+            .ldlt()
+            .expect("targeted matrix is nonsingular")
+            .solve(&rhs_f32);
+        assert_close_f32(solution_f32.as_slice(), eigen_solution_f32.as_slice());
+    }
+}
+
 fn compare_matvec_f64<const M: usize, const N: usize>(seed: u64) {
     let lhs = generated_f64::<M, N>(seed);
     let rhs = generated_f64::<N, 1>(seed.wrapping_add(31));

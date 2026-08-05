@@ -132,6 +132,52 @@ macro_rules! scalar_benches {
                 })
             }
 
+            #[derive(Clone, Copy)]
+            enum LdltCase {
+                Spd,
+                StableIndefinite,
+                ForcedTwoByTwo,
+            }
+
+            impl LdltCase {
+                fn name(self) -> &'static str {
+                    match self {
+                        Self::Spd => "spd",
+                        Self::StableIndefinite => "stable-indefinite",
+                        Self::ForcedTwoByTwo => "forced-2x2",
+                    }
+                }
+            }
+
+            fn stack_ldlt_case<const DIMENSION: usize>(
+                case: LdltCase,
+            ) -> Matrix<DIMENSION, DIMENSION, $scalar> {
+                match case {
+                    LdltCase::Spd => stack_spd_system(),
+                    LdltCase::StableIndefinite => stack_ldlt_system(),
+                    LdltCase::ForcedTwoByTwo => Matrix::from_fn(|row, column| {
+                        if row == 0 && column == 0 {
+                            1.0e-6 as $scalar
+                        } else if row == 1 && column == 0 {
+                            1.0 as $scalar
+                        } else if row == 1 && column == 1 {
+                            2.0 as $scalar
+                        } else if row == column {
+                            (DIMENSION + row + 1) as $scalar
+                        } else if row > column {
+                            (row + column + 1) as $scalar / 29.0
+                        } else {
+                            0.0 as $scalar
+                        }
+                    }),
+                }
+            }
+
+            fn faer_ldlt_case<const DIMENSION: usize>(case: LdltCase) -> Mat<$scalar> {
+                let input = stack_ldlt_case::<DIMENSION>(case);
+                Mat::from_fn(DIMENSION, DIMENSION, |row, column| input[(row, column)])
+            }
+
             fn faer_rhs<const DIMENSION: usize>() -> Mat<$scalar> {
                 Mat::from_fn(DIMENSION, 1, |row, column| {
                     (row + 2 * column + 3) as $scalar / 11.0
@@ -1050,6 +1096,85 @@ macro_rules! scalar_benches {
                 group.finish();
             }
 
+            fn bench_stack_ldlt_case<const DIMENSION: usize>(
+                criterion: &mut Criterion,
+                case: LdltCase,
+            ) {
+                let input = stack_ldlt_case::<DIMENSION>(case);
+                let mut factor = input.ldlt();
+                let mut group = criterion.benchmark_group(format!(
+                    "fixed/ldlt-case/{}/{}/{}",
+                    $scalar_name,
+                    case.name(),
+                    DIMENSION
+                ));
+                group.bench_function("stack-algebra", |bench| {
+                    bench.iter(|| {
+                        for _ in 0..BATCH_SIZE {
+                            factor = black_box(&input).ldlt();
+                        }
+                        black_box(&factor);
+                    });
+                });
+                if !matches!(case, LdltCase::ForcedTwoByTwo) {
+                    let mut no_pivot_factor = input.ldlt_no_pivot();
+                    group.bench_function("stack-algebra-no-pivot", |bench| {
+                        bench.iter(|| {
+                            for _ in 0..BATCH_SIZE {
+                                no_pivot_factor = black_box(&input).ldlt_no_pivot();
+                            }
+                            black_box(&no_pivot_factor);
+                        });
+                    });
+                }
+                group.finish();
+            }
+
+            fn bench_faer_ldlt_case<const DIMENSION: usize>(
+                criterion: &mut Criterion,
+                case: LdltCase,
+            ) {
+                let input = faer_ldlt_case::<DIMENSION>(case);
+                let mut factor = input.ldlt(Side::Lower);
+                let mut group = criterion.benchmark_group(format!(
+                    "fixed/ldlt-case/{}/{}/{}",
+                    $scalar_name,
+                    case.name(),
+                    DIMENSION
+                ));
+                group.bench_function("faer-dynamic", |bench| {
+                    bench.iter(|| {
+                        for _ in 0..BATCH_SIZE {
+                            factor = black_box(&input).ldlt(Side::Lower);
+                        }
+                        black_box(&factor);
+                    });
+                });
+                group.finish();
+            }
+
+            fn bench_ldlt_cases(criterion: &mut Criterion) {
+                for case in [
+                    LdltCase::Spd,
+                    LdltCase::StableIndefinite,
+                    LdltCase::ForcedTwoByTwo,
+                ] {
+                    for dimension in [15, 32] {
+                        match dimension {
+                            15 => {
+                                bench_stack_ldlt_case::<15>(criterion, case);
+                                bench_faer_ldlt_case::<15>(criterion, case);
+                            }
+                            32 => {
+                                bench_stack_ldlt_case::<32>(criterion, case);
+                                bench_faer_ldlt_case::<32>(criterion, case);
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+            }
+
             fn bench_faer_ldlt_solve<const DIMENSION: usize>(criterion: &mut Criterion) {
                 let input = faer_ldlt_system::<DIMENSION>();
                 let factor = input
@@ -1194,6 +1319,7 @@ macro_rules! scalar_benches {
                 for_stack_dimension!(criterion, bench_stack_ldlt_no_pivot_solve, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_faer_ldlt_factor, 3, 6, 15, 32);
                 for_stack_dimension!(criterion, bench_faer_ldlt_solve, 3, 6, 15, 32);
+                bench_ldlt_cases(criterion);
             }
         }
     };

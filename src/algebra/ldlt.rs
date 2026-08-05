@@ -182,12 +182,20 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         if PIVOTING {
             return Self::decompose_bunch_kaufman(output);
         }
+        Self::decompose_no_pivot_from::<CHECK_STABILITY>(output, 0)
+    }
+
+    #[inline]
+    fn decompose_no_pivot_from<const CHECK_STABILITY: bool>(
+        output: &mut Self,
+        start: usize,
+    ) -> Result<(), DecompositionError> {
         let factor = &mut output.factor;
         let permutation = &mut output.permutation;
         let stability_alpha = T::from(0.6403882032022076).unwrap_or(T::one());
 
         const BLOCK_SIZE: usize = 16;
-        let mut block_start = 0;
+        let mut block_start = start;
         while block_start < D {
             let block_end = core::cmp::min(block_start + BLOCK_SIZE, D);
             for diagonal in block_start..block_end {
@@ -324,7 +332,22 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             }
         }
 
+        if !Self::lower_is_finite(factor) {
+            return Err(DecompositionError::NonFinite);
+        }
         Ok(())
+    }
+
+    #[inline]
+    fn lower_is_finite(factor: &Matrix<D, D, T>) -> bool {
+        for column in 0..D {
+            for row in column..D {
+                if !factor[(row, column)].is_finite() {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     fn factor_one_pivot(
@@ -350,9 +373,6 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                     *value = *value / diagonal;
                 }
             }
-            if column.iter().any(|value| !value.is_finite()) {
-                return Err(DecompositionError::NonFinite);
-            }
         }
         for column in (position + 1)..D {
             let scale = diagonal * factor[(column, position)];
@@ -363,11 +383,6 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                 let source = &prefix[position * D + column..position * D + D];
                 let target = &mut suffix[column..D];
                 T::Matmul::rank_update_sub(target, source, scale);
-            }
-            for row in column..D {
-                if !factor[(row, column)].is_finite() {
-                    return Err(DecompositionError::NonFinite);
-                }
             }
         }
         Ok(())
@@ -399,28 +414,27 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             let second_value = factor[(row, position + 1)];
             let lower_first = (first_value * second - second_value * coupling) / determinant;
             let lower_second = (second_value * first - first_value * coupling) / determinant;
-            if !lower_first.is_finite() || !lower_second.is_finite() {
-                return Err(DecompositionError::NonFinite);
-            }
             factor[(row, position)] = lower_first;
             factor[(row, position + 1)] = lower_second;
         }
         for column in (position + 2)..D {
-            for row in column..D {
-                let row_first = factor[(row, position)];
-                let row_second = factor[(row, position + 1)];
-                let column_first = factor[(column, position)];
-                let column_second = factor[(column, position + 1)];
-                let value = factor[(row, column)]
-                    - row_first * first * column_first
-                    - row_first * coupling * column_second
-                    - row_second * coupling * column_first
-                    - row_second * second * column_second;
-                if !value.is_finite() {
-                    return Err(DecompositionError::NonFinite);
-                }
-                factor[(row, column)] = value;
-            }
+            let column_first = factor[(column, position)];
+            let column_second = factor[(column, position + 1)];
+            let scale_first = first * column_first + coupling * column_second;
+            let scale_second = coupling * column_first + second * column_second;
+            let data = factor.as_mut_slice();
+            let column_offset = column * D;
+            let (prefix, suffix) = data.split_at_mut(column_offset);
+            let source_first = &prefix[position * D + column..position * D + D];
+            let source_second = &prefix[(position + 1) * D + column..(position + 1) * D + D];
+            let target = &mut suffix[column..D];
+            T::Matmul::rank_update_two_sub(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            );
         }
         Ok(())
     }

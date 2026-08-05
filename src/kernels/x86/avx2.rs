@@ -303,6 +303,25 @@ impl MatmulBackend<f32> for X86Avx2Matmul {
     }
 
     #[inline]
+    fn rank_update_two_sub(
+        target: &mut [f32],
+        source_first: &[f32],
+        scale_first: f32,
+        source_second: &[f32],
+        scale_second: f32,
+    ) {
+        unsafe {
+            rank_update_two_sub_f32(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            )
+        }
+    }
+
+    #[inline]
     fn scale_divide(target: &mut [f32], divisor: f32) {
         unsafe { scale_divide_f32(target, divisor) }
     }
@@ -331,6 +350,25 @@ impl MatmulBackend<f64> for X86Avx2Matmul {
         block_end: usize,
     ) {
         unsafe { rank_k_update_f64(matrix, block_start, block_end) }
+    }
+
+    #[inline]
+    fn rank_update_two_sub(
+        target: &mut [f64],
+        source_first: &[f64],
+        scale_first: f64,
+        source_second: &[f64],
+        scale_second: f64,
+    ) {
+        unsafe {
+            rank_update_two_sub_f64(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            )
+        }
     }
 
     #[inline]
@@ -486,6 +524,82 @@ pub(super) unsafe fn rank_update_sub_f64(target: &mut [f64], source: &[f64], sca
     while index < target.len() {
         *target.get_unchecked_mut(index) =
             *target.get_unchecked(index) - *source.get_unchecked(index) * scale;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn rank_update_two_sub_f32(
+    target: &mut [f32],
+    source_first: &[f32],
+    scale_first: f32,
+    source_second: &[f32],
+    scale_second: f32,
+) {
+    use core::arch::x86_64::{
+        _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps, _mm256_sub_ps,
+    };
+    let mut index = 0;
+    let scale_first_packet = _mm256_set1_ps(scale_first);
+    let scale_second_packet = _mm256_set1_ps(scale_second);
+    while index + 8 <= target.len() {
+        let value = _mm256_loadu_ps(target.as_ptr().add(index));
+        let first = _mm256_mul_ps(
+            _mm256_loadu_ps(source_first.as_ptr().add(index)),
+            scale_first_packet,
+        );
+        let second = _mm256_mul_ps(
+            _mm256_loadu_ps(source_second.as_ptr().add(index)),
+            scale_second_packet,
+        );
+        _mm256_storeu_ps(
+            target.as_mut_ptr().add(index),
+            _mm256_sub_ps(_mm256_sub_ps(value, first), second),
+        );
+        index += 8;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) = *target.get_unchecked(index)
+            - *source_first.get_unchecked(index) * scale_first
+            - *source_second.get_unchecked(index) * scale_second;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn rank_update_two_sub_f64(
+    target: &mut [f64],
+    source_first: &[f64],
+    scale_first: f64,
+    source_second: &[f64],
+    scale_second: f64,
+) {
+    use core::arch::x86_64::{
+        _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    let mut index = 0;
+    let scale_first_packet = _mm256_set1_pd(scale_first);
+    let scale_second_packet = _mm256_set1_pd(scale_second);
+    while index + 4 <= target.len() {
+        let value = _mm256_loadu_pd(target.as_ptr().add(index));
+        let first = _mm256_mul_pd(
+            _mm256_loadu_pd(source_first.as_ptr().add(index)),
+            scale_first_packet,
+        );
+        let second = _mm256_mul_pd(
+            _mm256_loadu_pd(source_second.as_ptr().add(index)),
+            scale_second_packet,
+        );
+        _mm256_storeu_pd(
+            target.as_mut_ptr().add(index),
+            _mm256_sub_pd(_mm256_sub_pd(value, first), second),
+        );
+        index += 4;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) = *target.get_unchecked(index)
+            - *source_first.get_unchecked(index) * scale_first
+            - *source_second.get_unchecked(index) * scale_second;
         index += 1;
     }
 }

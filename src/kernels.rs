@@ -62,6 +62,25 @@ pub trait MatmulBackend<T> {
         }
     }
 
+    fn rank_update_two_sub(
+        target: &mut [T],
+        source_first: &[T],
+        scale_first: T,
+        source_second: &[T],
+        scale_second: T,
+    ) where
+        T: Copy + Mul<Output = T> + Sub<Output = T>,
+    {
+        for ((target_value, first_value), second_value) in target
+            .iter_mut()
+            .zip(source_first.iter())
+            .zip(source_second.iter())
+        {
+            *target_value =
+                *target_value - *first_value * scale_first - *second_value * scale_second;
+        }
+    }
+
     fn scale_divide(target: &mut [T], divisor: T)
     where
         T: Copy + Div<Output = T>,
@@ -171,8 +190,8 @@ pub(crate) use portable::matmul_scalar;
 
 #[cfg(test)]
 mod tests {
-    use super::matmul_scalar;
-    use crate::Matrix;
+    use super::{matmul_scalar, MatmulBackend};
+    use crate::{Matrix, MatrixScalar};
 
     fn next_value(state: &mut u64) -> f64 {
         *state = state
@@ -261,5 +280,43 @@ mod tests {
         check_f32::<6, 15, 6>();
         check_f32::<15, 15, 15>();
         check_f32::<16, 16, 16>();
+    }
+
+    #[test]
+    fn rank_update_two_sub_covers_simd_tails() {
+        let mut output = [1.0_f64, -2.0, 3.5, 4.0, -5.0, 6.25, 7.0];
+        let first = [0.5_f64, 1.0, -2.0, 3.0, 4.0, -1.5, 2.5];
+        let second = [-1.0_f64, 2.0, 0.5, -2.5, 1.5, 3.0, -4.0];
+        <f64 as MatrixScalar>::Matmul::rank_update_two_sub(
+            &mut output,
+            &first,
+            1.25,
+            &second,
+            -0.75,
+        );
+
+        let expected = [-0.375, -1.75, 6.375, -1.625, -8.875, 10.375, 0.875];
+        for (actual, expected) in output.iter().zip(expected) {
+            assert!((actual - expected).abs() <= 1e-14);
+        }
+    }
+
+    #[test]
+    fn rank_update_two_sub_f32_covers_simd_tails() {
+        let mut output = [1.0_f32, -2.0, 3.5, 4.0, -5.0, 6.25, 7.0];
+        let first = [0.5_f32, 1.0, -2.0, 3.0, 4.0, -1.5, 2.5];
+        let second = [-1.0_f32, 2.0, 0.5, -2.5, 1.5, 3.0, -4.0];
+        <f32 as MatrixScalar>::Matmul::rank_update_two_sub(
+            &mut output,
+            &first,
+            1.25,
+            &second,
+            -0.75,
+        );
+
+        let expected = [-0.375, -1.75, 6.375, -1.625, -8.875, 10.375, 0.875];
+        for (actual, expected) in output.iter().zip(expected) {
+            assert!((actual - expected).abs() <= 1e-6);
+        }
     }
 }

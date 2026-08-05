@@ -999,6 +999,25 @@ impl MatmulBackend<f32> for X86Avx2FmaMatmul {
     }
 
     #[inline]
+    fn rank_update_two_sub(
+        target: &mut [f32],
+        source_first: &[f32],
+        scale_first: f32,
+        source_second: &[f32],
+        scale_second: f32,
+    ) {
+        unsafe {
+            super::avx2::rank_update_two_sub_f32(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            )
+        }
+    }
+
+    #[inline]
     fn scale_divide(target: &mut [f32], divisor: f32) {
         unsafe { super::avx2::scale_divide_f32(target, divisor) }
     }
@@ -1031,6 +1050,25 @@ impl MatmulBackend<f64> for X86Avx2FmaMatmul {
         block_end: usize,
     ) {
         unsafe { super::avx2::rank_k_update_f64(matrix, block_start, block_end) }
+    }
+
+    #[inline]
+    fn rank_update_two_sub(
+        target: &mut [f64],
+        source_first: &[f64],
+        scale_first: f64,
+        source_second: &[f64],
+        scale_second: f64,
+    ) {
+        unsafe {
+            super::avx2::rank_update_two_sub_f64(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            )
+        }
     }
 
     #[inline]

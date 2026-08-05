@@ -38,6 +38,25 @@ impl MatmulBackend<f32> for NeonMatmul {
     }
 
     #[inline]
+    fn rank_update_two_sub(
+        target: &mut [f32],
+        source_first: &[f32],
+        scale_first: f32,
+        source_second: &[f32],
+        scale_second: f32,
+    ) {
+        unsafe {
+            rank_update_two_sub_f32(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            )
+        }
+    }
+
+    #[inline]
     fn scale_divide(target: &mut [f32], divisor: f32) {
         unsafe { scale_divide_f32(target, divisor) }
     }
@@ -70,6 +89,25 @@ impl MatmulBackend<f64> for NeonMatmul {
     #[inline]
     fn rank_update_sub(target: &mut [f64], source: &[f64], scale: f64) {
         unsafe { rank_update_sub_f64(target, source, scale) }
+    }
+
+    #[inline]
+    fn rank_update_two_sub(
+        target: &mut [f64],
+        source_first: &[f64],
+        scale_first: f64,
+        source_second: &[f64],
+        scale_second: f64,
+    ) {
+        unsafe {
+            rank_update_two_sub_f64(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            )
+        }
     }
 
     #[inline]
@@ -280,6 +318,78 @@ unsafe fn rank_update_sub_f64(target: &mut [f64], source: &[f64], scale: f64) {
     while index < target.len() {
         *target.get_unchecked_mut(index) =
             *target.get_unchecked(index) - *source.get_unchecked(index) * scale;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "neon")]
+unsafe fn rank_update_two_sub_f32(
+    target: &mut [f32],
+    source_first: &[f32],
+    scale_first: f32,
+    source_second: &[f32],
+    scale_second: f32,
+) {
+    use core::arch::aarch64::{vdupq_n_f32, vld1q_f32, vmulq_f32, vst1q_f32, vsubq_f32};
+    let mut index = 0;
+    let scale_first_packet = vdupq_n_f32(scale_first);
+    let scale_second_packet = vdupq_n_f32(scale_second);
+    while index + 4 <= target.len() {
+        let value = vld1q_f32(target.as_ptr().add(index));
+        let first = vmulq_f32(
+            vld1q_f32(source_first.as_ptr().add(index)),
+            scale_first_packet,
+        );
+        let second = vmulq_f32(
+            vld1q_f32(source_second.as_ptr().add(index)),
+            scale_second_packet,
+        );
+        vst1q_f32(
+            target.as_mut_ptr().add(index),
+            vsubq_f32(vsubq_f32(value, first), second),
+        );
+        index += 4;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) = *target.get_unchecked(index)
+            - *source_first.get_unchecked(index) * scale_first
+            - *source_second.get_unchecked(index) * scale_second;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "neon")]
+unsafe fn rank_update_two_sub_f64(
+    target: &mut [f64],
+    source_first: &[f64],
+    scale_first: f64,
+    source_second: &[f64],
+    scale_second: f64,
+) {
+    use core::arch::aarch64::{vdupq_n_f64, vld1q_f64, vmulq_f64, vst1q_f64, vsubq_f64};
+    let mut index = 0;
+    let scale_first_packet = vdupq_n_f64(scale_first);
+    let scale_second_packet = vdupq_n_f64(scale_second);
+    while index + 2 <= target.len() {
+        let value = vld1q_f64(target.as_ptr().add(index));
+        let first = vmulq_f64(
+            vld1q_f64(source_first.as_ptr().add(index)),
+            scale_first_packet,
+        );
+        let second = vmulq_f64(
+            vld1q_f64(source_second.as_ptr().add(index)),
+            scale_second_packet,
+        );
+        vst1q_f64(
+            target.as_mut_ptr().add(index),
+            vsubq_f64(vsubq_f64(value, first), second),
+        );
+        index += 2;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) = *target.get_unchecked(index)
+            - *source_first.get_unchecked(index) * scale_first
+            - *source_second.get_unchecked(index) * scale_second;
         index += 1;
     }
 }
