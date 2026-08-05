@@ -1085,7 +1085,9 @@ macro_rules! scalar_benches {
                     bench_faer_product,
                     (2, 3, 2),
                     (3, 6, 3),
-                    (6, 15, 6)
+                    (6, 15, 6),
+                    (15, 32, 15),
+                    (32, 15, 32)
                 );
                 for_bench_product!(
                     criterion,
