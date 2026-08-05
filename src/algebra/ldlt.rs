@@ -312,12 +312,19 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             return Err(DecompositionError::ZeroPivot);
         }
         pivots[position] = 1;
-        for row in (position + 1)..D {
-            let value = factor[(row, position)] / diagonal;
-            if !value.is_finite() {
+        {
+            let data = factor.as_mut_slice();
+            let column = &mut data[position * D + position + 1..position * D + D];
+            if column.len() >= 16 {
+                T::Matmul::scale_divide(column, diagonal);
+            } else {
+                for value in column.iter_mut() {
+                    *value = *value / diagonal;
+                }
+            }
+            if column.iter().any(|value| !value.is_finite()) {
                 return Err(DecompositionError::NonFinite);
             }
-            factor[(row, position)] = value;
         }
         for column in (position + 1)..D {
             let scale = diagonal * factor[(column, position)];
