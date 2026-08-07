@@ -31,7 +31,21 @@ let state_f64: Matrix<3, 1, f64> = state_f32.cast();
 let covariance: Matrix<3, 3, f64> = Matrix::eye();
 ```
 
-## 3. Products and output reuse
+## 3. Stable magnitude reductions
+
+Use `norm()` for a Frobenius magnitude when inputs may be very large or very
+small. It scales the accumulation to avoid intermediate overflow/underflow;
+`squared_norm()` intentionally exposes the raw sum-of-squares operation:
+
+```rust
+use stack_algebra::matrix;
+
+let values = matrix![1.0e308_f64, 1.0e308];
+assert!(values.norm().is_finite());
+assert!(values.squared_norm().is_infinite());
+```
+
+## 4. Products and output reuse
 
 Use operators for short expressions and `mul_into` in loops:
 
@@ -48,7 +62,7 @@ let state = a * matrix![1.0_f32; 2.0];
 Use `mul_into`, `matvec_view_into`, and decomposition `*_into` methods when
 output ownership and scratch reuse should be explicit.
 
-## 4. External buffers and views
+## 5. External buffers and views
 
 `Map` consumes contiguous column-major storage:
 
@@ -84,7 +98,7 @@ let factor = Cholesky::try_decompose_view(&block);
 All dense decomposition view paths own only factor/workspace storage. Use
 `Matrix::from_view` when an owned snapshot is intentionally required.
 
-## 5. Dense solves and decompositions
+## 6. Dense solves and decompositions
 
 Cholesky is for symmetric positive-definite systems:
 
@@ -101,7 +115,24 @@ let factor = Cholesky::try_decompose(&a).expect("SPD input");
 let x = factor.solve(&rhs);
 ```
 
-Diagonal-pivoted LDLT is for symmetric indefinite or weakly ordered input:
+Use `SelfAdjointView`, `SelfAdjointLower`, or `SelfAdjointUpper` when only one
+triangle stores a symmetric matrix. The view supplies the missing mirrored
+entries to reductions and decompositions without building a second matrix.
+
+`PartialPivLu` is the general square-system factorization. Use the checked
+constructor when non-finite inputs or scalar-range overflow should be reported
+instead of retained in the factor:
+
+```rust
+use stack_algebra::matrix;
+
+let a = matrix![3.0_f64, 1.0; 1.0, 2.0];
+let factor = a.try_partial_piv_lu().expect("finite LU factorization");
+let x = factor.solve(&matrix![5.0_f64; 5.0]);
+```
+
+`Ldlt` is the diagonal-pivoted LDLT factorization for symmetric indefinite or
+weakly ordered input:
 
 ```rust
 use stack_algebra::matrix;
@@ -119,7 +150,7 @@ diagonal `D` for diagnostics or verification.
 
 Use `try_ldlt_no_pivot` only when pivot stability is already known.
 
-Householder QR is the default for a known full-rank least-squares system:
+`HouseholderQr` is the default for a known full-rank least-squares system:
 
 ```rust
 use stack_algebra::matrix;
@@ -137,8 +168,20 @@ let coefficients = design
     .expect("full-rank design");
 ```
 
-Use column-pivoted QR when rank detection matters, and SVD when a pseudoinverse
-or robust rank threshold is required:
+Use `try_householder_qr()` when non-finite input or scalar-range overflow must
+be reported at factorization time:
+
+```rust
+let checked = design
+    .try_householder_qr()
+    .expect("finite QR factorization");
+let coefficients = checked
+    .try_solve_least_squares(&observations)
+    .expect("full-rank design");
+```
+
+Use `ColPivHouseholderQr` when rank detection matters, and `Svd` when a
+pseudoinverse or robust rank threshold is required:
 
 ```rust
 let pivoted = design.col_piv_householder_qr();
@@ -150,8 +193,7 @@ let robust_solution = svd.solve(&observations);
 let pinv = svd.pseudo_inverse();
 ```
 
-Self-adjoint eigendecomposition returns sorted eigenvalues and orthonormal
-eigenvectors:
+`SelfAdjointEigen` returns sorted eigenvalues and orthonormal eigenvectors:
 
 ```rust
 let eig = a.self_adjoint_eigen().expect("symmetric input");
@@ -159,6 +201,10 @@ let values = eig.eigenvalues();
 let vectors = eig.eigenvectors();
 let reconstructed = eig.reconstruct();
 ```
+
+`LowerTriangular` and `UpperTriangular` provide borrowed triangular views for
+specialized solves and products when the unused half of a matrix is not part
+of the input contract.
 
 ## 6. Reuse factors and workspaces
 
@@ -199,10 +245,17 @@ let mut buffer = MatrixBuf::<16, 16, f32>::new(6, 6).expect("within capacity");
 buffer[(0, 0)] = 1.0;
 buffer.resize(8, 4).expect("within capacity");
 const BYTES: usize = MatrixBuf::<16, 16, f32>::storage_bytes();
+let view = buffer.as_view::<8, 4>().expect("active dimensions match");
 ```
 
-`MatrixBuf` is storage, not a dynamic decomposition interface. Convert an
-active region into a matching fixed-size `Matrix<M, N, T>` before factoring.
+`MatrixBuf` remains bounded storage rather than a dynamic decomposition
+interface. When active dimensions match compile-time dimensions, pass
+`view` to any `try_decompose_view` API without copying; use `to_matrix` when an
+owned `Matrix<M, N, T>` is needed.
+
+`MatrixBufView` and `MatrixBufViewMut` are the corresponding fixed-size
+read-only and mutable view types. Use `row` and `column` when an algorithm
+needs a one-dimensional `Row` or `Column` view instead of an owned matrix.
 
 ## 8. Scalar sparse CSC
 
@@ -227,6 +280,52 @@ factor.recompute(&a).expect("same sparsity pattern");
 Use `StaticCscCholeskyPattern::analyze` when symbolic analysis is shared by
 multiple factors. Use `prepare_ordered` plus `recompute_ordered` when the same
 permutation and coordinate transform are reused.
+
+`StaticCscLdltPattern` is the matching symbolic alias when the numeric phase
+uses sparse LDLT rather than Cholesky.
+
+When a sparse system has a zero or poorly scaled leading diagonal, use
+`StaticCscLdlt::decompose_with_diagonal_pivoting(&a, threshold)` to select a
+bounded symmetric diagonal permutation. The threshold is an absolute pivot
+cutoff; non-finite thresholds are rejected. This mode still reports
+`ZeroPivot` when a global 2×2 pivot is required.
+
+Sparse LDLT currently uses no-pivot or analysis-time 1x1 diagonal pivoting.
+For a single ergonomic entry point, use
+`try_ldlt_with_dense_fallback::<MAX_L_NNZ>`; it returns native sparse LDLT when
+possible, tries bounded sparse diagonal pivoting for a zero leading pivot, and
+automatically selects the dense Bunch–Kaufman path only when a global 2x2 pivot
+is required:
+
+The unified overload uses a scale-relative default threshold (`epsilon` times
+the largest stored absolute value). Use
+`try_ldlt_with_dense_fallback_threshold::<MAX_L_NNZ>(threshold)` when a
+different numerical policy is required.
+
+```rust
+use stack_algebra::{Matrix, StaticCscMatrix};
+
+type Sparse = StaticCscMatrix<2, 2, 3, f64>;
+let a = Sparse::from_pattern(
+    &[0.0, 1.0, 2.0],
+    &[0, 1, 1],
+    &[0, 2, 3],
+).expect("canonical CSC");
+let rhs = Matrix::<2, 1, f64>::from_columns([[3.0, 4.0]]);
+let factor = a
+    .try_ldlt_with_dense_fallback::<3>()
+    .expect("nonsingular sparse system");
+let solution = factor.solve(&rhs);
+assert!(factor.uses_dense_fallback());
+```
+
+The fallback expands only the stored lower triangle into fixed-size stack
+storage. Use `try_dense_ldlt` directly when the dense fallback is intentional;
+otherwise the unified factor keeps the normal sparse path allocation-free. For
+reused sparsity patterns, call `recompute_with_dense_fallback` to refactor new
+values; it preserves the sparse factor when possible and transitions to dense
+storage only when required. Use `solve_in_place` when the right-hand side can
+be overwritten to avoid an additional fixed-size output copy.
 
 ## 9. Block sparse storage
 

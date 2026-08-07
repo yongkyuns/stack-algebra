@@ -1,0 +1,64 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: '0.4.52'
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Test documentation examples
+        run: cargo test --locked --doc
+
+      - name: Build combined guide and API site
+        run: ./scripts/build_docs.sh
+
+      - name: Check guide links and API coverage
+        run: python3 scripts/check_docs.py --site build/site
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stack-algebra-docs
+          path: build/site
+
+  # Pages publishing is deliberately opt-in. Set the repository variable
+  # PUBLISH_DOCS=true and configure Pages to use GitHub Actions.
+  publish:
+    name: Publish documentation site
+    needs: build
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: stack-algebra-docs
+          path: build/site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+      - id: deployment
+        uses: actions/deploy-pages@v4

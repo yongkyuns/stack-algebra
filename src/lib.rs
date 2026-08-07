@@ -56,7 +56,7 @@ pub use block_sparse::{
     StaticBlockCscCholesky, StaticBlockCscCholeskyPattern, StaticBlockCscLdlt,
     StaticBlockCscLdltPattern, StaticBlockCscMatrix, StaticBlockCsrMatrix,
 };
-pub use bounded::MatrixBuf;
+pub use bounded::{MatrixBuf, MatrixBufView, MatrixBufViewMut};
 pub use geometry::{AffineTransform, AngleAxis, Isometry, Quaternion, RotationMatrix};
 pub use index::MatrixIndex;
 #[doc(hidden)]
@@ -66,7 +66,8 @@ pub use num::{AsPrimitive, Float, One, Real, Zero};
 pub use ops::{matmul_view_into, matvec_view, matvec_view_into};
 pub use sparse::{
     CscError, SparseCholeskyError, StaticCscCholesky, StaticCscCholeskyPattern, StaticCscLdlt,
-    StaticCscLdltPattern, StaticCscMatrix, StaticCscOrdering, StaticCscPattern,
+    StaticCscLdltFactor, StaticCscLdltPattern, StaticCscMatrix, StaticCscOrdering,
+    StaticCscPattern,
 };
 pub use view::{
     Block, BlockMut, Column, Map, MapMut, MatrixRead, MatrixWrite, Row, StridedMap, StridedMapMut,
@@ -172,12 +173,14 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// contiguous buffer is required.
     #[inline]
     pub fn row(&self, i: usize) -> &Row<M, N, T> {
+        assert!(i < M, "row index out of bounds");
         Row::new(&self.as_slice()[i..])
     }
 
     /// Returns a mutable reference to the `i`-th row of this matrix.
     #[inline]
     pub fn row_mut(&mut self, i: usize) -> &mut Row<M, N, T> {
+        assert!(i < M, "row index out of bounds");
         Row::new_mut(&mut self.as_mut_slice()[i..])
     }
 
@@ -374,7 +377,11 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         self.transpose()
     }
 
-    /// Returns the sum of squares of all entries.
+    /// Returns the raw sum of squares of all entries.
+    ///
+    /// This is the direct `aᵢⱼ²` accumulation and can overflow or underflow for
+    /// extreme finite values. Use [`Self::norm`] when a scale-stable magnitude
+    /// is required.
     #[inline]
     pub fn squared_norm(&self) -> T
     where
@@ -384,12 +391,16 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     }
 
     /// Returns the Frobenius norm, `sqrt(sum(aᵢⱼ²))`.
+    ///
+    /// The reduction is scaled during accumulation, so finite inputs avoid
+    /// intermediate overflow and underflow where the mathematical result is
+    /// representable.
     #[inline]
     pub fn norm(&self) -> T
     where
         T: Real + ReductionScalar,
     {
-        self.squared_norm().sqrt()
+        T::Reduction::norm(self)
     }
 
     /// Returns a normalized copy divided by the Frobenius norm.
@@ -703,6 +714,20 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "row index out of bounds")]
+    fn row_rejects_out_of_bounds_index() {
+        let matrix = Matrix::<2, 2, i32>::zeros();
+        let _ = matrix.row(2);
+    }
+
+    #[test]
+    #[should_panic(expected = "row index out of bounds")]
+    fn row_mut_rejects_out_of_bounds_index() {
+        let mut matrix = Matrix::<2, 2, i32>::zeros();
+        let _ = matrix.row_mut(2);
+    }
+
+    #[test]
     fn mul_into_matches_operator_for_rectangular_matrices() {
         let lhs = Matrix::<2, 3, f64>::from_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
         let rhs = Matrix::<3, 2, f64>::from_rows([[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]]);
@@ -728,6 +753,13 @@ mod tests {
         assert_eq!(s.next(), Some(&3.0));
         assert_eq!(s.next(), Some(&6.0));
         assert_eq!(s.next(), None);
+    }
+
+    #[test]
+    fn tuple_get_rejects_large_indices_without_overflow() {
+        let mut matrix = Matrix::<1, 1, i32>::zeros();
+        assert!(matrix.get((usize::MAX, usize::MAX)).is_none());
+        assert!(matrix.get_mut((usize::MAX, usize::MAX)).is_none());
     }
     #[test]
     fn swap() {
@@ -780,6 +812,18 @@ mod tests {
         ];
         assert_eq!(m.squared_norm(), 50.0);
         assert_relative_eq!(m.norm(), 7.0710678, max_relative = 1e-6);
+    }
+
+    #[test]
+    fn norm_avoids_overflow_and_underflow() {
+        let large = Matrix::<2, 1, f64>::from_rows([[1.0e308], [1.0e308]]);
+        let small = Matrix::<2, 1, f64>::from_rows([[1.0e-300], [1.0e-300]]);
+        assert_relative_eq!(large.norm(), 2.0_f64.sqrt() * 1.0e308, max_relative = 1e-14);
+        assert_relative_eq!(
+            small.norm(),
+            2.0_f64.sqrt() * 1.0e-300,
+            max_relative = 1e-14
+        );
     }
 
     #[test]

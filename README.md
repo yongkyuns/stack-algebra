@@ -163,7 +163,9 @@ let vector64 = vector.cast::<f64>();
   assert_eq!(m.transpose(), exp);
   ```
 
-- `.norm()` for computing the [`Frobenius norm`][frobenius]
+- `.norm()` for computing the [`Frobenius norm`][frobenius]. The reduction is
+  scale-stable for finite extreme values; use `.squared_norm()` when the raw
+  sum-of-squares semantics are desired.
   ```rust
 	let m = matrix![
 	  1.0,-2.0;
@@ -339,10 +341,12 @@ need explicit stack/RAM control.
 
 - `MatrixBuf<MAX_ROWS, MAX_COLS, T>` for bounded runtime dimensions without
   heap allocation. It reserves a compile-time capacity, tracks active rows and
-  columns, supports checked resizing and column access, and can round-trip to
-  fixed-size `Matrix` values. `Matrix`, `MatrixBuf`, sparse patterns/factors,
-  and block sparse matrices expose `storage_bytes()` for compile-time RAM
-  budgeting on embedded targets.
+  columns, supports checked resizing and column access, and exposes matching
+  active regions through zero-copy `as_view::<M, N>()`/
+  `as_view_mut::<M, N>()` views. It can also round-trip to fixed-size `Matrix`
+  values. `Matrix`, `MatrixBuf`, sparse patterns/factors, and block sparse
+  matrices expose `storage_bytes()` for compile-time RAM budgeting on embedded
+  targets.
 
 - `StaticBlockCscMatrix` and `StaticBlockCsrMatrix` for fixed-capacity block
   sparse storage. Block patterns are validated once, dense blocks remain

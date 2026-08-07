@@ -1,3 +1,5 @@
+use crate::DecompositionError;
+
 /// Errors returned while constructing or updating a fixed-capacity CSC matrix.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CscError {
@@ -46,5 +48,17 @@ impl From<CscError> for SparseCholeskyError {
             CscError::CapacityExceeded => Self::CapacityExceeded,
             other => Self::Csc(other),
         }
+    }
+}
+
+pub(crate) fn map_ldlt_error(error: DecompositionError) -> SparseCholeskyError {
+    match error {
+        DecompositionError::NonFinite => SparseCholeskyError::NonFinite,
+        DecompositionError::ZeroPivot
+        | DecompositionError::Singular
+        | DecompositionError::NotPositiveDefinite
+        | DecompositionError::NotSymmetric
+        | DecompositionError::NoConvergence
+        | DecompositionError::InvalidView => SparseCholeskyError::ZeroPivot,
     }
 }

@@ -235,6 +235,22 @@ unsafe extern "C" {
         output: *mut f64,
     ) -> i32;
     fn sa_eigen_sparse_ldlt_destroy_f64(context: *mut c_void);
+    fn sa_eigen_sparse_ldlt_create_f32(
+        row_indices: *const usize,
+        column_starts: *const usize,
+        values: *const f32,
+        dimension: usize,
+        nonzeros: usize,
+    ) -> *mut c_void;
+    fn sa_eigen_sparse_ldlt_analyze_f32(context: *mut c_void) -> i32;
+    fn sa_eigen_sparse_ldlt_factorize_f32(context: *mut c_void) -> i32;
+    fn sa_eigen_sparse_ldlt_solve_f32(
+        context: *mut c_void,
+        rhs: *const f32,
+        columns: usize,
+        output: *mut f32,
+    ) -> i32;
+    fn sa_eigen_sparse_ldlt_destroy_f32(context: *mut c_void);
 }
 
 fn matrix<const R: usize, const C: usize>() -> Matrix<R, C, f64> {
@@ -764,6 +780,164 @@ fn ldlt_solves_match_eigen() {
             .expect("diagonal pivoting should recover the sparse factorization")
             .solve(&rhs_f64);
     assert_close_f64(pivoted_solution.as_slice(), eigen_solution_f64.as_slice());
+}
+
+#[test]
+fn sparse_and_dense_fallback_multi_rhs_match_eigen() {
+    let sparse_dense =
+        Matrix::<3, 3, f64>::from_rows([[4.0, 1.0, 2.0], [1.0, -3.0, 1.0], [2.0, 1.0, 2.0]]);
+    let sparse = StaticCscMatrix::<3, 3, 6, f64>::from_pattern(
+        &[4.0, 1.0, 2.0, -3.0, 1.0, 2.0],
+        &[0, 1, 2, 1, 2, 2],
+        &[0, 3, 5, 6],
+    )
+    .expect("sparse indefinite CSC pattern is valid");
+    let rhs = Matrix::<3, 2, f64>::from_rows([[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]]);
+    let mut eigen_solution = Matrix::<3, 2, f64>::zeros();
+    assert_eq!(
+        unsafe {
+            sa_eigen_ldlt_solve_f64(
+                sparse_dense.as_slice().as_ptr(),
+                rhs.as_slice().as_ptr(),
+                3,
+                2,
+                eigen_solution.as_mut_slice().as_mut_ptr(),
+            )
+        },
+        1
+    );
+    let factor = StaticCscLdlt::<3, 6, f64>::decompose(&sparse).unwrap();
+    assert_close_f64(factor.solve(&rhs).as_slice(), eigen_solution.as_slice());
+
+    let eigen_sparse_context = unsafe {
+        sa_eigen_sparse_ldlt_create_f64(
+            sparse.row_indices().as_ptr(),
+            sparse.column_starts().as_ptr(),
+            sparse.values().as_ptr(),
+            sparse.rows(),
+            sparse.nnz(),
+        )
+    };
+    assert!(!eigen_sparse_context.is_null());
+    assert_eq!(
+        unsafe { sa_eigen_sparse_ldlt_analyze_f64(eigen_sparse_context) },
+        1
+    );
+    assert_eq!(
+        unsafe { sa_eigen_sparse_ldlt_factorize_f64(eigen_sparse_context) },
+        1
+    );
+    let mut eigen_sparse_solution = Matrix::<3, 2, f64>::zeros();
+    assert_eq!(
+        unsafe {
+            sa_eigen_sparse_ldlt_solve_f64(
+                eigen_sparse_context,
+                rhs.as_slice().as_ptr(),
+                2,
+                eigen_sparse_solution.as_mut_slice().as_mut_ptr(),
+            )
+        },
+        1
+    );
+    assert_close_f64(eigen_sparse_solution.as_slice(), eigen_solution.as_slice());
+    unsafe { sa_eigen_sparse_ldlt_destroy_f64(eigen_sparse_context) };
+
+    let fallback = StaticCscMatrix::<2, 2, 3, f64>::from_pattern(
+        &[1.0e-6, 1.0, 1.0e-6],
+        &[0, 1, 1],
+        &[0, 2, 3],
+    )
+    .unwrap();
+    let fallback_dense = Matrix::<2, 2, f64>::from_rows([[1.0e-6, 1.0], [1.0, 1.0e-6]]);
+    let fallback_rhs = Matrix::<2, 2, f64>::from_rows([[3.0, 5.0], [4.0, 6.0]]);
+    let mut eigen_fallback_solution = Matrix::<2, 2, f64>::zeros();
+    assert_eq!(
+        unsafe {
+            sa_eigen_ldlt_solve_f64(
+                fallback_dense.as_slice().as_ptr(),
+                fallback_rhs.as_slice().as_ptr(),
+                2,
+                2,
+                eigen_fallback_solution.as_mut_slice().as_mut_ptr(),
+            )
+        },
+        1
+    );
+    let factor = fallback.try_dense_ldlt().unwrap();
+    let fallback_solution = factor.solve(&fallback_rhs);
+    for (actual, expected) in fallback_solution
+        .as_slice()
+        .iter()
+        .zip(eigen_fallback_solution.as_slice())
+    {
+        let error = (actual - expected).abs();
+        let scale = actual.abs().max(expected.abs());
+        assert!(error <= 1e-9 + 1e-9 * scale, "{actual} != {expected}");
+    }
+
+    let sparse_dense_f32 =
+        Matrix::<3, 3, f32>::from_rows([[4.0, 1.0, 2.0], [1.0, -3.0, 1.0], [2.0, 1.0, 2.0]]);
+    let sparse_f32 = StaticCscMatrix::<3, 3, 6, f32>::from_pattern(
+        &[4.0, 1.0, 2.0, -3.0, 1.0, 2.0],
+        &[0, 1, 2, 1, 2, 2],
+        &[0, 3, 5, 6],
+    )
+    .expect("f32 sparse CSC pattern is valid");
+    let rhs_f32 = Matrix::<3, 2, f32>::from_rows([[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]]);
+    let mut eigen_dense_f32 = Matrix::<3, 2, f32>::zeros();
+    assert_eq!(
+        unsafe {
+            sa_eigen_ldlt_solve_f32(
+                sparse_dense_f32.as_slice().as_ptr(),
+                rhs_f32.as_slice().as_ptr(),
+                3,
+                2,
+                eigen_dense_f32.as_mut_slice().as_mut_ptr(),
+            )
+        },
+        1
+    );
+    let factor_f32 = StaticCscLdlt::<3, 6, f32>::decompose(&sparse_f32).unwrap();
+    assert_close_f32(
+        factor_f32.solve(&rhs_f32).as_slice(),
+        eigen_dense_f32.as_slice(),
+    );
+
+    let eigen_sparse_context_f32 = unsafe {
+        sa_eigen_sparse_ldlt_create_f32(
+            sparse_f32.row_indices().as_ptr(),
+            sparse_f32.column_starts().as_ptr(),
+            sparse_f32.values().as_ptr(),
+            sparse_f32.rows(),
+            sparse_f32.nnz(),
+        )
+    };
+    assert!(!eigen_sparse_context_f32.is_null());
+    assert_eq!(
+        unsafe { sa_eigen_sparse_ldlt_analyze_f32(eigen_sparse_context_f32) },
+        1
+    );
+    assert_eq!(
+        unsafe { sa_eigen_sparse_ldlt_factorize_f32(eigen_sparse_context_f32) },
+        1
+    );
+    let mut eigen_sparse_f32 = Matrix::<3, 2, f32>::zeros();
+    assert_eq!(
+        unsafe {
+            sa_eigen_sparse_ldlt_solve_f32(
+                eigen_sparse_context_f32,
+                rhs_f32.as_slice().as_ptr(),
+                2,
+                eigen_sparse_f32.as_mut_slice().as_mut_ptr(),
+            )
+        },
+        1
+    );
+    assert_close_f32(
+        factor_f32.solve(&rhs_f32).as_slice(),
+        eigen_sparse_f32.as_slice(),
+    );
+    unsafe { sa_eigen_sparse_ldlt_destroy_f32(eigen_sparse_context_f32) };
 }
 
 fn targeted_ldlt_case<const D: usize>(case: usize) -> Matrix<D, D, f64> {

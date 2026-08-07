@@ -35,7 +35,7 @@
 //! factorizations consume the lower triangle; store that triangle in the
 //! pattern even when an application also keeps an upper-triangle view.
 
-use crate::Zero;
+use crate::{Ldlt, Matrix, MatrixScalar, Real, Zero};
 
 mod cholesky;
 mod errors;
@@ -44,8 +44,9 @@ mod ordering;
 mod storage;
 
 pub use cholesky::{StaticCscCholesky, StaticCscCholeskyPattern};
+pub(crate) use errors::map_ldlt_error;
 pub use errors::{CscError, SparseCholeskyError};
-pub use ldlt::StaticCscLdlt;
+pub use ldlt::{StaticCscLdlt, StaticCscLdltFactor};
 pub use ordering::StaticCscOrdering;
 pub use storage::{StaticCscMatrix, StaticCscPattern};
 
@@ -55,6 +56,87 @@ pub use storage::{StaticCscMatrix, StaticCscPattern};
 /// and LDLᵀ while retaining the same fill pattern.
 pub type StaticCscLdltPattern<const N: usize, const MAX_L_NNZ: usize> =
     StaticCscCholeskyPattern<N, MAX_L_NNZ>;
+
+pub(crate) fn default_ldlt_threshold<const N: usize, const MAX_NNZ: usize, T: Real>(
+    matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
+) -> T {
+    let mut scale = T::zero();
+    for column in 0..N {
+        let start = matrix.column_starts()[column];
+        let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+        for index in start..end {
+            if matrix.row_indices()[index] >= column {
+                scale = scale.max(matrix.values()[index].abs());
+            }
+        }
+    }
+    T::epsilon() * scale
+}
+
+impl<const N: usize, const MAX_NNZ: usize, T> StaticCscMatrix<N, N, MAX_NNZ, T> {
+    /// Factors with native sparse LDLT, tries bounded diagonal pivoting for a
+    /// zero leading pivot, and falls back to dense global Bunch–Kaufman
+    /// pivoting only when a sparse 2x2 pivot is required.
+    #[inline]
+    pub fn try_ldlt_with_dense_fallback<const MAX_L_NNZ: usize>(
+        &self,
+    ) -> Result<StaticCscLdltFactor<N, MAX_L_NNZ, T>, SparseCholeskyError>
+    where
+        T: Real + MatrixScalar,
+    {
+        self.try_ldlt_with_dense_fallback_threshold(default_ldlt_threshold(self))
+    }
+
+    /// Factors using sparse LDLT, bounded diagonal pivoting, and a dense
+    /// Bunch–Kaufman fallback with an explicit absolute pivot threshold.
+    #[inline]
+    pub fn try_ldlt_with_dense_fallback_threshold<const MAX_L_NNZ: usize>(
+        &self,
+        threshold: T,
+    ) -> Result<StaticCscLdltFactor<N, MAX_L_NNZ, T>, SparseCholeskyError>
+    where
+        T: Real + MatrixScalar,
+    {
+        match StaticCscLdlt::decompose(self) {
+            Ok(factor) => Ok(StaticCscLdltFactor::Sparse(factor)),
+            Err(SparseCholeskyError::ZeroPivot) => {
+                match StaticCscLdlt::decompose_with_diagonal_pivoting(self, threshold) {
+                    Ok(factor) => Ok(StaticCscLdltFactor::Sparse(factor)),
+                    Err(SparseCholeskyError::ZeroPivot) => {
+                        Ok(StaticCscLdltFactor::Dense(self.try_dense_ldlt()?))
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Expands the stored lower triangle into fixed-size dense storage and
+    /// factors it with global Bunch–Kaufman pivoting.
+    ///
+    /// This is an explicit fallback for sparse systems that require a scalar
+    /// 2×2 pivot. It remains allocation-free, but uses `N * N` inline dense
+    /// storage and should therefore be reserved for small bounded systems.
+    #[inline]
+    pub fn try_dense_ldlt(&self) -> Result<Ldlt<N, T>, SparseCholeskyError>
+    where
+        T: Real + MatrixScalar,
+    {
+        let mut dense = Matrix::<N, N, T>::zeros();
+        for column in 0..N {
+            let start = self.column_starts()[column];
+            let end = self.column_end(column).unwrap_or(self.nnz());
+            for index in start..end {
+                let row = self.row_indices()[index];
+                if row >= column {
+                    dense[(row, column)] = self.values()[index];
+                }
+            }
+        }
+        Ldlt::try_decompose(&dense).map_err(map_ldlt_error)
+    }
+}
 
 impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize, T> Default
     for StaticCscMatrix<ROWS, COLS, MAX_NNZ, T>

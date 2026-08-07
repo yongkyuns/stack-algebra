@@ -38,7 +38,9 @@ optional `alloc`/`std` layer.
 - Constructors/macros: `matrix!`, `vector!`, `eye!`, `zeros!`, `ones!`, `diag!`.
 - Core operations: indexing, addition/subtraction, scalar arithmetic,
   multiplication, transpose, trace, determinant, inverse, norm, dot, matvec,
-  and caller-provided `mul_into`.
+  and caller-provided `mul_into`. `norm()` uses a scale-stable Frobenius
+  reduction; `squared_norm()` is the raw sum of squares and may overflow for
+  extreme inputs.
 
 The `T` parameter is explicit in the type. This is the normal way to choose
 precision:
@@ -61,9 +63,10 @@ All dense decomposition view APIs consume `MatrixRead<M, N, T>`:
 | `Block` / `BlockMut` | Fixed-size submatrix of a `Matrix` | Borrowed |
 | `Matrix` | Owning fixed-size matrix | Owned |
 
-`MatrixBuf` has checked runtime dimensions but is not currently a
-`MatrixRead<M, N, T>` implementation; convert its active data into a matching
-fixed-size matrix or use its element/column accessors.
+`MatrixBuf` has checked runtime dimensions. When the active dimensions are
+known at a call site, `as_view::<M, N>()` and `as_view_mut::<M, N>()` expose the
+active region through the same zero-copy `MatrixRead`/`MatrixWrite` view APIs;
+use `to_matrix` only when an owned snapshot is required.
 
 View-based factorization fills factor-owned storage directly. It does not first
 create a second owning input matrix. Use `Matrix::from_view` when an owned
@@ -73,11 +76,11 @@ snapshot is explicitly desired.
 
 | Type | Input shape | Main constructor | Recompute | Solve / outputs | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `PartialPivLu<D, T>` | `D x D` | `PartialPivLu::decompose` / `matrix.partial_piv_lu()` | `compute` | `solve`, `solve_into`, `inverse`, `determinant` | Partial row pivoting; assumes invertible input. |
+| `PartialPivLu<D, T>` | `D x D` | `decompose` / `matrix.partial_piv_lu()`; checked: `try_decompose` / `matrix.try_partial_piv_lu()` | `compute`; checked: `try_compute` | `solve`, `solve_into`, `inverse`, `determinant` | Partial row pivoting; checked path rejects non-finite input/intermediates. |
 | `Cholesky<D, T>` | SPD `D x D` | `try_decompose` / `matrix.cholesky()` | `try_compute` | `solve`, `solve_into`, `solve_in_place`, `inverse` | Reads the lower triangle; rejects non-SPD input. |
 | `Ldlt<D, T>` | Symmetric `D x D` | `try_decompose` / `matrix.ldlt()` | `try_compute` | `solve`, `solve_into`, `solve_in_place`, `inverse` | Eigen-compatible Bunch–Kaufman 1x1/2x2 scalar pivoting; `pivot_blocks` exposes the compact block layout. |
-| `HouseholderQr<M, N, T>` | `M x N` | `decompose` / `matrix.householder_qr()` | `compute` | Full-rank least squares, `apply_q`, `apply_q_transpose` | Best for full-rank square/tall systems. |
-| `ColPivHouseholderQr<M, N, T>` | `M x N` | `decompose` / `matrix.col_piv_householder_qr()` | `compute` | Rank, basic/rank-aware least squares, Q application | Column pivoting improves rank detection. |
+| `HouseholderQr<M, N, T>` | `M x N` | `decompose` / `matrix.householder_qr()`; checked: `try_decompose` / `matrix.try_householder_qr()` | `compute`; checked: `try_compute` | Full-rank least squares, `apply_q`, `apply_q_transpose` | Best for full-rank square/tall systems. |
+| `ColPivHouseholderQr<M, N, T>` | `M x N` | `decompose` / `matrix.col_piv_householder_qr()`; checked: `try_decompose` / `matrix.try_col_piv_householder_qr()` | `compute`; checked: `try_compute` | Rank, basic/rank-aware least squares, Q application | Column pivoting improves rank detection. |
 | `Svd<M, N, T>` | Any fixed shape | `try_decompose` / `matrix.svd()` | `try_compute` | `solve`, rank, `pseudo_inverse`, `u`, `v`, singular values | Thin SVD; wide matrices use zero padding. |
 | `SelfAdjointEigen<D, T>` | Symmetric `D x D` | `try_decompose` / `matrix.self_adjoint_eigen()` | `try_compute` | Eigenvalues, eigenvectors, reconstruction | Sorted eigenvalues and orthonormal eigenvectors. |
 
@@ -107,6 +110,18 @@ adjoint eigendecomposition additionally supports caller-owned
   bounded symbolic fill.
 - `StaticCscLdlt`: sparse LDLT with no-pivot and analysis-time 1x1 diagonal
   pivoting. Matrices requiring 2x2 pivots return `ZeroPivot`.
+- `StaticCscMatrix::try_ldlt_with_dense_fallback::<MAX_L_NNZ>`: unified factor
+  that keeps native sparse LDLT when possible, tries bounded sparse diagonal
+  pivoting for zero leading pivots, and dispatches to the explicit dense
+  Bunch–Kaufman fallback only when a global 2x2 pivot is required.
+- `StaticCscMatrix::try_ldlt_with_dense_fallback_threshold::<MAX_L_NNZ>`:
+  same unified path with an explicit absolute pivot threshold.
+- `StaticCscLdltFactor::recompute_with_dense_fallback`: reusable numeric update
+  that transitions from sparse to dense storage only when needed.
+- `StaticCscLdltFactor::solve_in_place`: allocation-free solve that overwrites
+  the right-hand side for parity with dense factor APIs.
+- `StaticCscMatrix::try_dense_ldlt`: explicit fixed-size dense fallback for
+  callers that want to force dense Bunch–Kaufman factorization.
 
 Sparse factor objects separate symbolic analysis from numeric refactorization:
 call `recompute` for natural CSC coordinates and `recompute_ordered` after a

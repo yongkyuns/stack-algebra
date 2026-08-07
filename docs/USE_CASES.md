@@ -79,8 +79,9 @@ let damped_or_rank_aware_step = svd.solve(&residual);
 ```
 
 The matrix dimensions remain compile-time constants. For a changing active
-window, choose a maximum horizon and use `MatrixBuf` for assembly, then copy
-the active region into the fixed-size factor input.
+window, choose a maximum horizon and use `MatrixBuf` for assembly, then expose
+matching active dimensions with `as_view::<M, N>()` for zero-copy view-based
+factorization.
 
 ## NMPC and trajectory optimization
 

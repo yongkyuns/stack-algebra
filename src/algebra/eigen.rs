@@ -180,6 +180,22 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
             }
         }
 
+        // Jacobi's intermediate products are quadratic in the working values.
+        // Normalize first so finite inputs near the scalar limit do not overflow
+        // during the rotations, then restore the eigenvalue scale at the end.
+        let matrix_scale = work
+            .iter()
+            .copied()
+            .fold(T::zero(), |scale, value| scale.max(value.abs()));
+        if !matrix_scale.is_finite() {
+            return Err(DecompositionError::NonFinite);
+        }
+        if matrix_scale != T::zero() {
+            for value in work.iter_mut() {
+                *value = *value / matrix_scale;
+            }
+        }
+
         output.eigenvectors = Matrix::<D, D, T>::eye();
         let eigenvectors = &mut output.eigenvectors;
         const MAX_SWEEPS: usize = 64;
@@ -268,7 +284,7 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
 
         let eigenvalues = &mut output.eigenvalues;
         for index in 0..D {
-            eigenvalues[index] = work[(index, index)];
+            eigenvalues[index] = work[(index, index)] * matrix_scale;
             if !eigenvalues[index].is_finite() {
                 return Err(DecompositionError::NonFinite);
             }
@@ -442,6 +458,21 @@ mod tests {
         assert_relative_eq!(eigen.eigenvalues()[0], -1.0, epsilon = 1e-12);
         assert_relative_eq!(eigen.eigenvalues()[1], 2.0, epsilon = 1e-12);
         assert_relative_eq!(eigen.eigenvalues()[2], 2.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn handles_large_finite_values_without_jacobi_overflow() {
+        let input = matrix![
+            1.0e308_f64, 2.0e307;
+            2.0e307, -1.0e308;
+        ];
+        let eigen = input
+            .try_self_adjoint_eigen()
+            .expect("finite symmetric matrix is supported");
+        assert_relative_eq!(eigen.reconstruct(), input, max_relative = 1e-12);
+        for value in eigen.eigenvalues().iter() {
+            assert!(value.is_finite());
+        }
     }
 
     #[test]

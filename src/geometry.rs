@@ -29,6 +29,32 @@ use core::ops::Mul;
 
 use crate::{Matrix, MatrixScalar, Real, ReductionScalar, Vector};
 
+fn scaled_components<const N: usize, T: Real>(values: [T; N]) -> Result<(T, T), T> {
+    let mut scale = T::zero();
+    for value in values {
+        if !value.is_finite() {
+            return Err(value.abs());
+        }
+        scale = scale.max(value.abs());
+    }
+    if scale == T::zero() {
+        return Ok((scale, T::zero()));
+    }
+    let mut sum = T::zero();
+    for value in values {
+        let ratio = value.abs() / scale;
+        sum = sum + ratio * ratio;
+    }
+    Ok((scale, sum))
+}
+
+fn stable_component_norm<const N: usize, T: Real>(values: [T; N]) -> T {
+    match scaled_components(values) {
+        Ok((scale, sum)) => scale * sum.sqrt(),
+        Err(value) => value,
+    }
+}
+
 /// A scalar-first quaternion `(w, x, y, z)`.
 ///
 /// Quaternions are preferred for composing rotations and interpolation. Use
@@ -82,7 +108,10 @@ impl<T: Real + MatrixScalar + ReductionScalar> Quaternion<T> {
         &self.vector
     }
 
-    /// Returns the squared norm.
+    /// Returns the raw squared norm.
+    ///
+    /// This directly accumulates component squares and may overflow for
+    /// extreme finite values. Use [`Self::norm`] for a scale-stable magnitude.
     #[inline]
     pub fn norm_squared(&self) -> T {
         self.scalar * self.scalar
@@ -94,7 +123,7 @@ impl<T: Real + MatrixScalar + ReductionScalar> Quaternion<T> {
     /// Returns the norm.
     #[inline]
     pub fn norm(&self) -> T {
-        self.norm_squared().sqrt()
+        stable_component_norm([self.scalar, self.vector[0], self.vector[1], self.vector[2]])
     }
 
     /// Returns a normalized quaternion, or `None` for a zero/non-finite input.
@@ -123,19 +152,28 @@ impl<T: Real + MatrixScalar + ReductionScalar> Quaternion<T> {
     #[inline]
     pub fn inverse(&self) -> Option<Self> {
         let norm_squared = self.norm_squared();
-        if !norm_squared.is_finite() || norm_squared <= T::epsilon() {
+        if norm_squared.is_finite() && norm_squared > T::epsilon() {
+            return Some(Self {
+                scalar: self.scalar / norm_squared,
+                vector: -self.vector / norm_squared,
+            });
+        }
+        let (scale, sum) =
+            scaled_components([self.scalar, self.vector[0], self.vector[1], self.vector[2]])
+                .ok()?;
+        if scale <= T::epsilon() || sum <= T::zero() {
             return None;
         }
         Some(Self {
-            scalar: self.scalar / norm_squared,
-            vector: -self.vector / norm_squared,
+            scalar: self.scalar / scale / scale / sum,
+            vector: -self.vector / scale / scale / sum,
         })
     }
 
     /// Creates a unit quaternion from an axis-angle pair.
     #[inline]
     pub fn from_axis_angle(axis: &Vector<3, T>, angle: T) -> Option<Self> {
-        let axis_norm = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        let axis_norm = stable_component_norm([axis[0], axis[1], axis[2]]);
         if !angle.is_finite() || !axis_norm.is_finite() || axis_norm <= T::epsilon() {
             return None;
         }
@@ -287,7 +325,7 @@ impl<T: Real + MatrixScalar + ReductionScalar> AngleAxis<T> {
     /// Creates a normalized angle-axis rotation.
     #[inline]
     pub fn new(axis: &Vector<3, T>, angle: T) -> Option<Self> {
-        let norm = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        let norm = stable_component_norm([axis[0], axis[1], axis[2]]);
         if !angle.is_finite() || !norm.is_finite() || norm <= T::epsilon() {
             return None;
         }
@@ -538,6 +576,9 @@ impl<T: Real + MatrixScalar + ReductionScalar> Isometry<T> {
     /// Creates a transform from a homogeneous 4-by-4 matrix.
     #[inline]
     pub fn from_homogeneous(matrix: Matrix<4, 4, T>) -> Option<Self> {
+        if matrix.as_slice().iter().any(|value| !value.is_finite()) {
+            return None;
+        }
         let tolerance = T::epsilon() * T::from(100).unwrap_or(T::one());
         let scale = T::one().max(matrix[(3, 3)].abs());
         if (matrix[(3, 3)] - T::one()).abs() > tolerance * scale {
@@ -743,6 +784,27 @@ mod tests {
             0.0, 0.0, 0.0, 1.0
         ])
         .is_none());
+        assert!(Isometry::from_homogeneous(matrix![
+            f64::NAN, 0.0, 0.0, 0.0;
+            0.0, 1.0, 0.0, 0.0;
+            0.0, 0.0, 1.0, 0.0;
+            0.0, 0.0, 0.0, 1.0
+        ])
+        .is_none());
+    }
+
+    #[test]
+    fn quaternion_and_axis_norms_scale_extreme_finite_values() {
+        let large = Quaternion::new(1.0e308_f64, 0.0, 0.0, 0.0);
+        assert_relative_eq!(large.norm(), 1.0e308, max_relative = 1e-15);
+        let normalized = large.normalized().expect("large quaternion is nonzero");
+        assert_relative_eq!(normalized.scalar(), 1.0, epsilon = 1e-15);
+        let inverse = large.inverse().expect("large quaternion is invertible");
+        assert_relative_eq!(inverse.scalar(), 1.0e-308, max_relative = 1e-12);
+
+        let axis = vector![1.0e308_f64; 0.0; 0.0];
+        assert!(AngleAxis::new(&axis, 0.25).is_some());
+        assert!(Quaternion::from_axis_angle(&axis, 0.25).is_some());
     }
 
     #[test]

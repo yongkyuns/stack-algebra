@@ -28,6 +28,21 @@ fn sparse_ldlt_solves_indefinite_system() {
 }
 
 #[test]
+fn sparse_ldlt_unified_factor_uses_native_sparse_path() {
+    let matrix = indefinite_matrix();
+    let dense = matrix![4.0, 1.0, 2.0; 1.0, -3.0, 1.0; 2.0, 1.0, 2.0];
+    let rhs = vector![1.0; 2.0; 3.0];
+    let factor = matrix.try_ldlt_with_dense_fallback::<6>().unwrap();
+
+    assert!(!factor.uses_dense_fallback());
+    assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-12);
+
+    let mut in_place = rhs;
+    factor.solve_in_place(&mut in_place);
+    assert_relative_eq!(dense * in_place, rhs, max_relative = 1e-12);
+}
+
+#[test]
 fn sparse_ldlt_reuses_factor_storage() {
     let matrix = indefinite_matrix();
     let mut factor = StaticCscLdlt::<3, 6, f64>::decompose(&matrix).unwrap();
@@ -60,6 +75,128 @@ fn sparse_ldlt_diagonal_pivoting_recovers_zero_leading_diagonal() {
 
     assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-12);
     assert_ne!(factor.ordering().permutation(), &[0, 1]);
+}
+
+#[test]
+fn sparse_ldlt_diagonal_pivoting_enforces_threshold() {
+    type NearZero = StaticCscMatrix<2, 2, 3, f64>;
+    let matrix = NearZero::from_pattern(&[1.0e-8, 0.0, 2.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+
+    assert_eq!(
+        StaticCscLdlt::<2, 3, f64>::decompose_with_diagonal_pivoting(&matrix, 1.0e-6),
+        Err(SparseCholeskyError::ZeroPivot)
+    );
+    assert!(StaticCscLdlt::<2, 3, f64>::decompose_with_diagonal_pivoting(&matrix, 1.0e-10).is_ok());
+}
+
+#[test]
+fn sparse_ldlt_diagonal_pivoting_rejects_non_finite_threshold() {
+    type NearZero = StaticCscMatrix<2, 2, 3, f64>;
+    let matrix = NearZero::from_pattern(&[1.0, 0.0, 2.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+
+    assert_eq!(
+        StaticCscLdlt::<2, 3, f64>::decompose_with_diagonal_pivoting(&matrix, f64::NAN,),
+        Err(SparseCholeskyError::NonFinite)
+    );
+}
+
+#[test]
+fn sparse_ldlt_dense_fallback_handles_two_by_two_pivot() {
+    type Pivoted = StaticCscMatrix<2, 2, 3, f64>;
+    let matrix = Pivoted::from_pattern(&[1.0e-6, 1.0, 1.0e-6], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let dense = matrix![1.0e-6, 1.0; 1.0, 1.0e-6];
+    let rhs = vector![3.0; 4.0];
+    let factor = matrix.try_dense_ldlt().unwrap();
+
+    assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-10);
+    assert_eq!(factor.pivot_blocks(), &[2, 3]);
+}
+
+#[test]
+fn sparse_ldlt_unified_factor_falls_back_for_two_by_two_pivot() {
+    type Pivoted = StaticCscMatrix<2, 2, 3, f64>;
+    let matrix = Pivoted::from_pattern(&[0.0, 1.0, 0.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let dense = matrix![0.0, 1.0; 1.0, 0.0];
+    let rhs = vector![3.0; 4.0];
+    let factor = matrix.try_ldlt_with_dense_fallback::<3>().unwrap();
+
+    assert!(factor.uses_dense_fallback());
+    assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-12);
+
+    let mut in_place = rhs;
+    factor.solve_in_place(&mut in_place);
+    assert_relative_eq!(dense * in_place, rhs, max_relative = 1e-12);
+}
+
+#[test]
+fn sparse_ldlt_unified_factor_switches_on_numeric_recompute() {
+    type Pivoted = StaticCscMatrix<2, 2, 3, f64>;
+    let native = Pivoted::from_pattern(&[2.0, 1.0, 3.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let requires_two_by_two =
+        Pivoted::from_pattern(&[0.0, 1.0, 0.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let dense = matrix![0.0, 1.0; 1.0, 0.0];
+    let rhs = vector![3.0; 4.0];
+    let mut factor = native.try_ldlt_with_dense_fallback::<3>().unwrap();
+
+    assert!(!factor.uses_dense_fallback());
+    factor
+        .recompute_with_dense_fallback(&requires_two_by_two)
+        .unwrap();
+    assert!(factor.uses_dense_fallback());
+    assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-12);
+}
+
+#[test]
+fn sparse_ldlt_unified_factor_prefers_sparse_diagonal_pivoting() {
+    type Pivoted = StaticCscMatrix<2, 2, 3, f64>;
+    let matrix = Pivoted::from_pattern(&[0.0, 1.0, 2.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let dense = matrix![0.0, 1.0; 1.0, 2.0];
+    let rhs = vector![3.0; 4.0];
+    let factor = matrix.try_ldlt_with_dense_fallback::<3>().unwrap();
+
+    assert!(!factor.uses_dense_fallback());
+    assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-12);
+}
+
+#[test]
+fn sparse_ldlt_unified_factor_uses_scale_relative_threshold() {
+    type Scaled = StaticCscMatrix<2, 2, 3, f64>;
+    let matrix = Scaled::from_pattern(&[0.0, 1.0e-20, 2.0e-20], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let dense = matrix![0.0, 1.0e-20; 1.0e-20, 2.0e-20];
+    let rhs = vector![3.0e-20; 4.0e-20];
+    let factor = matrix.try_ldlt_with_dense_fallback::<3>().unwrap();
+
+    assert!(!factor.uses_dense_fallback());
+    assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-12);
+}
+
+#[test]
+fn sparse_ldlt_unified_factor_accepts_explicit_threshold() {
+    type Pivoted = StaticCscMatrix<2, 2, 3, f64>;
+    let matrix = Pivoted::from_pattern(&[0.0, 1.0, 2.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let factor = matrix
+        .try_ldlt_with_dense_fallback_threshold::<3>(10.0)
+        .unwrap();
+
+    assert!(factor.uses_dense_fallback());
+}
+
+#[test]
+fn sparse_ldlt_failed_fallback_recompute_preserves_previous_factor() {
+    type Pivoted = StaticCscMatrix<2, 2, 3, f64>;
+    let valid = Pivoted::from_pattern(&[2.0, 1.0, 3.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let singular = Pivoted::from_pattern(&[0.0, 0.0, 0.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
+    let dense = matrix![2.0, 1.0; 1.0, 3.0];
+    let rhs = vector![3.0; 4.0];
+    let mut factor = valid.try_ldlt_with_dense_fallback::<3>().unwrap();
+
+    assert!(!factor.uses_dense_fallback());
+    assert_eq!(
+        factor.recompute_with_dense_fallback(&singular),
+        Err(SparseCholeskyError::ZeroPivot)
+    );
+    assert!(!factor.uses_dense_fallback());
+    assert_relative_eq!(dense * factor.solve(&rhs), rhs, max_relative = 1e-12);
 }
 
 #[test]

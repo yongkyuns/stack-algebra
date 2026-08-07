@@ -257,6 +257,25 @@ impl MatmulBackend<f32> for X86Sse2Matmul {
     fn rank_update_sub(target: &mut [f32], source: &[f32], scale: f32) {
         unsafe { rank_update_sub_f32(target, source, scale) }
     }
+
+    #[inline]
+    fn rank_update_two_sub(
+        target: &mut [f32],
+        source_first: &[f32],
+        scale_first: f32,
+        source_second: &[f32],
+        scale_second: f32,
+    ) {
+        unsafe {
+            rank_update_two_sub_f32(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            )
+        }
+    }
 }
 
 impl MatmulBackend<f64> for X86Sse2Matmul {
@@ -277,6 +296,25 @@ impl MatmulBackend<f64> for X86Sse2Matmul {
     #[inline]
     fn rank_update_sub(target: &mut [f64], source: &[f64], scale: f64) {
         unsafe { rank_update_sub_f64(target, source, scale) }
+    }
+
+    #[inline]
+    fn rank_update_two_sub(
+        target: &mut [f64],
+        source_first: &[f64],
+        scale_first: f64,
+        source_second: &[f64],
+        scale_second: f64,
+    ) {
+        unsafe {
+            rank_update_two_sub_f64(
+                target,
+                source_first,
+                scale_first,
+                source_second,
+                scale_second,
+            )
+        }
     }
 }
 
@@ -382,6 +420,72 @@ unsafe fn rank_update_sub_f64(target: &mut [f64], source: &[f64], scale: f64) {
     }
     while index < target.len() {
         *target.get_unchecked_mut(index) -= *source.get_unchecked(index) * scale;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "sse2")]
+unsafe fn rank_update_two_sub_f32(
+    target: &mut [f32],
+    source_first: &[f32],
+    scale_first: f32,
+    source_second: &[f32],
+    scale_second: f32,
+) {
+    use core::arch::x86_64::{_mm_loadu_ps, _mm_mul_ps, _mm_set1_ps, _mm_storeu_ps, _mm_sub_ps};
+    let mut index = 0;
+    let first_packet = _mm_set1_ps(scale_first);
+    let second_packet = _mm_set1_ps(scale_second);
+    while index + 4 <= target.len() {
+        let value = _mm_loadu_ps(target.as_ptr().add(index));
+        let first = _mm_mul_ps(_mm_loadu_ps(source_first.as_ptr().add(index)), first_packet);
+        let second = _mm_mul_ps(
+            _mm_loadu_ps(source_second.as_ptr().add(index)),
+            second_packet,
+        );
+        _mm_storeu_ps(
+            target.as_mut_ptr().add(index),
+            _mm_sub_ps(_mm_sub_ps(value, first), second),
+        );
+        index += 4;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) = *target.get_unchecked(index)
+            - *source_first.get_unchecked(index) * scale_first
+            - *source_second.get_unchecked(index) * scale_second;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "sse2")]
+unsafe fn rank_update_two_sub_f64(
+    target: &mut [f64],
+    source_first: &[f64],
+    scale_first: f64,
+    source_second: &[f64],
+    scale_second: f64,
+) {
+    use core::arch::x86_64::{_mm_loadu_pd, _mm_mul_pd, _mm_set1_pd, _mm_storeu_pd, _mm_sub_pd};
+    let mut index = 0;
+    let first_packet = _mm_set1_pd(scale_first);
+    let second_packet = _mm_set1_pd(scale_second);
+    while index + 2 <= target.len() {
+        let value = _mm_loadu_pd(target.as_ptr().add(index));
+        let first = _mm_mul_pd(_mm_loadu_pd(source_first.as_ptr().add(index)), first_packet);
+        let second = _mm_mul_pd(
+            _mm_loadu_pd(source_second.as_ptr().add(index)),
+            second_packet,
+        );
+        _mm_storeu_pd(
+            target.as_mut_ptr().add(index),
+            _mm_sub_pd(_mm_sub_pd(value, first), second),
+        );
+        index += 2;
+    }
+    while index < target.len() {
+        *target.get_unchecked_mut(index) = *target.get_unchecked(index)
+            - *source_first.get_unchecked(index) * scale_first
+            - *source_second.get_unchecked(index) * scale_second;
         index += 1;
     }
 }

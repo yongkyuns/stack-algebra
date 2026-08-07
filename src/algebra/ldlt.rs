@@ -396,12 +396,21 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         let first = factor[(position, position)];
         let coupling = factor[(position + 1, position)];
         let second = factor[(position + 1, position + 1)];
-        let determinant = first * second - coupling * coupling;
+        let block_scale = first.abs().max(coupling.abs()).max(second.abs());
         if !first.is_finite()
             || !coupling.is_finite()
             || !second.is_finite()
-            || !determinant.is_finite()
+            || !block_scale.is_finite()
+            || block_scale == T::zero()
         {
+            return Err(DecompositionError::NonFinite);
+        }
+        let normalized_first = first / block_scale;
+        let normalized_coupling = coupling / block_scale;
+        let normalized_second = second / block_scale;
+        let determinant =
+            normalized_first * normalized_second - normalized_coupling * normalized_coupling;
+        if !determinant.is_finite() {
             return Err(DecompositionError::NonFinite);
         }
         if determinant == T::zero() {
@@ -412,16 +421,24 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
         for row in (position + 2)..D {
             let first_value = factor[(row, position)];
             let second_value = factor[(row, position + 1)];
-            let lower_first = (first_value * second - second_value * coupling) / determinant;
-            let lower_second = (second_value * first - first_value * coupling) / determinant;
+            let normalized_first_value = first_value / block_scale;
+            let normalized_second_value = second_value / block_scale;
+            let lower_first = (normalized_first_value * normalized_second
+                - normalized_second_value * normalized_coupling)
+                / determinant;
+            let lower_second = (normalized_second_value * normalized_first
+                - normalized_first_value * normalized_coupling)
+                / determinant;
             factor[(row, position)] = lower_first;
             factor[(row, position + 1)] = lower_second;
         }
         for column in (position + 2)..D {
             let column_first = factor[(column, position)];
             let column_second = factor[(column, position + 1)];
-            let scale_first = first * column_first + coupling * column_second;
-            let scale_second = coupling * column_first + second * column_second;
+            let scale_first = block_scale
+                * (normalized_first * column_first + normalized_coupling * column_second);
+            let scale_second = block_scale
+                * (normalized_coupling * column_first + normalized_second * column_second);
             let data = factor.as_mut_slice();
             let column_offset = column * D;
             let (prefix, suffix) = data.split_at_mut(column_offset);
@@ -621,9 +638,25 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                     let d11 = self.factor[(row, row)];
                     let d12 = self.factor[(row + 1, row)];
                     let d22 = self.factor[(row + 1, row + 1)];
-                    let determinant = d11 * d22 - d12 * d12;
-                    transformed[(row, column)] = (first * d22 - second * d12) / determinant;
-                    transformed[(row + 1, column)] = (second * d11 - first * d12) / determinant;
+                    let scale = first
+                        .abs()
+                        .max(second.abs())
+                        .max(d11.abs())
+                        .max(d12.abs())
+                        .max(d22.abs());
+                    let normalized_first = first / scale;
+                    let normalized_second = second / scale;
+                    let normalized_d11 = d11 / scale;
+                    let normalized_d12 = d12 / scale;
+                    let normalized_d22 = d22 / scale;
+                    let determinant =
+                        normalized_d11 * normalized_d22 - normalized_d12 * normalized_d12;
+                    transformed[(row, column)] = (normalized_first * normalized_d22
+                        - normalized_second * normalized_d12)
+                        / determinant;
+                    transformed[(row + 1, column)] = (normalized_second * normalized_d11
+                        - normalized_first * normalized_d12)
+                        / determinant;
                     row += 2;
                 } else {
                     transformed[(row, column)] =
@@ -838,6 +871,21 @@ mod tests {
             max_relative = 1e-12
         );
         let rhs = matrix![2.0_f64; -3.0];
+        assert_relative_eq!(matrix * factor.solve(&rhs), rhs, max_relative = 1e-12);
+    }
+
+    #[test]
+    fn two_by_two_pivot_scales_near_f64_limit() {
+        let matrix = matrix![0.0_f64, 1.0e308; 1.0e308, 0.0];
+        let factor = matrix.ldlt().expect("finite nonsingular 2x2 pivot");
+        assert_eq!(factor.pivot_blocks(), &[2, 3]);
+        let transformed = factor.permutation() * matrix * factor.permutation().transpose();
+        assert_relative_eq!(
+            transformed,
+            factor.lower() * factor.diagonal_matrix() * factor.lower().transpose(),
+            max_relative = 1e-12
+        );
+        let rhs = matrix![2.0e307_f64; -3.0e307];
         assert_relative_eq!(matrix * factor.solve(&rhs), rhs, max_relative = 1e-12);
     }
 

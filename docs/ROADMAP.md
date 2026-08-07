@@ -34,6 +34,12 @@ SymForce or any other robotics framework.
   symbolic fill and reusable solves is implemented. Native block CSC LDLT with
   local Bunch–Kaufman diagonal blocks, ordering, and reusable solves is implemented.
   A scalar-expansion adapter is retained for reference comparisons.
+- Scalar CSC LDLT now supports bounded diagonal pivoting with explicit
+  thresholds, a sparse-first dense-fallback factor, reusable numeric
+  recomputation, and in-place multi-RHS solves.
+- Eigen differential coverage includes dense and sparse `f32`/`f64` solves,
+  fallback paths, ordering, and multi-RHS cases. QEMU Cortex-M, RISC-V32, and
+  AArch64 smoke images plus focused Miri view/sparse suites pass locally.
 
 ## Execution phases
 
@@ -93,7 +99,9 @@ SymForce or any other robotics framework.
   no allocation and an Eigen `MaxRows`/`MaxCols`-like capacity contract.
 - Extend fixed-capacity block CSC/CSR with additional block-level ordering
   strategies and native cross-block pivot handling; local pivoted LDLT and an
-  explicit dense global-pivot fallback are implemented.
+  explicit dense global-pivot fallback are implemented. Scalar CSC now also
+  exposes the same explicit bounded dense fallback for systems requiring a
+  global 2x2 pivot.
 - Revisit heap-backed dynamic matrices only after bounded, mapped, and sparse
   storage are demonstrably insufficient for a concrete application; any future
   implementation must remain behind an optional `alloc`/`std` layer.

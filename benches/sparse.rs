@@ -11,7 +11,7 @@ use faer::{Mat, Side};
 use faer_traits::ComplexField;
 use num_traits::FromPrimitive;
 use stack_algebra::{
-    Matrix, Real, StaticCscCholeskyPattern, StaticCscLdltPattern, StaticCscMatrix,
+    Matrix, MatrixScalar, Real, StaticCscCholeskyPattern, StaticCscLdltPattern, StaticCscMatrix,
     StaticCscOrdering,
 };
 
@@ -372,6 +372,13 @@ fn stack_indefinite<const N: usize, T: Real + FromPrimitive>() -> StaticCscMatri
     matrix
 }
 
+fn stack_zero_leading<const N: usize, T: Real + FromPrimitive>() -> StaticCscMatrix<N, N, MAX_NNZ, T>
+{
+    let mut matrix = stack_matrix::<N, T>();
+    matrix.set_value(0, 0, T::zero()).unwrap();
+    matrix
+}
+
 fn faer_matrix<const N: usize, T: ComplexField + FromPrimitive>() -> SparseColMat<usize, T> {
     let mut column_pointers = Vec::with_capacity(N + 1);
     let mut row_indices = Vec::with_capacity(2 * N - 1);
@@ -547,6 +554,45 @@ fn bench_stack_ldlt<const N: usize, T: Real + FromPrimitive>(
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
                 factor.recompute(black_box(&matrix)).unwrap();
+            }
+            black_box(&factor);
+        });
+    });
+    group.bench_with_input(BenchmarkId::new("stack-solve", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.solve_into(black_box(&rhs), black_box(&mut solution));
+            }
+            black_box(&solution);
+        });
+    });
+    group.finish();
+}
+
+fn bench_stack_auto_pivot<const N: usize, T: Real + FromPrimitive + MatrixScalar>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+) {
+    let matrix = stack_zero_leading::<N, T>();
+    let rhs = stack_rhs::<N, T>();
+    let mut solution = Matrix::<N, 1, T>::zeros();
+    let mut factor = matrix.try_ldlt_with_dense_fallback::<MAX_NNZ>().unwrap();
+    let mut group =
+        criterion.benchmark_group(format!("sparse-ldlt/{scalar_name}/auto-pivot-tridiag"));
+    group.bench_with_input(BenchmarkId::new("stack-factor", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor = black_box(matrix.try_ldlt_with_dense_fallback::<MAX_NNZ>()).unwrap();
+            }
+            black_box(&factor);
+        });
+    });
+    group.bench_with_input(BenchmarkId::new("stack-factor-reuse", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor
+                    .recompute_with_dense_fallback(black_box(&matrix))
+                    .unwrap();
             }
             black_box(&factor);
         });
@@ -789,6 +835,7 @@ fn bench_all(criterion: &mut Criterion) {
             bench_stack::<15, f32>(criterion, scalar_name);
             bench_stack::<32, f32>(criterion, scalar_name);
             bench_stack_ldlt::<15, f32>(criterion, scalar_name);
+            bench_stack_auto_pivot::<15, f32>(criterion, scalar_name);
             #[cfg(feature = "eigen-compare")]
             {
                 bench_eigen_ldlt::<15, f32>(criterion, scalar_name);
@@ -808,6 +855,7 @@ fn bench_all(criterion: &mut Criterion) {
             bench_stack::<15, f64>(criterion, scalar_name);
             bench_stack::<32, f64>(criterion, scalar_name);
             bench_stack_ldlt::<15, f64>(criterion, scalar_name);
+            bench_stack_auto_pivot::<15, f64>(criterion, scalar_name);
             #[cfg(feature = "eigen-compare")]
             {
                 bench_eigen_ldlt::<15, f64>(criterion, scalar_name);

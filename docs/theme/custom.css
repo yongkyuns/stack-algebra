@@ -1,0 +1,23 @@
+:root {
+  --links: #1769aa;
+  --sidebar-active: #1769aa;
+  --inline-code-color: #25405a;
+}
+
+.content main {
+  max-width: 960px;
+}
+
+.content h1 {
+  letter-spacing: -0.015em;
+}
+
+.content code {
+  border-radius: 0.2rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.js) {
+    --inline-code-color: #c7def5;
+  }
+}

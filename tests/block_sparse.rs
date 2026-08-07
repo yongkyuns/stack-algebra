@@ -358,6 +358,27 @@ fn native_block_ldlt_handles_local_two_by_two_pivot() {
 }
 
 #[test]
+fn native_block_ldlt_scales_local_two_by_two_solve() {
+    type SingleBlock = StaticBlockCscMatrix<2, 2, 1, 1, 1, f64>;
+    type Factor = StaticBlockCscLdlt<2, 2, 1, 1, 1, f64>;
+    let matrix = SingleBlock::from_pattern(
+        &[Matrix::from_rows([[0.0, 1.0e308], [1.0e308, 0.0]])],
+        &[0],
+        &[0, 1],
+    )
+    .unwrap();
+    let factor = Factor::decompose(&matrix).unwrap();
+    let rhs = Matrix::<2, 1, f64>::from_columns([[2.0e307, -3.0e307]]);
+    let solution = factor.try_solve::<2, 1>(&rhs).unwrap();
+    assert_relative_eq!(
+        matrix![0.0_f64, 1.0e308; 1.0e308, 0.0] * solution,
+        rhs,
+        epsilon = 1e292,
+        max_relative = 1e-12
+    );
+}
+
+#[test]
 fn native_block_ldlt_handles_local_symmetric_permutation() {
     type SingleBlock = StaticBlockCscMatrix<2, 2, 1, 1, 1, f64>;
     type Factor = StaticBlockCscLdlt<2, 2, 1, 1, 1, f64>;

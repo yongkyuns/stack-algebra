@@ -33,6 +33,18 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
         Self::factorize_into(matrix, self);
     }
 
+    /// Recomputes this factorization with typed failure reporting.
+    ///
+    /// Unlike [`Self::compute`], this checked path rejects non-finite input or
+    /// an intermediate value that exceeds the scalar range. The factor is
+    /// replaced only after the complete decomposition succeeds.
+    #[inline]
+    pub fn try_compute(&mut self, matrix: &Matrix<D, D, T>) -> Result<(), DecompositionError> {
+        let factor = Self::try_decompose(matrix)?;
+        *self = factor;
+        Ok(())
+    }
+
     /// Recomputes this factorization directly from a fixed-size matrix view.
     #[inline]
     pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
@@ -56,6 +68,24 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
         output
     }
 
+    /// Computes a partial-pivot LU factorization with typed failure reporting.
+    ///
+    /// The checked path rejects non-finite input or an intermediate value that
+    /// exceeds the scalar range.
+    #[inline]
+    pub fn try_decompose(matrix: &Matrix<D, D, T>) -> Result<Self, DecompositionError> {
+        if matrix.iter().any(|value| !value.is_finite()) {
+            return Err(DecompositionError::NonFinite);
+        }
+        let output = Self::decompose(matrix);
+        if !output.lower.iter().all(|value| value.is_finite())
+            || !output.upper.iter().all(|value| value.is_finite())
+        {
+            return Err(DecompositionError::NonFinite);
+        }
+        Ok(output)
+    }
+
     /// Computes a partial-pivot LU factorization directly from a fixed-size
     /// matrix view without materializing a separate owning input matrix.
     #[inline]
@@ -76,7 +106,15 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
                     .ok_or(DecompositionError::InvalidView)?;
             }
         }
+        if output.upper.iter().any(|value| !value.is_finite()) {
+            return Err(DecompositionError::NonFinite);
+        }
         Self::factorize(&mut output);
+        if !output.lower.iter().all(|value| value.is_finite())
+            || !output.upper.iter().all(|value| value.is_finite())
+        {
+            return Err(DecompositionError::NonFinite);
+        }
         Ok(output)
     }
 
@@ -232,6 +270,12 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
         PartialPivLu::decompose(self)
     }
 
+    /// Computes a checked partial-pivot LU factorization.
+    #[inline]
+    pub fn try_partial_piv_lu(&self) -> Result<PartialPivLu<D, T>, DecompositionError> {
+        PartialPivLu::try_decompose(self)
+    }
+
     /// Computes the determinant of this matrix.
     #[inline]
     pub fn determinant(&self) -> T {
@@ -251,7 +295,7 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
 mod tests {
     use approx::{assert_abs_diff_eq, assert_relative_eq};
 
-    use crate::{eye, matrix, Map, Matrix, PartialPivLu};
+    use crate::{eye, matrix, DecompositionError, Map, Matrix, PartialPivLu};
 
     #[test]
     fn factorization_reconstructs_matrix() {
@@ -337,6 +381,31 @@ mod tests {
         let inverse = matrix.inverse();
         assert_relative_eq!(matrix * inverse, eye!(3, f64), max_relative = 1e-12);
         assert_abs_diff_eq!(matrix.determinant(), 24.0, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn checked_factorization_rejects_nonfinite_intermediates() {
+        let matrix = matrix![
+            1.0e308_f64, 1.0e308;
+            -1.0e308, 1.0e308;
+        ];
+        assert_eq!(
+            matrix.try_partial_piv_lu(),
+            Err(DecompositionError::NonFinite)
+        );
+        assert_eq!(
+            matrix![f64::NAN, 0.0; 0.0, 1.0].try_partial_piv_lu(),
+            Err(DecompositionError::NonFinite)
+        );
+
+        let stable = matrix![2.0_f64, 1.0; 1.0, 3.0];
+        let mut factor = stable.partial_piv_lu();
+        let previous = factor;
+        assert_eq!(
+            factor.try_compute(&matrix),
+            Err(DecompositionError::NonFinite)
+        );
+        assert_eq!(factor, previous);
     }
 
     #[test]

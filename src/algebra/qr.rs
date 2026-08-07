@@ -40,6 +40,59 @@ fn finite_matrix<const M: usize, const N: usize, T: Real>(matrix: &Matrix<M, N, 
 }
 
 #[inline]
+fn apply_reflector_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
+    factors: &Matrix<M, N, T>,
+    column: usize,
+    coefficient: T,
+    transformed: &mut Matrix<M, P, T>,
+    rhs_column: usize,
+) {
+    let mut dot = transformed[(column, rhs_column)];
+    for row in (column + 1)..M {
+        dot = dot + factors[(row, column)] * transformed[(row, rhs_column)];
+    }
+    let scale = coefficient * dot;
+    if scale.is_finite() {
+        transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
+        for row in (column + 1)..M {
+            transformed[(row, rhs_column)] =
+                transformed[(row, rhs_column)] - scale * factors[(row, column)];
+        }
+        return;
+    }
+
+    let mut normalization = T::zero();
+    for row in column..M {
+        normalization = normalization.max(transformed[(row, rhs_column)].abs());
+    }
+    if !normalization.is_finite() || normalization == T::zero() {
+        transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
+        for row in (column + 1)..M {
+            transformed[(row, rhs_column)] =
+                transformed[(row, rhs_column)] - scale * factors[(row, column)];
+        }
+        return;
+    }
+
+    for row in column..M {
+        transformed[(row, rhs_column)] = transformed[(row, rhs_column)] / normalization;
+    }
+    let mut normalized_dot = transformed[(column, rhs_column)];
+    for row in (column + 1)..M {
+        normalized_dot = normalized_dot + factors[(row, column)] * transformed[(row, rhs_column)];
+    }
+    let normalized_scale = coefficient * normalized_dot;
+    transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - normalized_scale;
+    for row in (column + 1)..M {
+        transformed[(row, rhs_column)] =
+            transformed[(row, rhs_column)] - normalized_scale * factors[(row, column)];
+    }
+    for row in column..M {
+        transformed[(row, rhs_column)] = transformed[(row, rhs_column)] * normalization;
+    }
+}
+
+#[inline]
 fn apply_q_transpose_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
     factors: &Matrix<M, N, T>,
     coefficients: &Vector<N, T>,
@@ -52,16 +105,7 @@ fn apply_q_transpose_in_place<const M: usize, const N: usize, const P: usize, T:
             continue;
         }
         for rhs_column in 0..P {
-            let mut dot = transformed[(column, rhs_column)];
-            for row in (column + 1)..M {
-                dot = dot + factors[(row, column)] * transformed[(row, rhs_column)];
-            }
-            let scale = coefficient * dot;
-            transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
-            for row in (column + 1)..M {
-                transformed[(row, rhs_column)] =
-                    transformed[(row, rhs_column)] - scale * factors[(row, column)];
-            }
+            apply_reflector_in_place(factors, column, coefficient, transformed, rhs_column);
         }
     }
 }
@@ -79,16 +123,7 @@ fn apply_q_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
             continue;
         }
         for rhs_column in 0..P {
-            let mut dot = transformed[(column, rhs_column)];
-            for row in (column + 1)..M {
-                dot = dot + factors[(row, column)] * transformed[(row, rhs_column)];
-            }
-            let scale = coefficient * dot;
-            transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
-            for row in (column + 1)..M {
-                transformed[(row, rhs_column)] =
-                    transformed[(row, rhs_column)] - scale * factors[(row, column)];
-            }
+            apply_reflector_in_place(factors, column, coefficient, transformed, rhs_column);
         }
     }
 }
@@ -123,6 +158,14 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
         Self::factorize_into(matrix, self);
     }
 
+    /// Recomputes this factorization with typed failure reporting.
+    #[inline]
+    pub fn try_compute(&mut self, matrix: &Matrix<M, N, T>) -> Result<(), DecompositionError> {
+        let factor = Self::try_decompose(matrix)?;
+        *self = factor;
+        Ok(())
+    }
+
     /// Recomputes this factorization directly from a fixed-size matrix view.
     #[inline]
     pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
@@ -144,6 +187,25 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
         output
     }
 
+    /// Computes a Householder QR factorization with typed failure reporting.
+    #[inline]
+    pub fn try_decompose(matrix: &Matrix<M, N, T>) -> Result<Self, DecompositionError> {
+        if !finite_matrix(matrix) {
+            return Err(DecompositionError::NonFinite);
+        }
+        let output = Self::decompose(matrix);
+        if !finite_matrix(&output.factors)
+            || !output
+                .coefficients
+                .as_slice()
+                .iter()
+                .all(|value| value.is_finite())
+        {
+            return Err(DecompositionError::NonFinite);
+        }
+        Ok(output)
+    }
+
     /// Computes a Householder QR factorization directly from a fixed-size
     /// matrix view without materializing a separate owning input matrix.
     #[inline]
@@ -162,7 +224,19 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
                     .ok_or(DecompositionError::InvalidView)?;
             }
         }
+        if !finite_matrix(&output.factors) {
+            return Err(DecompositionError::NonFinite);
+        }
         Self::factorize(&mut output);
+        if !finite_matrix(&output.factors)
+            || !output
+                .coefficients
+                .as_slice()
+                .iter()
+                .all(|value| value.is_finite())
+        {
+            return Err(DecompositionError::NonFinite);
+        }
         Ok(output)
     }
 
@@ -188,16 +262,53 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
             let diagonal = factors[(column, column)];
             let beta = if diagonal >= T::zero() { -norm } else { norm };
             let first = diagonal - beta;
-            if first == T::zero() || !first.is_finite() {
+            if first == T::zero() {
+                continue;
+            }
+            let scaled = !first.is_finite();
+            let (normalized_beta, normalized_diagonal, normalized_first) = if scaled {
+                let normalized_diagonal = diagonal / norm;
+                let normalized_beta = if diagonal >= T::zero() {
+                    -T::one()
+                } else {
+                    T::one()
+                };
+                (
+                    normalized_beta,
+                    normalized_diagonal,
+                    normalized_diagonal - normalized_beta,
+                )
+            } else {
+                (T::zero(), T::zero(), T::zero())
+            };
+            if scaled && (normalized_first == T::zero() || !normalized_first.is_finite()) {
                 continue;
             }
 
             factors[(column, column)] = beta;
             let source_start = column * M + column + 1;
             let source_end = (column + 1) * M;
-            T::Matmul::scale_divide(&mut factors.as_mut_slice()[source_start..source_end], first);
+            if !scaled {
+                T::Matmul::scale_divide(
+                    &mut factors.as_mut_slice()[source_start..source_end],
+                    first,
+                );
+            } else {
+                T::Matmul::scale_divide(
+                    &mut factors.as_mut_slice()[source_start..source_end],
+                    norm,
+                );
+                T::Matmul::scale_divide(
+                    &mut factors.as_mut_slice()[source_start..source_end],
+                    normalized_first,
+                );
+            }
 
-            let coefficient = (beta - diagonal) / beta;
+            let coefficient = if !scaled {
+                (beta - diagonal) / beta
+            } else {
+                (normalized_beta - normalized_diagonal) / normalized_beta
+            };
             coefficients[column] = coefficient;
             for trailing_column in (column + 1)..N {
                 let initial = factors[(column, trailing_column)];
@@ -364,10 +475,24 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Matrix<M, N, T> {
         HouseholderQr::decompose(self)
     }
 
+    /// Computes a checked Householder QR factorization.
+    #[inline]
+    pub fn try_householder_qr(&self) -> Result<HouseholderQr<M, N, T>, DecompositionError> {
+        HouseholderQr::try_decompose(self)
+    }
+
     /// Computes a column-pivoted Householder QR factorization of this matrix.
     #[inline]
     pub fn col_piv_householder_qr(&self) -> ColPivHouseholderQr<M, N, T> {
         ColPivHouseholderQr::decompose(self)
+    }
+
+    /// Computes a checked column-pivoted Householder QR factorization.
+    #[inline]
+    pub fn try_col_piv_householder_qr(
+        &self,
+    ) -> Result<ColPivHouseholderQr<M, N, T>, DecompositionError> {
+        ColPivHouseholderQr::try_decompose(self)
     }
 }
 
@@ -404,6 +529,14 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
         Self::factorize_into(matrix, self);
     }
 
+    /// Recomputes this factorization with typed failure reporting.
+    #[inline]
+    pub fn try_compute(&mut self, matrix: &Matrix<M, N, T>) -> Result<(), DecompositionError> {
+        let factor = Self::try_decompose(matrix)?;
+        *self = factor;
+        Ok(())
+    }
+
     /// Recomputes this factorization directly from a fixed-size matrix view.
     #[inline]
     pub fn try_compute_view<V>(&mut self, matrix: &V) -> Result<(), DecompositionError>
@@ -428,6 +561,28 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
         output
     }
 
+    /// Computes a column-pivoted Householder QR factorization with typed
+    /// failure reporting.
+    #[inline]
+    pub fn try_decompose(matrix: &Matrix<M, N, T>) -> Result<Self, DecompositionError> {
+        if !finite_matrix(matrix) {
+            return Err(DecompositionError::NonFinite);
+        }
+        let output = Self::decompose(matrix);
+        if !finite_matrix(&output.factors)
+            || !output
+                .coefficients
+                .as_slice()
+                .iter()
+                .all(|value| value.is_finite())
+            || !output.max_pivot.is_finite()
+            || !output.threshold.is_finite()
+        {
+            return Err(DecompositionError::NonFinite);
+        }
+        Ok(output)
+    }
+
     /// Computes a column-pivoted Householder QR factorization directly from a
     /// fixed-size matrix view without materializing a separate owning input
     /// matrix.
@@ -450,7 +605,21 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
                     .ok_or(DecompositionError::InvalidView)?;
             }
         }
+        if !finite_matrix(&output.factors) {
+            return Err(DecompositionError::NonFinite);
+        }
         Self::factorize(&mut output);
+        if !finite_matrix(&output.factors)
+            || !output
+                .coefficients
+                .as_slice()
+                .iter()
+                .all(|value| value.is_finite())
+            || !output.max_pivot.is_finite()
+            || !output.threshold.is_finite()
+        {
+            return Err(DecompositionError::NonFinite);
+        }
         Ok(output)
     }
 
@@ -500,16 +669,53 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
                 pivot_norm
             };
             let first = diagonal - beta;
-            if first == T::zero() || !first.is_finite() {
+            if first == T::zero() {
+                continue;
+            }
+            let scaled = !first.is_finite();
+            let (normalized_beta, normalized_diagonal, normalized_first) = if scaled {
+                let normalized_diagonal = diagonal / pivot_norm;
+                let normalized_beta = if diagonal >= T::zero() {
+                    -T::one()
+                } else {
+                    T::one()
+                };
+                (
+                    normalized_beta,
+                    normalized_diagonal,
+                    normalized_diagonal - normalized_beta,
+                )
+            } else {
+                (T::zero(), T::zero(), T::zero())
+            };
+            if scaled && (normalized_first == T::zero() || !normalized_first.is_finite()) {
                 continue;
             }
 
             factors[(column, column)] = beta;
             let source_start = column * M + column + 1;
             let source_end = (column + 1) * M;
-            T::Matmul::scale_divide(&mut factors.as_mut_slice()[source_start..source_end], first);
+            if !scaled {
+                T::Matmul::scale_divide(
+                    &mut factors.as_mut_slice()[source_start..source_end],
+                    first,
+                );
+            } else {
+                T::Matmul::scale_divide(
+                    &mut factors.as_mut_slice()[source_start..source_end],
+                    pivot_norm,
+                );
+                T::Matmul::scale_divide(
+                    &mut factors.as_mut_slice()[source_start..source_end],
+                    normalized_first,
+                );
+            }
 
-            let coefficient = (beta - diagonal) / beta;
+            let coefficient = if !scaled {
+                (beta - diagonal) / beta
+            } else {
+                (normalized_beta - normalized_diagonal) / normalized_beta
+            };
             coefficients[column] = coefficient;
             for trailing_column in (column + 1)..N {
                 let initial = factors[(column, trailing_column)];
@@ -843,6 +1049,10 @@ mod tests {
         let non_finite = matrix![f64::NAN; 1.0; 2.0];
         let rhs = Matrix::<3, 1, f64>::ones();
         assert_eq!(
+            non_finite.try_householder_qr(),
+            Err(DecompositionError::NonFinite)
+        );
+        assert_eq!(
             non_finite.householder_qr().try_solve_least_squares(&rhs),
             Err(DecompositionError::NonFinite)
         );
@@ -874,6 +1084,10 @@ mod tests {
 
         let non_finite = matrix![f64::NAN; 1.0; 2.0];
         let rhs = Matrix::<3, 1, f64>::ones();
+        assert_eq!(
+            non_finite.try_col_piv_householder_qr(),
+            Err(DecompositionError::NonFinite)
+        );
         assert_eq!(
             non_finite
                 .col_piv_householder_qr()
@@ -1029,6 +1243,24 @@ mod tests {
             expected_small,
             max_relative = 1e-14
         );
+    }
+
+    #[test]
+    fn householder_reflector_scales_near_f64_limit() {
+        let input = matrix![
+            -1.0e308_f64;
+            1.0e308;
+        ];
+        let qr = input.householder_qr();
+        assert!(qr
+            .factors()
+            .as_slice()
+            .iter()
+            .all(|value| value.is_finite()));
+        assert_relative_eq!(qr.apply_q(&qr.r()), input, max_relative = 1e-12);
+        let transformed = qr.apply_q_transpose(&input);
+        assert_relative_eq!(transformed[(0, 0)], qr.r()[(0, 0)], max_relative = 1e-12);
+        assert!(transformed[(1, 0)].abs() < 1.0e293);
     }
 
     #[test]

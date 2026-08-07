@@ -288,8 +288,9 @@ impl<'a, const M: usize, const N: usize, T> Map<'a, M, N, T> {
     /// too short.
     #[inline]
     pub fn from_slice(data: &'a [T]) -> Option<Self> {
+        let len = M.checked_mul(N)?;
         Some(Self {
-            data: data.get(..M * N)?,
+            data: data.get(..len)?,
         })
     }
 
@@ -374,8 +375,9 @@ impl<'a, const M: usize, const N: usize, T> MapMut<'a, M, N, T> {
     /// too short.
     #[inline]
     pub fn from_slice(data: &'a mut [T]) -> Option<Self> {
+        let len = M.checked_mul(N)?;
         Some(Self {
-            data: data.get_mut(..M * N)?,
+            data: data.get_mut(..len)?,
         })
     }
 
@@ -981,6 +983,15 @@ fn map_views_read_and_write_external_column_major_storage() {
     *mapped.get_mut(0, 2).expect("mapped index is in bounds") = 30;
     assert_eq!(mapped.as_map().to_matrix(), matrix![1, 2, 30; 4, 50, 6]);
     assert_eq!(storage, [1, 4, 2, 50, 30, 6, 99]);
+}
+
+#[test]
+fn map_dimensions_reject_multiplication_overflow() {
+    let storage: [u8; 0] = [];
+    assert!(Map::<{ usize::MAX }, 2, _>::from_slice(&storage).is_none());
+
+    let mut storage: [u8; 0] = [];
+    assert!(MapMut::<{ usize::MAX }, 2, _>::from_slice(&mut storage).is_none());
 }
 
 #[test]

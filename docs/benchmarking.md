@@ -21,7 +21,7 @@ native Eigen runner:
 ```sh
 EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench --locked \
   --bench comparison -- --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
-for bench in sparse block_sparse; do
+for bench in dense_solvers sparse block_sparse; do
   EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench --locked --all-features \
     --bench "$bench" -- --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
 done
@@ -65,6 +65,12 @@ fixed directory layout.
   phases. Reusable-factor solve timings exclude the one-time factorization;
   factor-and-solve timings include both. Do not compare these phases as if they
   were the same operation.
+- The dense LDLT suite includes both factor-and-solve cases and reusable
+  two-right-hand-side solve cases; the latter keeps factorization outside the
+  timed region.
+- Sparse LDLT includes a separate auto-pivot group for zero-leading-diagonal
+  inputs, so sparse diagonal pivoting is not conflated with the no-pivot path;
+  its factor and reusable-refactorization phases are measured separately.
 - Inputs, dimensions, scalar type, and benchmark setup are owned by the bench
   sources. Correctness checks should run before timing and failed checks must
   fail the benchmark rather than produce a result.

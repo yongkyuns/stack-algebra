@@ -1,7 +1,7 @@
-use crate::{Matrix, Real};
+use crate::{Ldlt, Matrix, MatrixScalar, Real};
 
 use super::cholesky::StaticCscCholeskyPattern;
-use super::{SparseCholeskyError, StaticCscMatrix, StaticCscOrdering};
+use super::{default_ldlt_threshold, SparseCholeskyError, StaticCscMatrix, StaticCscOrdering};
 
 /// Numeric fixed-capacity simplicial sparse LDLᵀ factorization without
 /// diagonal pivoting.
@@ -10,12 +10,103 @@ use super::{SparseCholeskyError, StaticCscMatrix, StaticCscOrdering};
 /// `A = L * D * Lᵀ`. Use [`Self::decompose_with_diagonal_pivoting`] when
 /// diagonal scaling is needed; that mode selects a fixed ordering during
 /// analysis and still reports [`SparseCholeskyError::ZeroPivot`] when a
-/// 2-by-2 pivot is required.
+/// 2-by-2 pivot is required. Use [`StaticCscMatrix::try_dense_ldlt`] for an
+/// explicit bounded dense fallback when global scalar pivoting is required.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StaticCscLdlt<const N: usize, const MAX_L_NNZ: usize, T = f32> {
     pub(crate) lower: StaticCscMatrix<N, N, MAX_L_NNZ, T>,
     pub(crate) diagonal: [T; N],
     pub(crate) ordering: StaticCscOrdering<N>,
+}
+
+/// Sparse LDLᵀ with an explicit bounded dense fallback.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StaticCscLdltFactor<const N: usize, const MAX_L_NNZ: usize, T = f32> {
+    /// Native sparse factorization using the analyzed 1x1 pivot model.
+    Sparse(StaticCscLdlt<N, MAX_L_NNZ, T>),
+    /// Dense fixed-size Bunch–Kaufman fallback for global 2x2 pivots.
+    Dense(Ldlt<N, T>),
+}
+
+impl<const N: usize, const MAX_L_NNZ: usize, T> StaticCscLdltFactor<N, MAX_L_NNZ, T>
+where
+    T: Real + MatrixScalar,
+{
+    /// Returns the exact inline storage footprint of this factor.
+    #[inline]
+    pub const fn storage_bytes() -> usize {
+        core::mem::size_of::<Self>()
+    }
+
+    /// Returns whether the dense fallback is active.
+    #[inline]
+    pub const fn uses_dense_fallback(&self) -> bool {
+        matches!(self, Self::Dense(_))
+    }
+
+    /// Solves `A * X = B` using the selected factorization.
+    #[inline]
+    pub fn solve<const P: usize>(&self, rhs: &Matrix<N, P, T>) -> Matrix<N, P, T> {
+        match self {
+            Self::Sparse(factor) => factor.solve(rhs),
+            Self::Dense(factor) => factor.solve(rhs),
+        }
+    }
+
+    /// Solves into caller-provided output storage.
+    #[inline]
+    pub fn solve_into<const P: usize>(&self, rhs: &Matrix<N, P, T>, output: &mut Matrix<N, P, T>) {
+        match self {
+            Self::Sparse(factor) => factor.solve_into(rhs, output),
+            Self::Dense(factor) => factor.solve_into(rhs, output),
+        }
+    }
+
+    /// Solves `A * X = B` in place using the selected factorization.
+    #[inline]
+    pub fn solve_in_place<const P: usize>(&self, rhs: &mut Matrix<N, P, T>) {
+        match self {
+            Self::Sparse(factor) => factor.solve_in_place(rhs),
+            Self::Dense(factor) => factor.solve_in_place(rhs),
+        }
+    }
+
+    /// Recomputes numeric values and switches to the dense fallback if a
+    /// later sparse update requires a global 2×2 pivot.
+    #[inline]
+    pub fn recompute_with_dense_fallback<const MAX_A_NNZ: usize>(
+        &mut self,
+        matrix: &super::StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<(), SparseCholeskyError> {
+        let result = match self {
+            Self::Sparse(factor) => factor.recompute(matrix),
+            Self::Dense(factor) => {
+                *factor = matrix.try_dense_ldlt()?;
+                return Ok(());
+            }
+        };
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(SparseCholeskyError::ZeroPivot) => {
+                match StaticCscLdlt::decompose_with_diagonal_pivoting(
+                    matrix,
+                    default_ldlt_threshold(matrix),
+                ) {
+                    Ok(factor) => {
+                        *self = Self::Sparse(factor);
+                        Ok(())
+                    }
+                    Err(SparseCholeskyError::ZeroPivot) => {
+                        *self = Self::Dense(matrix.try_dense_ldlt()?);
+                        Ok(())
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
 }
 
 impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscLdlt<N, MAX_L_NNZ, T> {

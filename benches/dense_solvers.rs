@@ -112,13 +112,17 @@ impl<T: EigenDenseLdltScalar> EigenDenseLdlt<T> {
         assert_eq!(unsafe { T::factorize(self.context) }, 1);
     }
 
-    fn solve<const D: usize>(&self, rhs: &Matrix<D, 1, T>, output: &mut Matrix<D, 1, T>) {
+    fn solve<const D: usize, const P: usize>(
+        &self,
+        rhs: &Matrix<D, P, T>,
+        output: &mut Matrix<D, P, T>,
+    ) {
         assert_eq!(
             unsafe {
                 T::solve(
                     self.context,
                     rhs.as_slice().as_ptr(),
-                    1,
+                    P,
                     output.as_mut_slice().as_mut_ptr(),
                 )
             },
@@ -255,6 +259,14 @@ fn rhs_f32<const D: usize>() -> Matrix<D, 1, f32> {
     Matrix::from_fn(|row, _| (row + 1) as f32 / 3.0)
 }
 
+fn rhs_multi_f64<const D: usize, const P: usize>() -> Matrix<D, P, f64> {
+    Matrix::from_fn(|row, column| (row + 2 * column + 1) as f64 / 3.0)
+}
+
+fn rhs_multi_f32<const D: usize, const P: usize>() -> Matrix<D, P, f32> {
+    Matrix::from_fn(|row, column| (row + 2 * column + 1) as f32 / 3.0)
+}
+
 fn faer_matrix_f64<const D: usize>() -> Mat<f64> {
     let matrix = matrix_f64::<D>();
     Mat::from_fn(D, D, |row, column| matrix[(row, column)])
@@ -306,6 +318,52 @@ fn bench_ldlt_cases_f64<const D: usize>(criterion: &mut Criterion) {
             });
         });
         group.finish();
+
+        let rhs = rhs_multi_f64::<D, 2>();
+        let faer_rhs = Mat::from_fn(D, 2, |row, column| rhs[(row, column)]);
+        let mut stack_output = Matrix::<D, 2, f64>::zeros();
+        let mut faer_output = Mat::zeros(D, 2);
+        let stack_factor = matrix.ldlt().unwrap();
+        let stack_no_pivot_factor = matrix
+            .ldlt_no_pivot()
+            .expect("benchmark matrix supports no-pivot LDLT");
+        let faer_factor = faer_matrix
+            .ldlt(Side::Lower)
+            .expect("benchmark matrix is nonsingular");
+        #[cfg(feature = "eigen-compare")]
+        let mut eigen_factor = EigenDenseLdlt::new(&matrix);
+        #[cfg(feature = "eigen-compare")]
+        eigen_factor.factorize();
+        let mut solve_group =
+            criterion.benchmark_group(format!("dense-ldlt-solve/f64/{}/{}", case.name(), D));
+        solve_group.bench_function("stack-algebra", |bench| {
+            bench.iter(|| {
+                black_box(&stack_factor).solve_into(black_box(&rhs), black_box(&mut stack_output));
+                black_box(&stack_output);
+            });
+        });
+        solve_group.bench_function("stack-algebra-no-pivot", |bench| {
+            bench.iter(|| {
+                black_box(&stack_no_pivot_factor)
+                    .solve_into(black_box(&rhs), black_box(&mut stack_output));
+                black_box(&stack_output);
+            });
+        });
+        solve_group.bench_function("faer", |bench| {
+            bench.iter(|| {
+                faer_output.copy_from(&faer_rhs);
+                faer_factor.solve_in_place(black_box(&mut faer_output));
+                black_box(&faer_output);
+            });
+        });
+        #[cfg(feature = "eigen-compare")]
+        solve_group.bench_function("eigen", |bench| {
+            bench.iter(|| {
+                eigen_factor.solve(black_box(&rhs), black_box(&mut stack_output));
+                black_box(&stack_output);
+            });
+        });
+        solve_group.finish();
     }
 }
 
@@ -350,6 +408,52 @@ fn bench_ldlt_cases_f32<const D: usize>(criterion: &mut Criterion) {
             });
         });
         group.finish();
+
+        let rhs = rhs_multi_f32::<D, 2>();
+        let faer_rhs = Mat::from_fn(D, 2, |row, column| rhs[(row, column)]);
+        let mut stack_output = Matrix::<D, 2, f32>::zeros();
+        let mut faer_output = Mat::zeros(D, 2);
+        let stack_factor = matrix.ldlt().unwrap();
+        let stack_no_pivot_factor = matrix
+            .ldlt_no_pivot()
+            .expect("benchmark matrix supports no-pivot LDLT");
+        let faer_factor = faer_matrix
+            .ldlt(Side::Lower)
+            .expect("benchmark matrix is nonsingular");
+        #[cfg(feature = "eigen-compare")]
+        let mut eigen_factor = EigenDenseLdlt::new(&matrix);
+        #[cfg(feature = "eigen-compare")]
+        eigen_factor.factorize();
+        let mut solve_group =
+            criterion.benchmark_group(format!("dense-ldlt-solve/f32/{}/{}", case.name(), D));
+        solve_group.bench_function("stack-algebra", |bench| {
+            bench.iter(|| {
+                black_box(&stack_factor).solve_into(black_box(&rhs), black_box(&mut stack_output));
+                black_box(&stack_output);
+            });
+        });
+        solve_group.bench_function("stack-algebra-no-pivot", |bench| {
+            bench.iter(|| {
+                black_box(&stack_no_pivot_factor)
+                    .solve_into(black_box(&rhs), black_box(&mut stack_output));
+                black_box(&stack_output);
+            });
+        });
+        solve_group.bench_function("faer", |bench| {
+            bench.iter(|| {
+                faer_output.copy_from(&faer_rhs);
+                faer_factor.solve_in_place(black_box(&mut faer_output));
+                black_box(&faer_output);
+            });
+        });
+        #[cfg(feature = "eigen-compare")]
+        solve_group.bench_function("eigen", |bench| {
+            bench.iter(|| {
+                eigen_factor.solve(black_box(&rhs), black_box(&mut stack_output));
+                black_box(&stack_output);
+            });
+        });
+        solve_group.finish();
     }
 }
 

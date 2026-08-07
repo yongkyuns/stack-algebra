@@ -153,12 +153,22 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
             let mut changed = false;
             for p in 0..N {
                 for q in (p + 1)..N {
+                    let mut scale = T::zero();
+                    for row in 0..M {
+                        scale = scale.max(u[(row, p)].abs()).max(u[(row, q)].abs());
+                    }
+                    if !scale.is_finite() {
+                        return Err(DecompositionError::NonFinite);
+                    }
+                    if scale == T::zero() {
+                        continue;
+                    }
                     let mut app = T::zero();
                     let mut aqq = T::zero();
                     let mut apq = T::zero();
                     for row in 0..M {
-                        let left = u[(row, p)];
-                        let right = u[(row, q)];
+                        let left = u[(row, p)] / scale;
+                        let right = u[(row, q)] / scale;
                         app = app + left * left;
                         aqq = aqq + right * right;
                         apq = apq + left * right;
@@ -166,11 +176,11 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
                     if !app.is_finite() || !aqq.is_finite() || !apq.is_finite() {
                         return Err(DecompositionError::NonFinite);
                     }
-                    let scale = app.sqrt() * aqq.sqrt();
-                    if !scale.is_finite() {
+                    let gram_scale = app.sqrt() * aqq.sqrt();
+                    if !gram_scale.is_finite() {
                         return Err(DecompositionError::NonFinite);
                     }
-                    if scale == T::zero() || apq.abs() <= tolerance * scale {
+                    if gram_scale == T::zero() || apq.abs() <= tolerance * gram_scale {
                         continue;
                     }
 
@@ -449,6 +459,26 @@ mod tests {
             }
         }
         assert_relative_eq!(reconstructed, input, epsilon = 1e-10, max_relative = 1e-10);
+    }
+
+    #[test]
+    fn handles_large_finite_values_without_gram_overflow() {
+        let input = matrix![
+            1.0e200_f64, 2.0e200;
+            3.0e200, 4.0e200;
+        ];
+        let svd = input.svd().expect("finite matrix is supported");
+        let mut reconstructed = Matrix::<2, 2, f64>::zeros();
+        for row in 0..2 {
+            for column in 0..2 {
+                for singular in 0..2 {
+                    reconstructed[(row, column)] += svd.u()[(row, singular)]
+                        * svd.singular_values()[singular]
+                        * svd.v()[(column, singular)];
+                }
+            }
+        }
+        assert_relative_eq!(reconstructed, input, max_relative = 1e-10);
     }
 
     #[test]

@@ -98,6 +98,31 @@ pub trait ReductionBackend<T> {
 
     fn squared_norm<const M: usize, const N: usize>(matrix: &Matrix<M, N, T>) -> T;
 
+    /// Computes a Frobenius norm without overflowing intermediate squares.
+    #[inline]
+    fn norm<const M: usize, const N: usize>(matrix: &Matrix<M, N, T>) -> T
+    where
+        T: crate::Real,
+    {
+        let mut max_abs = T::zero();
+        for &value in matrix.as_slice() {
+            if !value.is_finite() {
+                return value.abs();
+            }
+            max_abs = max_abs.max(value.abs());
+        }
+        if max_abs == T::zero() || !max_abs.is_finite() {
+            return max_abs;
+        }
+
+        let mut scaled_sum = T::zero();
+        for &value in matrix.as_slice() {
+            let ratio = value.abs() / max_abs;
+            scaled_sum = scaled_sum + ratio * ratio;
+        }
+        max_abs * scaled_sum.sqrt()
+    }
+
     fn matvec<const M: usize, const N: usize>(
         matrix: &Matrix<M, N, T>,
         vector: &Vector<N, T>,

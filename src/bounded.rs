@@ -24,6 +24,7 @@
 
 use core::ops::{Index, IndexMut};
 
+use crate::view::{MatrixRead, MatrixWrite};
 use crate::{Matrix, Zero};
 
 /// A stack-allocated matrix with runtime active dimensions and compile-time
@@ -193,6 +194,174 @@ where
         self.copy_into(&mut output)?;
         Some(output)
     }
+
+    /// Borrows the active values as a fixed-size read-only view.
+    #[inline]
+    pub fn as_view<const M: usize, const N: usize>(
+        &self,
+    ) -> Option<MatrixBufView<'_, MAX_ROWS, MAX_COLS, M, N, T>> {
+        if self.rows == M && self.columns == N {
+            Some(MatrixBufView { buffer: self })
+        } else {
+            None
+        }
+    }
+
+    /// Borrows the active values as a fixed-size mutable view.
+    #[inline]
+    pub fn as_view_mut<const M: usize, const N: usize>(
+        &mut self,
+    ) -> Option<MatrixBufViewMut<'_, MAX_ROWS, MAX_COLS, M, N, T>> {
+        if self.rows == M && self.columns == N {
+            Some(MatrixBufViewMut { buffer: self })
+        } else {
+            None
+        }
+    }
+}
+
+/// Fixed-size read-only view into a matching active `MatrixBuf` region.
+#[derive(Clone, Copy)]
+pub struct MatrixBufView<
+    'a,
+    const MAX_ROWS: usize,
+    const MAX_COLS: usize,
+    const M: usize,
+    const N: usize,
+    T,
+> {
+    buffer: &'a MatrixBuf<MAX_ROWS, MAX_COLS, T>,
+}
+
+impl<const MAX_ROWS: usize, const MAX_COLS: usize, const M: usize, const N: usize, T>
+    MatrixBufView<'_, MAX_ROWS, MAX_COLS, M, N, T>
+where
+    T: Copy + Zero,
+{
+    /// Returns the element at `(row, column)`, or `None` when out of bounds.
+    #[inline]
+    pub fn get(&self, row: usize, column: usize) -> Option<&T> {
+        self.buffer.get(row, column)
+    }
+
+    /// Copies the view into an owning fixed-size matrix.
+    #[inline]
+    pub fn to_matrix(&self) -> Matrix<M, N, T> {
+        self.buffer
+            .to_matrix::<M, N>()
+            .expect("view dimensions match the active buffer")
+    }
+}
+
+impl<const MAX_ROWS: usize, const MAX_COLS: usize, const M: usize, const N: usize, T>
+    Index<(usize, usize)> for MatrixBufView<'_, MAX_ROWS, MAX_COLS, M, N, T>
+where
+    T: Copy + Zero,
+{
+    type Output = T;
+
+    #[inline]
+    fn index(&self, index: (usize, usize)) -> &Self::Output {
+        self.get(index.0, index.1)
+            .expect("bounded matrix view index is out of bounds")
+    }
+}
+
+impl<const MAX_ROWS: usize, const MAX_COLS: usize, const M: usize, const N: usize, T>
+    MatrixRead<M, N, T> for MatrixBufView<'_, MAX_ROWS, MAX_COLS, M, N, T>
+where
+    T: Copy + Zero,
+{
+    #[inline]
+    fn get(&self, row: usize, column: usize) -> Option<&T> {
+        self.buffer.get(row, column)
+    }
+}
+
+/// Fixed-size mutable view into a matching active `MatrixBuf` region.
+pub struct MatrixBufViewMut<
+    'a,
+    const MAX_ROWS: usize,
+    const MAX_COLS: usize,
+    const M: usize,
+    const N: usize,
+    T,
+> {
+    buffer: &'a mut MatrixBuf<MAX_ROWS, MAX_COLS, T>,
+}
+
+impl<const MAX_ROWS: usize, const MAX_COLS: usize, const M: usize, const N: usize, T>
+    MatrixBufViewMut<'_, MAX_ROWS, MAX_COLS, M, N, T>
+where
+    T: Copy + Zero,
+{
+    /// Reborrows the mutable view as a read-only view.
+    #[inline]
+    pub fn as_view(&self) -> MatrixBufView<'_, MAX_ROWS, MAX_COLS, M, N, T> {
+        MatrixBufView {
+            buffer: &*self.buffer,
+        }
+    }
+
+    /// Returns the element at `(row, column)`, or `None` when out of bounds.
+    #[inline]
+    pub fn get(&self, row: usize, column: usize) -> Option<&T> {
+        self.buffer.get(row, column)
+    }
+
+    /// Returns a mutable element at `(row, column)`, or `None` when out of bounds.
+    #[inline]
+    pub fn get_mut(&mut self, row: usize, column: usize) -> Option<&mut T> {
+        self.buffer.get_mut(row, column)
+    }
+}
+
+impl<const MAX_ROWS: usize, const MAX_COLS: usize, const M: usize, const N: usize, T>
+    Index<(usize, usize)> for MatrixBufViewMut<'_, MAX_ROWS, MAX_COLS, M, N, T>
+where
+    T: Copy + Zero,
+{
+    type Output = T;
+
+    #[inline]
+    fn index(&self, index: (usize, usize)) -> &Self::Output {
+        self.get(index.0, index.1)
+            .expect("bounded matrix view index is out of bounds")
+    }
+}
+
+impl<const MAX_ROWS: usize, const MAX_COLS: usize, const M: usize, const N: usize, T>
+    IndexMut<(usize, usize)> for MatrixBufViewMut<'_, MAX_ROWS, MAX_COLS, M, N, T>
+where
+    T: Copy + Zero,
+{
+    #[inline]
+    fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
+        self.get_mut(index.0, index.1)
+            .expect("bounded matrix view index is out of bounds")
+    }
+}
+
+impl<const MAX_ROWS: usize, const MAX_COLS: usize, const M: usize, const N: usize, T>
+    MatrixRead<M, N, T> for MatrixBufViewMut<'_, MAX_ROWS, MAX_COLS, M, N, T>
+where
+    T: Copy + Zero,
+{
+    #[inline]
+    fn get(&self, row: usize, column: usize) -> Option<&T> {
+        self.buffer.get(row, column)
+    }
+}
+
+impl<const MAX_ROWS: usize, const MAX_COLS: usize, const M: usize, const N: usize, T>
+    MatrixWrite<M, N, T> for MatrixBufViewMut<'_, MAX_ROWS, MAX_COLS, M, N, T>
+where
+    T: Copy + Zero,
+{
+    #[inline]
+    fn get_mut(&mut self, row: usize, column: usize) -> Option<&mut T> {
+        self.buffer.get_mut(row, column)
+    }
 }
 
 impl<const MAX_ROWS: usize, const MAX_COLS: usize, T> Index<(usize, usize)>
@@ -224,7 +393,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::MatrixBuf;
-    use crate::{matrix, Matrix};
+    use crate::{matrix, Cholesky, Matrix};
 
     #[test]
     fn bounded_matrix_tracks_active_dimensions() {
@@ -264,5 +433,23 @@ mod tests {
         );
         const FOOTPRINT: usize = MatrixBuf::<4, 3, i32>::storage_bytes();
         assert!(FOOTPRINT >= 4 * 3 * core::mem::size_of::<i32>());
+    }
+
+    #[test]
+    fn fixed_views_match_active_dimensions() {
+        let mut buffer = MatrixBuf::<4, 4, f64>::from_matrix(&matrix![4.0, 1.0; 1.0, 3.0]).unwrap();
+        let view = buffer.as_view::<2, 2>().unwrap();
+        assert_eq!(view.get(1, 0), Some(&1.0));
+        assert_eq!(view[(0, 1)], 1.0);
+        assert_eq!(view.to_matrix(), matrix![4.0, 1.0; 1.0, 3.0]);
+        let factor = Cholesky::try_decompose_view(&view).unwrap();
+        assert_eq!(factor.lower()[(0, 0)], 2.0);
+
+        let mut view = buffer.as_view_mut::<2, 2>().unwrap();
+        *view.get_mut(1, 0).unwrap() = 2.0;
+        view[(0, 1)] = 2.0;
+        assert_eq!(view.as_view()[(0, 1)], 2.0);
+        assert_eq!(buffer[(1, 0)], 2.0);
+        assert!(buffer.as_view::<3, 2>().is_none());
     }
 }

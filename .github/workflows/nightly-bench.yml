@@ -42,7 +42,7 @@ jobs:
         run: |
           cargo bench --locked --bench comparison -- \
             --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
-          for bench in sparse block_sparse; do
+          for bench in dense_solvers sparse block_sparse; do
             cargo bench --locked --all-features --bench "$bench" -- \
               --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
           done

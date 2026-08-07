@@ -1,0 +1,15 @@
+[book]
+title = "stack-algebra"
+description = "Fixed-size Rust linear algebra with generated API documentation."
+authors = ["stack-algebra contributors"]
+language = "en"
+src = "."
+
+[build]
+build-dir = "../build/book"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/yongkyuns/stack-algebra"
+additional-css = ["theme/custom.css"]

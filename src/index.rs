@@ -134,12 +134,20 @@ unsafe impl<T, const M: usize, const N: usize> MatrixIndex<Matrix<M, N, T>> for 
 
     #[inline]
     fn get(self, matrix: &Matrix<M, N, T>) -> Option<&Self::Output> {
-        matrix.as_slice().get(self.1 * M + self.0)
+        if self.0 >= M || self.1 >= N {
+            return None;
+        }
+        let offset = self.1.checked_mul(M)?.checked_add(self.0)?;
+        matrix.as_slice().get(offset)
     }
 
     #[inline]
     fn get_mut(self, matrix: &mut Matrix<M, N, T>) -> Option<&mut Self::Output> {
-        matrix.as_mut_slice().get_mut(self.1 * M + self.0)
+        if self.0 >= M || self.1 >= N {
+            return None;
+        }
+        let offset = self.1.checked_mul(M)?.checked_add(self.0)?;
+        matrix.as_mut_slice().get_mut(offset)
     }
 
     #[inline]
@@ -161,12 +169,14 @@ unsafe impl<T, const M: usize, const N: usize> MatrixIndex<Matrix<M, N, T>> for 
     #[track_caller]
     #[inline]
     fn index(self, matrix: &Matrix<M, N, T>) -> &Self::Output {
+        assert!(self.0 < M && self.1 < N, "matrix index is out of bounds");
         &matrix.as_slice()[self.1 * M + self.0]
     }
 
     #[track_caller]
     #[inline]
     fn index_mut(self, matrix: &mut Matrix<M, N, T>) -> &mut Self::Output {
+        assert!(self.0 < M && self.1 < N, "matrix index is out of bounds");
         &mut matrix.as_mut_slice()[self.1 * M + self.0]
     }
 }

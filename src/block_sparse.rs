@@ -28,9 +28,10 @@
 //! grids. For rectangular or unsupported block layouts, use
 //! [`StaticBlockCscMatrix::to_scalar_csc`] as an explicit bounded adapter.
 
+use crate::sparse::map_ldlt_error;
 use crate::{
-    CscError, DecompositionError, Ldlt, Matrix, MatrixScalar, Real, SparseCholeskyError,
-    StaticCscCholesky, StaticCscMatrix, StaticCscOrdering, StaticCscPattern, Zero,
+    CscError, Ldlt, Matrix, MatrixScalar, Real, SparseCholeskyError, StaticCscCholesky,
+    StaticCscMatrix, StaticCscOrdering, StaticCscPattern, Zero,
 };
 
 /// A fixed-capacity block-compressed sparse column matrix.
@@ -1420,16 +1421,8 @@ where
                         let d11 = diagonal[(local_row, local_row)];
                         let d12 = diagonal[(local_row + 1, local_row)];
                         let d22 = diagonal[(local_row + 1, local_row + 1)];
-                        let determinant = d11 * d22 - d12 * d12;
-                        let first_result = (first * d22 - second * d12) / determinant;
-                        let second_result = (second * d11 - first * d12) / determinant;
-                        if !determinant.is_finite()
-                            || determinant == T::zero()
-                            || !first_result.is_finite()
-                            || !second_result.is_finite()
-                        {
-                            return Err(SparseCholeskyError::ZeroPivot);
-                        }
+                        let (first_result, second_result) =
+                            solve_two_by_two(first, second, d11, d12, d22)?;
                         rhs[(block_column * BLOCK_ROWS + local_row, rhs_column)] = first_result;
                         rhs[(block_column * BLOCK_ROWS + local_row + 1, rhs_column)] =
                             second_result;
@@ -1854,6 +1847,50 @@ fn block_ldlt<const ROWS: usize, const COLS: usize, T: Real>(
 }
 
 #[inline]
+fn solve_two_by_two<T: Real>(
+    first: T,
+    second: T,
+    d11: T,
+    d12: T,
+    d22: T,
+) -> Result<(T, T), SparseCholeskyError> {
+    let scale = first
+        .abs()
+        .max(second.abs())
+        .max(d11.abs())
+        .max(d12.abs())
+        .max(d22.abs());
+    if !scale.is_finite() {
+        return Err(SparseCholeskyError::NonFinite);
+    }
+    if scale == T::zero() {
+        return Err(SparseCholeskyError::ZeroPivot);
+    }
+
+    let normalized_first = first / scale;
+    let normalized_second = second / scale;
+    let normalized_d11 = d11 / scale;
+    let normalized_d12 = d12 / scale;
+    let normalized_d22 = d22 / scale;
+    let determinant = normalized_d11 * normalized_d22 - normalized_d12 * normalized_d12;
+    if !determinant.is_finite() {
+        return Err(SparseCholeskyError::NonFinite);
+    }
+    if determinant == T::zero() {
+        return Err(SparseCholeskyError::ZeroPivot);
+    }
+
+    let first_result =
+        (normalized_first * normalized_d22 - normalized_second * normalized_d12) / determinant;
+    let second_result =
+        (normalized_second * normalized_d11 - normalized_first * normalized_d12) / determinant;
+    if !first_result.is_finite() || !second_result.is_finite() {
+        return Err(SparseCholeskyError::NonFinite);
+    }
+    Ok((first_result, second_result))
+}
+
+#[inline]
 fn block_solve_right_ldlt_transpose<const ROWS: usize, const COLS: usize, T: Real>(
     block: &mut Matrix<ROWS, COLS, T>,
     diagonal: &Matrix<ROWS, COLS, T>,
@@ -1883,18 +1920,7 @@ fn block_solve_right_ldlt_transpose<const ROWS: usize, const COLS: usize, T: Rea
                 let d11 = diagonal[(column, column)];
                 let d12 = diagonal[(column + 1, column)];
                 let d22 = diagonal[(column + 1, column + 1)];
-                let determinant = d11 * d22 - d12 * d12;
-                let first_result = (first * d22 - second * d12) / determinant;
-                let second_result = (second * d11 - first * d12) / determinant;
-                if !determinant.is_finite()
-                    || !first_result.is_finite()
-                    || !second_result.is_finite()
-                {
-                    return Err(SparseCholeskyError::NonFinite);
-                }
-                if determinant == T::zero() {
-                    return Err(SparseCholeskyError::ZeroPivot);
-                }
+                let (first_result, second_result) = solve_two_by_two(first, second, d11, d12, d22)?;
                 block[(row, column)] = first_result;
                 block[(row, column + 1)] = second_result;
                 column += 2;
@@ -1973,19 +1999,6 @@ fn store_ldlt_block<const D: usize, const COLS: usize, T: Real + crate::MatrixSc
             T::zero()
         }
     })
-}
-
-#[inline]
-fn map_ldlt_error(error: DecompositionError) -> SparseCholeskyError {
-    match error {
-        DecompositionError::NonFinite => SparseCholeskyError::NonFinite,
-        DecompositionError::ZeroPivot
-        | DecompositionError::Singular
-        | DecompositionError::NotPositiveDefinite
-        | DecompositionError::NotSymmetric
-        | DecompositionError::NoConvergence
-        | DecompositionError::InvalidView => SparseCholeskyError::ZeroPivot,
-    }
 }
 
 /// A fixed-capacity block-compressed sparse row matrix.
