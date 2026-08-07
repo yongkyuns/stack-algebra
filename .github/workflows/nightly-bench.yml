@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -77,24 +75,3 @@ jobs:
           name: nightly-benchmark-report
           path: benchmark-report
           if-no-files-found: error
-
-  # Pages publishing is deliberately opt-in. Set the repository variable
-  # PUBLISH_BENCHMARKS=true and configure Pages to use GitHub Actions.
-  publish:
-    name: Publish report to GitHub Pages
-    needs: benchmark
-    if: ${{ github.event_name == 'schedule' && vars.PUBLISH_BENCHMARKS == 'true' }}
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: nightly-benchmark-report
-          path: benchmark-report
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: benchmark-report
-      - id: deployment
-        uses: actions/deploy-pages@v4

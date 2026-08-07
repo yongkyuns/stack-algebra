@@ -77,11 +77,10 @@ fixed directory layout.
 - Results are machine-specific. The report records the commit and runner, but
   comparisons across different CPU models should be treated as directional.
 
-## Optional Pages publishing
+## Nightly report artifacts
 
-The workflow runs nightly and always uploads an artifact. Publishing to Pages
-is opt-in so forks and repositories without Pages enabled do not fail: set the
-repository variable `PUBLISH_BENCHMARKS=true`, enable **GitHub Actions** as the
-Pages source, and grant the `github-pages` environment's normal deployment
-permissions. Scheduled runs then deploy `benchmark-report/index.html`; manual
-dispatches still produce an artifact but do not overwrite the published page.
+The nightly workflow always uploads a `nightly-benchmark-report` artifact. Open
+the [nightly benchmark workflow](https://github.com/yongkyuns/stack-algebra/actions/workflows/nightly-bench.yml),
+select a completed run, and download the artifact to view `index.html` and the
+raw CSV/JSON inputs. GitHub Pages is reserved for the documentation site, so a
+benchmark run cannot overwrite the published documentation.
