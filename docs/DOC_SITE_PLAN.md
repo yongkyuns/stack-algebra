@@ -31,7 +31,7 @@ Use two complementary outputs:
 
 1. **Guide site:** `mdBook` built from Markdown in `docs/`.
 2. **API reference:** `rustdoc` from
-   `cargo doc --locked --no-deps`.
+   `cargo doc --no-deps`.
 
 Rustdoc remains authoritative for public signatures, trait bounds, examples,
 and item-level documentation. The generated API output is copied below the
@@ -196,7 +196,7 @@ examples compilable as Rust doctests.
 Build the API reference with:
 
 ```sh
-cargo doc --locked --no-deps
+cargo doc --no-deps
 ```
 
 Requirements:
@@ -214,7 +214,7 @@ Requirements:
 
 Examples must be validated by at least one of:
 
-- `cargo test --locked --doc`.
+- `cargo test --doc`.
 - An executable under `examples/` covered by `cargo test --examples`.
 - A deterministic integration test for numerical output or storage layout.
 
@@ -233,7 +233,7 @@ Add `.github/workflows/docs.yml`.
 ### Pull requests
 
 - Install a pinned mdBook version.
-- Run formatting checks and `cargo test --locked --doc`.
+- Run formatting checks and `cargo test --doc`.
 - Generate rustdoc and build mdBook.
 - Verify internal links and the API link.
 - Upload a preview artifact without deploying.
@@ -253,7 +253,7 @@ docs deployment must not depend on long-running benchmark execution.
 
 ```sh
 mdbook serve docs
-cargo doc --locked --no-deps --open
+cargo doc --no-deps --open
 ```
 
 The initial theme should provide responsive navigation, readable typography,
@@ -314,8 +314,8 @@ links without manual steps.
 ## 7. Acceptance checklist
 
 - [ ] `mdbook build docs` succeeds on a clean checkout.
-- [ ] `cargo test --locked --doc` passes.
-- [ ] `cargo doc --locked --no-deps` passes.
+- [ ] `cargo test --doc` passes.
+- [ ] `cargo doc --no-deps` passes.
 - [ ] API coverage and generated-site link checks pass.
 - [ ] Landing page links to getting started, tutorials, use cases, API,
       benchmarks, the feature set, and roadmap.

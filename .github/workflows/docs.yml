@@ -25,7 +25,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Test documentation examples
-        run: cargo test --locked --doc
+        run: cargo test --doc
 
       - name: Build combined guide and API site
         run: ./scripts/build_docs.sh

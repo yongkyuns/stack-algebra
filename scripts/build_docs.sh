@@ -13,7 +13,7 @@ fi
 
 rm -rf "$BUILD_DIR" "$CARGO_TARGET_DIR"
 
-cargo doc --locked --no-deps --target-dir "$CARGO_TARGET_DIR"
+cargo doc --no-deps --target-dir "$CARGO_TARGET_DIR"
 mdbook build "$DOCS_DIR" --dest-dir "$BUILD_DIR"
 
 mkdir -p "$BUILD_DIR/api/stack_algebra"

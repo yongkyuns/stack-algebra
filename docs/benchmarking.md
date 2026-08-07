@@ -19,10 +19,10 @@ Install Eigen (`libeigen3-dev` on Ubuntu), then run the Criterion benches and
 native Eigen runner:
 
 ```sh
-EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench --locked \
+EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench \
   --bench comparison -- --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
 for bench in dense_solvers sparse block_sparse; do
-  EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench --locked --all-features \
+  EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench --all-features \
     --bench "$bench" -- --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
 done
 mkdir -p benchmark-report/raw
