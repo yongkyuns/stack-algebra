@@ -6,6 +6,7 @@
 ## Overview
 
 - [Feature set](FEATURES.md)
+- [Design review and improvement plan](DESIGN_REVIEW.md)
 - [Roadmap](ROADMAP.md)
 
 ## Guides
@@ -17,4 +18,5 @@
 ## Validation
 
 - [Benchmarking](benchmarking.md)
+- [Target support and evidence](targets.md)
 - [API reference](api-reference.md)

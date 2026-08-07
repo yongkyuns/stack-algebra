@@ -1,5 +1,5 @@
 use crate::view::MatrixRead;
-use crate::{DecompositionError, MatmulBackend, Matrix, MatrixScalar, Real, Vector};
+use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 
 #[inline]
 fn column_norm<const M: usize, const N: usize, T: Real>(
@@ -289,16 +289,10 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
             let source_start = column * M + column + 1;
             let source_end = (column + 1) * M;
             if !scaled {
-                T::Matmul::scale_divide(
-                    &mut factors.as_mut_slice()[source_start..source_end],
-                    first,
-                );
+                T::scale_divide(&mut factors.as_mut_slice()[source_start..source_end], first);
             } else {
-                T::Matmul::scale_divide(
-                    &mut factors.as_mut_slice()[source_start..source_end],
-                    norm,
-                );
-                T::Matmul::scale_divide(
+                T::scale_divide(&mut factors.as_mut_slice()[source_start..source_end], norm);
+                T::scale_divide(
                     &mut factors.as_mut_slice()[source_start..source_end],
                     normalized_first,
                 );
@@ -322,7 +316,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
                     let target_start = trailing_column * M + column + 1;
                     let source = &factors.as_slice()[source_start..source_end];
                     let target = &factors.as_slice()[target_start..target_start + source.len()];
-                    T::Matmul::dot(source, target, initial)
+                    T::dot_accumulate(source, target, initial)
                 };
                 let scale = coefficient * dot;
                 factors[(column, trailing_column)] = factors[(column, trailing_column)] - scale;
@@ -330,7 +324,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> HouseholderQr<M, N,
                 let (prefix, suffix) = factors.as_mut_slice().split_at_mut(source_end);
                 let source = &prefix[source_start..source_end];
                 let target_offset = target_start - source_end;
-                T::Matmul::rank_update_sub(
+                T::rank_update_sub(
                     &mut suffix[target_offset..target_offset + source.len()],
                     source,
                     scale,
@@ -696,16 +690,13 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
             let source_start = column * M + column + 1;
             let source_end = (column + 1) * M;
             if !scaled {
-                T::Matmul::scale_divide(
-                    &mut factors.as_mut_slice()[source_start..source_end],
-                    first,
-                );
+                T::scale_divide(&mut factors.as_mut_slice()[source_start..source_end], first);
             } else {
-                T::Matmul::scale_divide(
+                T::scale_divide(
                     &mut factors.as_mut_slice()[source_start..source_end],
                     pivot_norm,
                 );
-                T::Matmul::scale_divide(
+                T::scale_divide(
                     &mut factors.as_mut_slice()[source_start..source_end],
                     normalized_first,
                 );
@@ -729,7 +720,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
                     let target_start = trailing_column * M + column + 1;
                     let source = &factors.as_slice()[source_start..source_end];
                     let target = &factors.as_slice()[target_start..target_start + source.len()];
-                    T::Matmul::dot(source, target, initial)
+                    T::dot_accumulate(source, target, initial)
                 };
                 let scale = coefficient * dot;
                 factors[(column, trailing_column)] = factors[(column, trailing_column)] - scale;
@@ -737,7 +728,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> ColPivHouseholderQr
                 let (prefix, suffix) = factors.as_mut_slice().split_at_mut(source_end);
                 let source = &prefix[source_start..source_end];
                 let target_offset = target_start - source_end;
-                T::Matmul::rank_update_sub(
+                T::rank_update_sub(
                     &mut suffix[target_offset..target_offset + source.len()],
                     source,
                     scale,

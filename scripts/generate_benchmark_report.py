@@ -374,6 +374,36 @@ def _write_csv(rows: list[dict[str, object]], path: Path) -> None:
         writer.writerows({field: row.get(field, "") for field in fields} for row in rows)
 
 
+def _parse_metadata(value: str) -> dict[str, str]:
+    """Parse the workflow's compact ``key=value;...`` metadata format."""
+
+    metadata: dict[str, str] = {}
+    for item in value.split(";"):
+        key, separator, raw_value = item.partition("=")
+        if separator and key.strip():
+            metadata[key.strip()] = raw_value.strip()
+    return metadata
+
+
+def _read_metadata(path: Path | None, inline: str) -> dict[str, str]:
+    metadata = _parse_metadata(inline)
+    if path is None:
+        return metadata
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip():
+                metadata[key.strip()] = value.strip()
+    except OSError as error:
+        raise ValueError(f"Cannot read metadata file {path}: {error}") from error
+    return metadata
+
+
+def _write_metadata(metadata: dict[str, str], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def build_html(rows: list[dict[str, object]], title: str, metadata: str) -> str:
     chart = _svg_chart(rows)
     groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = defaultdict(list)
@@ -399,6 +429,11 @@ def main() -> int:
     parser.add_argument("--csv-output", type=Path, default=None)
     parser.add_argument("--title", default="Stack Algebra nightly benchmark comparison")
     parser.add_argument("--metadata", default="")
+    parser.add_argument(
+        "--metadata-file",
+        type=Path,
+        help="Read additional key=value provenance fields from a file",
+    )
     parser.add_argument("--require-eigen", action="store_true")
     args = parser.parse_args()
     try:
@@ -410,12 +445,17 @@ def main() -> int:
         if args.require_eigen and not any(row["source"] == "eigen" for row in rows):
             raise ValueError("--require-eigen was set but no Eigen measurements were parsed")
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(build_html(rows, args.title, args.metadata), encoding="utf-8")
+        metadata = _read_metadata(args.metadata_file, args.metadata)
+        metadata.setdefault("generated_utc", dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat())
+        metadata["measurement_count"] = str(len(rows))
+        metadata_text = "; ".join(f"{key}={value}" for key, value in sorted(metadata.items()))
+        args.output.write_text(build_html(rows, args.title, metadata_text), encoding="utf-8")
         # Keep a standalone image next to the HTML as well as embedding it in
         # the document, so artifact consumers can link or post-process it.
         args.output.with_name("latency.svg").write_text(_svg_chart(rows), encoding="utf-8")
         csv_output = args.csv_output or args.output.with_name("results.csv")
         _write_csv(rows, csv_output)
+        _write_metadata(metadata, args.output.with_name("metadata.json"))
         print(f"wrote {args.output} ({len(rows)} measurements) and {csv_output}")
     except (OSError, ValueError) as error:
         print(f"benchmark report: {error}", file=sys.stderr)

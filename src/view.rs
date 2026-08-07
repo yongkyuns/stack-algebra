@@ -19,7 +19,7 @@
 //! let storage = [1, 3, 2, 4]; // [[1, 2], [3, 4]] in column-major order
 //! let input = Map::<2, 2, _>::from_slice(&storage).unwrap();
 //! let mut output = Matrix::<2, 2, i32>::zeros();
-//! matmul_view_into(&input, &input, &mut output).unwrap();
+//! matmul_view_into(&input, &input, &mut output);
 //! assert_eq!(output, matrix![7, 10; 15, 22]);
 //! ```
 
@@ -28,6 +28,34 @@ use core::ops::{Deref, DerefMut, Index, IndexMut, Mul};
 
 use crate::Matrix;
 use stride::Stride;
+
+/// Describes why construction of a matrix view failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewError {
+    /// The compile-time shape or strided offset calculation overflowed `usize`.
+    SizeOverflow,
+    /// The source buffer does not cover every element addressed by the view.
+    BufferTooShort {
+        /// Number of elements required by the view.
+        required: usize,
+        /// Number of elements supplied by the caller.
+        available: usize,
+    },
+    /// A non-empty strided view used a zero stride.
+    ZeroStride {
+        /// Axis associated with the invalid stride.
+        axis: StrideAxis,
+    },
+}
+
+/// Axis associated with a strided-view construction error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrideAxis {
+    /// The stride between successive rows.
+    Inner,
+    /// The stride between successive columns.
+    Outer,
+}
 
 /// Read-only access to a fixed-size matrix-shaped view.
 ///
@@ -38,6 +66,18 @@ use stride::Stride;
 pub trait MatrixRead<const M: usize, const N: usize, T> {
     /// Returns the element at `(row, column)`, or `None` when out of bounds.
     fn get(&self, row: usize, column: usize) -> Option<&T>;
+
+    /// Returns an element known to be within the declared `M`-by-`N` shape.
+    ///
+    /// Generic kernels use this method after their compile-time loop bounds
+    /// establish that `row < M` and `column < N`. Implementations may override
+    /// the default to avoid repeating a dynamic bounds check.
+    #[doc(hidden)]
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        self.get(row, column)
+            .expect("matrix view implementation rejected an in-bounds coordinate")
+    }
 }
 
 /// Mutable access to a fixed-size matrix-shaped view.
@@ -57,6 +97,11 @@ impl<const M: usize, const N: usize, T> MatrixRead<M, N, T> for Matrix<M, N, T> 
         } else {
             None
         }
+    }
+
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        &self[(row, column)]
     }
 }
 
@@ -146,6 +191,11 @@ impl<const M: usize, const N: usize, const R: usize, const C: usize, T> MatrixRe
     #[inline]
     fn get(&self, row: usize, column: usize) -> Option<&T> {
         Block::get(self, row, column)
+    }
+
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        &self.matrix[(self.row_offset + row, self.column_offset + column)]
     }
 }
 
@@ -248,6 +298,11 @@ impl<const M: usize, const N: usize, const R: usize, const C: usize, T> MatrixRe
     fn get(&self, row: usize, column: usize) -> Option<&T> {
         BlockMut::get(self, row, column)
     }
+
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        &self.matrix[(self.row_offset + row, self.column_offset + column)]
+    }
 }
 
 impl<const M: usize, const N: usize, const R: usize, const C: usize, T> MatrixWrite<R, C, T>
@@ -284,14 +339,19 @@ pub struct Map<'a, const M: usize, const N: usize, T> {
 }
 
 impl<'a, const M: usize, const N: usize, T> Map<'a, M, N, T> {
-    /// Maps the first `M * N` elements of `data`, or returns `None` when it is
-    /// too short.
+    /// Maps the first `M * N` elements of `data`.
+    ///
+    /// Returns [`ViewError::BufferTooShort`] when the source is too short and
+    /// [`ViewError::SizeOverflow`] when `M * N` cannot fit in `usize`.
     #[inline]
-    pub fn from_slice(data: &'a [T]) -> Option<Self> {
-        let len = M.checked_mul(N)?;
-        Some(Self {
-            data: data.get(..len)?,
-        })
+    pub fn from_slice(data: &'a [T]) -> Result<Self, ViewError> {
+        let required = M.checked_mul(N).ok_or(ViewError::SizeOverflow)?;
+        let available = data.len();
+        let data = data.get(..required).ok_or(ViewError::BufferTooShort {
+            required,
+            available,
+        })?;
+        Ok(Self { data })
     }
 
     /// Returns the mapped column-major storage.
@@ -346,6 +406,11 @@ impl<const M: usize, const N: usize, T> MatrixRead<M, N, T> for Map<'_, M, N, T>
     fn get(&self, row: usize, column: usize) -> Option<&T> {
         Map::get(self, row, column)
     }
+
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        &self.data[row + M * column]
+    }
 }
 
 /// A mutable fixed-size, zero-copy view over an external column-major buffer.
@@ -371,14 +436,19 @@ pub struct MapMut<'a, const M: usize, const N: usize, T> {
 }
 
 impl<'a, const M: usize, const N: usize, T> MapMut<'a, M, N, T> {
-    /// Maps the first `M * N` elements of `data`, or returns `None` when it is
-    /// too short.
+    /// Maps the first `M * N` elements of `data`.
+    ///
+    /// Returns [`ViewError::BufferTooShort`] when the source is too short and
+    /// [`ViewError::SizeOverflow`] when `M * N` cannot fit in `usize`.
     #[inline]
-    pub fn from_slice(data: &'a mut [T]) -> Option<Self> {
-        let len = M.checked_mul(N)?;
-        Some(Self {
-            data: data.get_mut(..len)?,
-        })
+    pub fn from_slice(data: &'a mut [T]) -> Result<Self, ViewError> {
+        let required = M.checked_mul(N).ok_or(ViewError::SizeOverflow)?;
+        let available = data.len();
+        let data = data.get_mut(..required).ok_or(ViewError::BufferTooShort {
+            required,
+            available,
+        })?;
+        Ok(Self { data })
     }
 
     /// Returns the mapped column-major storage.
@@ -469,6 +539,11 @@ impl<const M: usize, const N: usize, T> MatrixRead<M, N, T> for MapMut<'_, M, N,
     fn get(&self, row: usize, column: usize) -> Option<&T> {
         MapMut::get(self, row, column)
     }
+
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        &self.data[row + M * column]
+    }
 }
 
 impl<const M: usize, const N: usize, T> MatrixWrite<M, N, T> for MapMut<'_, M, N, T> {
@@ -502,12 +577,24 @@ pub struct StridedMap<'a, const M: usize, const N: usize, T> {
 }
 
 impl<'a, const M: usize, const N: usize, T> StridedMap<'a, M, N, T> {
-    /// Maps a strided buffer, or returns `None` when the layout exceeds it.
+    /// Maps a strided buffer.
+    ///
+    /// Returns a [`ViewError`] when a stride is invalid, its address calculation
+    /// overflows, or the source buffer is too short.
     #[inline]
-    pub fn from_slice(data: &'a [T], inner_stride: usize, outer_stride: usize) -> Option<Self> {
-        let last = last_strided_index::<M, N>(inner_stride, outer_stride)?;
-        Some(Self {
-            data: data.get(..last)?,
+    pub fn from_slice(
+        data: &'a [T],
+        inner_stride: usize,
+        outer_stride: usize,
+    ) -> Result<Self, ViewError> {
+        let required = last_strided_index::<M, N>(inner_stride, outer_stride)?;
+        let available = data.len();
+        let data = data.get(..required).ok_or(ViewError::BufferTooShort {
+            required,
+            available,
+        })?;
+        Ok(Self {
+            data,
             inner_stride,
             outer_stride,
         })
@@ -570,6 +657,11 @@ impl<const M: usize, const N: usize, T> MatrixRead<M, N, T> for StridedMap<'_, M
     fn get(&self, row: usize, column: usize) -> Option<&T> {
         StridedMap::get(self, row, column)
     }
+
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        &self.data[row * self.inner_stride + column * self.outer_stride]
+    }
 }
 
 /// A mutable fixed-size, zero-copy view with runtime inner and outer strides.
@@ -596,12 +688,24 @@ pub struct StridedMapMut<'a, const M: usize, const N: usize, T> {
 }
 
 impl<'a, const M: usize, const N: usize, T> StridedMapMut<'a, M, N, T> {
-    /// Maps a strided buffer, or returns `None` when the layout exceeds it.
+    /// Maps a strided buffer.
+    ///
+    /// Returns a [`ViewError`] when a stride is invalid, its address calculation
+    /// overflows, or the source buffer is too short.
     #[inline]
-    pub fn from_slice(data: &'a mut [T], inner_stride: usize, outer_stride: usize) -> Option<Self> {
-        let last = last_strided_index::<M, N>(inner_stride, outer_stride)?;
-        Some(Self {
-            data: data.get_mut(..last)?,
+    pub fn from_slice(
+        data: &'a mut [T],
+        inner_stride: usize,
+        outer_stride: usize,
+    ) -> Result<Self, ViewError> {
+        let required = last_strided_index::<M, N>(inner_stride, outer_stride)?;
+        let available = data.len();
+        let data = data.get_mut(..required).ok_or(ViewError::BufferTooShort {
+            required,
+            available,
+        })?;
+        Ok(Self {
+            data,
             inner_stride,
             outer_stride,
         })
@@ -695,6 +799,11 @@ impl<const M: usize, const N: usize, T> MatrixRead<M, N, T> for StridedMapMut<'_
     fn get(&self, row: usize, column: usize) -> Option<&T> {
         StridedMapMut::get(self, row, column)
     }
+
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        &self.data[row * self.inner_stride + column * self.outer_stride]
+    }
 }
 
 impl<const M: usize, const N: usize, T> MatrixWrite<M, N, T> for StridedMapMut<'_, M, N, T> {
@@ -708,16 +817,30 @@ impl<const M: usize, const N: usize, T> MatrixWrite<M, N, T> for StridedMapMut<'
 fn last_strided_index<const M: usize, const N: usize>(
     inner_stride: usize,
     outer_stride: usize,
-) -> Option<usize> {
+) -> Result<usize, ViewError> {
     if M == 0 || N == 0 {
-        return Some(0);
+        return Ok(0);
     }
-    if inner_stride == 0 || outer_stride == 0 {
-        return None;
+    if inner_stride == 0 {
+        return Err(ViewError::ZeroStride {
+            axis: StrideAxis::Inner,
+        });
     }
-    let row_offset = (M - 1).checked_mul(inner_stride)?;
-    let column_offset = (N - 1).checked_mul(outer_stride)?;
-    row_offset.checked_add(column_offset)?.checked_add(1)
+    if outer_stride == 0 {
+        return Err(ViewError::ZeroStride {
+            axis: StrideAxis::Outer,
+        });
+    }
+    let row_offset = (M - 1)
+        .checked_mul(inner_stride)
+        .ok_or(ViewError::SizeOverflow)?;
+    let column_offset = (N - 1)
+        .checked_mul(outer_stride)
+        .ok_or(ViewError::SizeOverflow)?;
+    row_offset
+        .checked_add(column_offset)
+        .and_then(|offset| offset.checked_add(1))
+        .ok_or(ViewError::SizeOverflow)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -976,7 +1099,13 @@ fn map_views_read_and_write_external_column_major_storage() {
         mapped.to_matrix(),
         Matrix::<2, 3, i32>::from_rows([[1, 2, 3], [4, 5, 6]])
     );
-    assert!(Map::<3, 3, _>::from_slice(&storage).is_none());
+    assert!(matches!(
+        Map::<3, 3, _>::from_slice(&storage),
+        Err(ViewError::BufferTooShort {
+            required: 9,
+            available: 7,
+        })
+    ));
 
     let mut mapped = MapMut::<2, 3, _>::from_slice(&mut storage).expect("storage is large enough");
     mapped[(1, 1)] = 50;
@@ -988,10 +1117,16 @@ fn map_views_read_and_write_external_column_major_storage() {
 #[test]
 fn map_dimensions_reject_multiplication_overflow() {
     let storage: [u8; 0] = [];
-    assert!(Map::<{ usize::MAX }, 2, _>::from_slice(&storage).is_none());
+    assert!(matches!(
+        Map::<{ usize::MAX }, 2, _>::from_slice(&storage),
+        Err(ViewError::SizeOverflow)
+    ));
 
     let mut storage: [u8; 0] = [];
-    assert!(MapMut::<{ usize::MAX }, 2, _>::from_slice(&mut storage).is_none());
+    assert!(matches!(
+        MapMut::<{ usize::MAX }, 2, _>::from_slice(&mut storage),
+        Err(ViewError::SizeOverflow)
+    ));
 }
 
 #[test]
@@ -1006,12 +1141,39 @@ fn strided_map_views_handle_padding_and_row_major_storage() {
     assert_eq!(mapped.to_matrix(), matrix![1, 2, 3; 4, 5, 6]);
     assert_eq!(mapped.inner_stride(), 4);
     assert_eq!(mapped.outer_stride(), 1);
-    assert!(StridedMap::<2, 3, _>::from_slice(&storage[..5], 4, 1).is_none());
+    assert!(matches!(
+        StridedMap::<2, 3, _>::from_slice(&storage[..5], 4, 1),
+        Err(ViewError::BufferTooShort {
+            required: 7,
+            available: 5,
+        })
+    ));
 
     let mut mapped = StridedMapMut::<2, 3, _>::from_slice(&mut storage, 4, 1)
         .expect("row-major padded storage is large enough");
     mapped[(1, 2)] = 60;
     assert_eq!(storage, [1, 2, 3, 99, 4, 5, 60, 88]);
+}
+
+#[test]
+fn strided_map_reports_invalid_strides_and_offset_overflow() {
+    let storage = [0_u8; 4];
+    assert!(matches!(
+        StridedMap::<2, 1, _>::from_slice(&storage, 0, 1),
+        Err(ViewError::ZeroStride {
+            axis: StrideAxis::Inner,
+        })
+    ));
+    assert!(matches!(
+        StridedMap::<1, 2, _>::from_slice(&storage, 1, 0),
+        Err(ViewError::ZeroStride {
+            axis: StrideAxis::Outer,
+        })
+    ));
+    assert!(matches!(
+        StridedMap::<2, 2, _>::from_slice(&storage, usize::MAX, 1),
+        Err(ViewError::SizeOverflow)
+    ));
 }
 
 #[test]

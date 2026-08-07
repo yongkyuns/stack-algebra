@@ -259,6 +259,12 @@ macro_rules! diag {
 /// This is required because the compiler doesn't yet know how to deal with the
 /// size of const arrays. We should be able to use [`mem::transmute()`] but it
 /// doesn't work yet :(.
+///
+/// # Safety
+///
+/// The caller must ensure that `A` and `B` have identical sizes and compatible
+/// alignments, and that the bit pattern of `a` is valid for `B`. Ownership of
+/// `a` is consumed; its destructor is intentionally skipped.
 #[inline]
 pub unsafe fn transmute_unchecked<A, B>(a: A) -> B {
     let b = unsafe { ptr::read(&a as *const A as *const B) };
@@ -272,8 +278,8 @@ impl<T, const M: usize, const N: usize> Matrix<M, N, MaybeUninit<T>> {
     pub(crate) fn uninit() -> Self {
         // SAFETY: The `assume_init` is safe because the type we are claiming to
         // have initialized here is a bunch of `MaybeUninit`s, which do not
-        // require initialization. Additionally, `Matrix` is `repr(transparent)`
-        // with an array of arrays.
+        // require initialization. Additionally, `Matrix` is `repr(C)` with an
+        // array-of-arrays representation.
         //
         // Note: this is not the most ideal way of doing this. In the future
         // when Rust allows inline const expressions we might be able to use
@@ -289,7 +295,7 @@ impl<T, const M: usize, const N: usize> Matrix<M, N, MaybeUninit<T>> {
     /// # Safety
     ///
     /// As with [`MaybeUninit::assume_init`], it is up to the caller to
-    /// guarantee that the matrix is really is in an initialized state. Calling
+    /// guarantee that the matrix is really in an initialized state. Calling
     /// this when the contents are not yet fully initialized causes immediate
     /// undefined behavior.
     #[inline]
@@ -357,22 +363,6 @@ where
     // matrix, so all elements in the matrix are initialized.
     Ok(unsafe { matrix.assume_init() })
 }
-
-// /// Like [`collect()`] except the caller must guarantee that the iterator will
-// /// yield enough elements to fill the matrix.
-// pub unsafe fn collect_unchecked<I, T, const M: usize, const N: usize>(iter: I) -> Matrix<M, N, T>
-// where
-//     I: IntoIterator<Item = T>,
-// {
-//     match collect(iter.into_iter()) {
-//         Ok(matrix) => matrix,
-//         Err(_) => {
-//             // SAFETY: the caller guarantees the iterator will yield enough
-//             // elements, so this error case can never be reached.
-//             unsafe { hint::unreachable_unchecked() }
-//         }
-//     }
-// }
 
 impl<T, const M: usize, const N: usize> FromIterator<T> for Matrix<M, N, T> {
     /// Create a new matrix from an iterator.

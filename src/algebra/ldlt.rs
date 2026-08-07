@@ -1,4 +1,3 @@
-use crate::kernels::MatmulBackend;
 use crate::view::MatrixRead;
 use crate::{DecompositionError, Matrix, MatrixScalar, Real};
 
@@ -239,7 +238,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                 {
                     let data = factor.as_mut_slice();
                     let column = &mut data[diagonal * D + diagonal + 1..diagonal * D + D];
-                    T::Matmul::scale_divide(column, diagonal_value);
+                    T::scale_divide(column, diagonal_value);
                     if column.iter().any(|value| !value.is_finite()) {
                         return Err(DecompositionError::NonFinite);
                     }
@@ -252,11 +251,11 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                     let (prefix, suffix) = data.split_at_mut(column_offset);
                     let source = &prefix[diagonal * D + column..diagonal * D + D];
                     let target = &mut suffix[column..D];
-                    T::Matmul::rank_update_sub(target, source, scale);
+                    T::rank_update_sub(target, source, scale);
                 }
             }
 
-            T::Matmul::symmetric_rank_k_update(factor, block_start, block_end);
+            T::symmetric_rank_k_update(factor, block_start, block_end);
             block_start = block_end;
         }
 
@@ -367,7 +366,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             let data = factor.as_mut_slice();
             let column = &mut data[position * D + position + 1..position * D + D];
             if column.len() >= 16 {
-                T::Matmul::scale_divide(column, diagonal);
+                T::scale_divide(column, diagonal);
             } else {
                 for value in column.iter_mut() {
                     *value = *value / diagonal;
@@ -382,7 +381,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                 let (prefix, suffix) = data.split_at_mut(column_offset);
                 let source = &prefix[position * D + column..position * D + D];
                 let target = &mut suffix[column..D];
-                T::Matmul::rank_update_sub(target, source, scale);
+                T::rank_update_sub(target, source, scale);
             }
         }
         Ok(())
@@ -445,7 +444,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
             let source_first = &prefix[position * D + column..position * D + D];
             let source_second = &prefix[(position + 1) * D + column..(position + 1) * D + D];
             let target = &mut suffix[column..D];
-            T::Matmul::rank_update_two_sub(
+            T::rank_update_two_sub(
                 target,
                 source_first,
                 scale_first,

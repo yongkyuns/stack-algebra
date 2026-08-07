@@ -41,20 +41,21 @@ use crate::{Matrix, Vector};
 ///
 /// let storage = [1_i32, 3, 2, 4];
 /// let matrix = Map::<2, 2, _>::from_slice(&storage).unwrap();
-/// let result = matvec_view(&matrix, &vector![5; 6]).unwrap();
+/// let result = matvec_view(&matrix, &vector![5; 6]);
 /// assert_eq!(result, vector![17; 39]);
 /// ```
 #[inline]
 pub fn matvec_view<const M: usize, const N: usize, T, V>(
     matrix: &V,
     vector: &Vector<N, T>,
-) -> Option<Vector<M, T>>
+) -> Vector<M, T>
 where
     T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
     V: MatrixRead<M, N, T>,
 {
     let mut output = Vector::<M, T>::zeros();
-    matvec_view_into(matrix, vector, &mut output).map(|()| output)
+    matvec_view_into(matrix, vector, &mut output);
+    output
 }
 
 /// Computes `matrix * vector` directly from a fixed-size matrix view.
@@ -67,26 +68,22 @@ pub fn matvec_view_into<const M: usize, const N: usize, T, V>(
     matrix: &V,
     vector: &Vector<N, T>,
     output: &mut Vector<M, T>,
-) -> Option<()>
-where
+) where
     T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
     V: MatrixRead<M, N, T>,
 {
     for row in 0..M {
         let mut value = T::zero();
         for column in 0..N {
-            value = value + *matrix.get(row, column)? * vector[column];
+            value = value + *matrix.get_in_bounds(row, column) * vector[column];
         }
         output[row] = value;
     }
-    Some(())
 }
-
 /// Computes `lhs * rhs` directly from fixed-size matrix views.
 ///
 /// Both operands may be borrowed views with different backing layouts. The
-/// destination is an owning fixed-size matrix supplied by the caller, and the
-/// function returns `None` only if a view violates its declared dimensions.
+/// destination is an owning fixed-size matrix supplied by the caller.
 ///
 /// # Example
 ///
@@ -98,7 +95,7 @@ where
 /// let lhs = Map::<2, 2, _>::from_slice(&lhs_storage).unwrap();
 /// let rhs = Map::<2, 2, _>::from_slice(&rhs_storage).unwrap();
 /// let mut output = Matrix::<2, 2, i32>::zeros();
-/// matmul_view_into(&lhs, &rhs, &mut output).unwrap();
+/// matmul_view_into(&lhs, &rhs, &mut output);
 /// assert_eq!(output, matrix![19, 22; 43, 50]);
 /// ```
 #[inline]
@@ -106,8 +103,7 @@ pub fn matmul_view_into<const M: usize, const N: usize, const P: usize, T, Lhs, 
     lhs: &Lhs,
     rhs: &Rhs,
     output: &mut Matrix<M, P, T>,
-) -> Option<()>
-where
+) where
     T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
     Lhs: MatrixRead<M, N, T>,
     Rhs: MatrixRead<N, P, T>,
@@ -116,12 +112,12 @@ where
         for row in 0..M {
             let mut value = T::zero();
             for shared in 0..N {
-                value = value + *lhs.get(row, shared)? * *rhs.get(shared, column)?;
+                value =
+                    value + *lhs.get_in_bounds(row, shared) * *rhs.get_in_bounds(shared, column);
             }
             output[(row, column)] = value;
         }
     }
-    Some(())
 }
 
 ////////////////////////////////////////////////////////////////////////////////

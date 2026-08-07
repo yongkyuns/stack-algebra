@@ -379,7 +379,76 @@ impl<const D: usize, T: Real + MatrixScalar> Matrix<D, D, T> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{eye, matrix, Cholesky, DecompositionError, Map, Matrix};
+    use crate::{eye, matrix, Cholesky, DecompositionError, Map, Matrix, MatrixScalar, Real};
+
+    fn scalar<T: Real>(value: f64) -> T {
+        T::from(value).expect("test value is representable by the scalar")
+    }
+
+    fn generated_spd<const D: usize, T: Real + MatrixScalar>(
+        diagonal_scale: f64,
+    ) -> Matrix<D, D, T> {
+        Matrix::from_fn(|row, column| {
+            let mut value = if row == column {
+                scalar::<T>(diagonal_scale)
+            } else {
+                T::zero()
+            };
+            for shared in 0..D {
+                let left = scalar::<T>((row * 11 + shared * 3 + 1) as f64 / 17.0);
+                let right = scalar::<T>((column * 11 + shared * 3 + 1) as f64 / 17.0);
+                value = value + left * right;
+            }
+            value
+        })
+    }
+
+    fn generated_rhs<const D: usize, T: Real + MatrixScalar>() -> Matrix<D, 2, T> {
+        Matrix::from_fn(|row, column| scalar::<T>((row * 5 + column * 3 + 1) as f64 / 11.0))
+    }
+
+    fn max_abs<const M: usize, const N: usize, T: Real>(matrix: &Matrix<M, N, T>) -> T {
+        matrix
+            .as_slice()
+            .iter()
+            .copied()
+            .map(T::abs)
+            .fold(T::zero(), T::max)
+    }
+
+    fn assert_relative_matrix<const M: usize, const N: usize, T: Real + core::fmt::Debug>(
+        actual: &Matrix<M, N, T>,
+        expected: &Matrix<M, N, T>,
+        tolerance: f64,
+    ) {
+        let scale = max_abs(expected).max(T::one());
+        let mut error = T::zero();
+        for (&actual_value, &expected_value) in actual.as_slice().iter().zip(expected.as_slice()) {
+            error = error.max((actual_value - expected_value).abs());
+        }
+        assert!(
+            error <= scalar::<T>(tolerance) * scale,
+            "matrix error {error:?} exceeds tolerance {tolerance:?} at scale {scale:?}"
+        );
+    }
+
+    fn check_generated_contract<const D: usize, T: Real + MatrixScalar + core::fmt::Debug>(
+        diagonal_scale: f64,
+        tolerance: f64,
+    ) {
+        let matrix = generated_spd::<D, T>(diagonal_scale);
+        let rhs = generated_rhs::<D, T>();
+        let factor = matrix
+            .try_cholesky()
+            .expect("generated matrix is positive-definite");
+
+        let reconstructed = factor.lower() * factor.lower().transpose();
+        assert_relative_matrix(&reconstructed, &matrix, tolerance);
+
+        let solution = factor.solve(&rhs);
+        let residual = matrix * solution - rhs;
+        assert_relative_matrix(&residual, &Matrix::zeros(), tolerance * 4.0);
+    }
 
     #[test]
     fn typed_errors_distinguish_cholesky_failures() {
@@ -483,6 +552,44 @@ mod tests {
         assert!(matrix![1.0_f64, 2.0; 2.0, 1.0].cholesky().is_none());
         assert!(matrix![0.0_f64, 0.0; 0.0, 1.0].cholesky().is_none());
         assert!(matrix![f64::NAN, 0.0; 0.0, 1.0].cholesky().is_none());
+    }
+
+    #[test]
+    fn generated_f64_reconstruction_and_solve_contract() {
+        for scale in [0.25, 1.0, 10_000.0] {
+            check_generated_contract::<1, f64>(scale, 1e-12);
+            check_generated_contract::<2, f64>(scale, 1e-12);
+            check_generated_contract::<3, f64>(scale, 1e-12);
+            check_generated_contract::<6, f64>(scale, 1e-11);
+            check_generated_contract::<15, f64>(scale, 1e-10);
+        }
+    }
+
+    #[test]
+    fn generated_f32_reconstruction_and_solve_contract() {
+        for scale in [0.25, 1.0, 10_000.0] {
+            check_generated_contract::<1, f32>(scale, 2e-6);
+            check_generated_contract::<2, f32>(scale, 2e-5);
+            check_generated_contract::<3, f32>(scale, 5e-5);
+            check_generated_contract::<6, f32>(scale, 3e-4);
+            check_generated_contract::<15, f32>(scale, 2e-3);
+        }
+    }
+
+    #[test]
+    fn rejects_infinite_and_indefinite_inputs_with_typed_errors() {
+        assert_eq!(
+            matrix![f64::INFINITY, 0.0; 0.0, 1.0].try_cholesky(),
+            Err(DecompositionError::NonFinite)
+        );
+        assert_eq!(
+            matrix![1.0_f64, 0.0; 0.0, -1.0].try_cholesky(),
+            Err(DecompositionError::NotPositiveDefinite)
+        );
+        assert_eq!(
+            matrix![1.0_f64, f64::NAN; f64::NAN, 1.0].try_cholesky(),
+            Err(DecompositionError::NonFinite)
+        );
     }
 
     #[test]

@@ -16,6 +16,8 @@ caller-owned buffers.
 - [Use cases](USE_CASES.md) — map common estimation, optimization, geometry,
   and sparse workflows to the API.
 - [Benchmarking](benchmarking.md) — run and interpret numerical comparisons.
+- [Target support and evidence](targets.md) — distinguish host builds, QEMU
+  execution, and real-hardware validation.
 - [Roadmap](ROADMAP.md) — see planned capability and validation work.
 - [API reference](api-reference.md) — browse generated Rust documentation.
 

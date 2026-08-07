@@ -277,6 +277,45 @@ fn generated_f32<const R: usize, const C: usize>(seed: u64) -> Matrix<R, C, f32>
     generated_f64::<R, C>(seed).cast()
 }
 
+fn scaled_design(scale: f64) -> Matrix<4, 2, f64> {
+    Matrix::from_rows([
+        [1.0 * scale, -0.5 * scale],
+        [1.0 * scale, 0.25 * scale],
+        [1.0 * scale, 1.5 * scale],
+        [1.0 * scale, 2.5 * scale],
+    ])
+}
+
+fn scaled_symmetric_positive_definite(scale: f64) -> Matrix<3, 3, f64> {
+    Matrix::from_rows([
+        [5.0 * scale, 1.0 * scale, 0.5 * scale],
+        [1.0 * scale, 4.0 * scale, 0.25 * scale],
+        [0.5 * scale, 0.25 * scale, 3.0 * scale],
+    ])
+}
+
+fn assert_residual_f64<const M: usize, const N: usize>(
+    matrix: Matrix<M, N, f64>,
+    solution: Matrix<N, 1, f64>,
+    rhs: Matrix<M, 1, f64>,
+) {
+    assert!(
+        (matrix * solution - rhs).norm() <= 1.0e-11 * rhs.norm().max(1.0),
+        "solve residual exceeds f64 tolerance"
+    );
+}
+
+fn assert_residual_f32<const M: usize, const N: usize>(
+    matrix: Matrix<M, N, f32>,
+    solution: Matrix<N, 1, f32>,
+    rhs: Matrix<M, 1, f32>,
+) {
+    assert!(
+        (matrix * solution - rhs).norm() <= 2.0e-4 * rhs.norm().max(1.0),
+        "solve residual exceeds f32 tolerance"
+    );
+}
+
 fn assert_close_f64(actual: &[f64], expected: &[f64]) {
     assert_eq!(actual.len(), expected.len());
     for (actual, expected) in actual.iter().zip(expected) {
@@ -294,6 +333,241 @@ fn assert_close_f32(actual: &[f32], expected: &[f32]) {
         let error = (actual - expected).abs();
         let scale = actual.abs().max(expected.abs());
         assert!(error <= 1e-5 + 1e-5 * scale, "{actual} != {expected}");
+    }
+}
+
+#[test]
+fn scaled_dense_solver_corpus_matches_eigen_outputs_and_residuals() {
+    for scale in [0.25, 1.0, 10_000.0] {
+        let design = scaled_design(scale);
+        let expected_solution = Matrix::from_rows([[1.25], [-0.75]]);
+        let rhs = design * expected_solution;
+        let mut eigen_qr = Matrix::<2, 1, f64>::zeros();
+        let mut eigen_col_piv_qr = Matrix::<2, 1, f64>::zeros();
+        let mut eigen_singular_values = Vector::<2, f64>::zeros();
+        let mut eigen_svd = Matrix::<2, 1, f64>::zeros();
+        unsafe {
+            sa_eigen_qr_solve_f64(
+                design.as_slice().as_ptr(),
+                rhs.as_slice().as_ptr(),
+                4,
+                2,
+                1,
+                eigen_qr.as_mut_slice().as_mut_ptr(),
+            );
+            sa_eigen_col_piv_qr_solve_f64(
+                design.as_slice().as_ptr(),
+                rhs.as_slice().as_ptr(),
+                4,
+                2,
+                1,
+                eigen_col_piv_qr.as_mut_slice().as_mut_ptr(),
+            );
+            sa_eigen_svd_singular_values_f64(
+                design.as_slice().as_ptr(),
+                4,
+                2,
+                eigen_singular_values.as_mut_slice().as_mut_ptr(),
+            );
+            sa_eigen_svd_solve_f64(
+                design.as_slice().as_ptr(),
+                rhs.as_slice().as_ptr(),
+                4,
+                2,
+                1,
+                eigen_svd.as_mut_slice().as_mut_ptr(),
+            );
+        }
+
+        let qr_solution = design
+            .try_householder_qr()
+            .expect("finite full-rank input")
+            .try_solve_least_squares(&rhs)
+            .expect("full rank");
+        let pivoted_solution = design
+            .try_col_piv_householder_qr()
+            .expect("finite full-rank input")
+            .try_solve_least_squares(&rhs)
+            .expect("full rank");
+        let svd = design.try_svd().expect("finite input converges");
+        let svd_solution = svd.solve(&rhs);
+        assert_close_f64(qr_solution.as_slice(), eigen_qr.as_slice());
+        assert_close_f64(pivoted_solution.as_slice(), eigen_col_piv_qr.as_slice());
+        assert_close_f64(
+            svd.singular_values().as_slice(),
+            eigen_singular_values.as_slice(),
+        );
+        assert_close_f64(svd_solution.as_slice(), eigen_svd.as_slice());
+        assert_residual_f64(design, qr_solution, rhs);
+        assert_residual_f64(design, pivoted_solution, rhs);
+        assert_residual_f64(design, svd_solution, rhs);
+
+        let symmetric = scaled_symmetric_positive_definite(scale);
+        let square_rhs = Matrix::from_rows([[1.0], [-2.0], [0.5]]);
+        let mut eigen_llt = Vector::<3, f64>::zeros();
+        let mut eigen_ldlt = Vector::<3, f64>::zeros();
+        let mut eigen_values = Vector::<3, f64>::zeros();
+        assert_eq!(
+            unsafe {
+                sa_eigen_llt_solve_f64(
+                    symmetric.as_slice().as_ptr(),
+                    square_rhs.as_slice().as_ptr(),
+                    3,
+                    1,
+                    eigen_llt.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+        assert_eq!(
+            unsafe {
+                sa_eigen_ldlt_solve_f64(
+                    symmetric.as_slice().as_ptr(),
+                    square_rhs.as_slice().as_ptr(),
+                    3,
+                    1,
+                    eigen_ldlt.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+        unsafe {
+            sa_eigen_self_adjoint_eigenvalues_f64(
+                symmetric.as_slice().as_ptr(),
+                3,
+                eigen_values.as_mut_slice().as_mut_ptr(),
+            );
+        }
+        let llt_solution = symmetric
+            .try_cholesky()
+            .expect("positive-definite input")
+            .solve(&square_rhs);
+        let ldlt_solution = symmetric
+            .try_ldlt()
+            .expect("nonsingular symmetric input")
+            .solve(&square_rhs);
+        let eigen = symmetric
+            .try_self_adjoint_eigen()
+            .expect("symmetric finite input");
+        assert_close_f64(llt_solution.as_slice(), eigen_llt.as_slice());
+        assert_close_f64(ldlt_solution.as_slice(), eigen_ldlt.as_slice());
+        assert_close_f64(eigen.eigenvalues().as_slice(), eigen_values.as_slice());
+        assert_residual_f64(symmetric, llt_solution, square_rhs);
+        assert_residual_f64(symmetric, ldlt_solution, square_rhs);
+
+        let design = design.cast::<f32>();
+        let rhs = rhs.cast::<f32>();
+        let symmetric = symmetric.cast::<f32>();
+        let square_rhs = square_rhs.cast::<f32>();
+        let mut eigen_qr = Matrix::<2, 1, f32>::zeros();
+        let mut eigen_col_piv_qr = Matrix::<2, 1, f32>::zeros();
+        let mut eigen_singular_values = Vector::<2, f32>::zeros();
+        let mut eigen_svd = Matrix::<2, 1, f32>::zeros();
+        unsafe {
+            sa_eigen_qr_solve_f32(
+                design.as_slice().as_ptr(),
+                rhs.as_slice().as_ptr(),
+                4,
+                2,
+                1,
+                eigen_qr.as_mut_slice().as_mut_ptr(),
+            );
+            sa_eigen_col_piv_qr_solve_f32(
+                design.as_slice().as_ptr(),
+                rhs.as_slice().as_ptr(),
+                4,
+                2,
+                1,
+                eigen_col_piv_qr.as_mut_slice().as_mut_ptr(),
+            );
+            sa_eigen_svd_singular_values_f32(
+                design.as_slice().as_ptr(),
+                4,
+                2,
+                eigen_singular_values.as_mut_slice().as_mut_ptr(),
+            );
+            sa_eigen_svd_solve_f32(
+                design.as_slice().as_ptr(),
+                rhs.as_slice().as_ptr(),
+                4,
+                2,
+                1,
+                eigen_svd.as_mut_slice().as_mut_ptr(),
+            );
+        }
+        let qr_solution = design
+            .try_householder_qr()
+            .expect("finite full-rank input")
+            .try_solve_least_squares(&rhs)
+            .expect("full rank");
+        let pivoted_solution = design
+            .try_col_piv_householder_qr()
+            .expect("finite full-rank input")
+            .try_solve_least_squares(&rhs)
+            .expect("full rank");
+        let svd = design.try_svd().expect("finite input converges");
+        let svd_solution = svd.solve(&rhs);
+        assert_close_f32(qr_solution.as_slice(), eigen_qr.as_slice());
+        assert_close_f32(pivoted_solution.as_slice(), eigen_col_piv_qr.as_slice());
+        assert_close_f32(
+            svd.singular_values().as_slice(),
+            eigen_singular_values.as_slice(),
+        );
+        assert_close_f32(svd_solution.as_slice(), eigen_svd.as_slice());
+        assert_residual_f32(design, qr_solution, rhs);
+        assert_residual_f32(design, pivoted_solution, rhs);
+        assert_residual_f32(design, svd_solution, rhs);
+
+        let mut eigen_llt = Vector::<3, f32>::zeros();
+        let mut eigen_ldlt = Vector::<3, f32>::zeros();
+        let mut eigen_values = Vector::<3, f32>::zeros();
+        assert_eq!(
+            unsafe {
+                sa_eigen_llt_solve_f32(
+                    symmetric.as_slice().as_ptr(),
+                    square_rhs.as_slice().as_ptr(),
+                    3,
+                    1,
+                    eigen_llt.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+        assert_eq!(
+            unsafe {
+                sa_eigen_ldlt_solve_f32(
+                    symmetric.as_slice().as_ptr(),
+                    square_rhs.as_slice().as_ptr(),
+                    3,
+                    1,
+                    eigen_ldlt.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+        unsafe {
+            sa_eigen_self_adjoint_eigenvalues_f32(
+                symmetric.as_slice().as_ptr(),
+                3,
+                eigen_values.as_mut_slice().as_mut_ptr(),
+            );
+        }
+        let llt_solution = symmetric
+            .try_cholesky()
+            .expect("positive-definite input")
+            .solve(&square_rhs);
+        let ldlt_solution = symmetric
+            .try_ldlt()
+            .expect("nonsingular symmetric input")
+            .solve(&square_rhs);
+        let eigen = symmetric
+            .try_self_adjoint_eigen()
+            .expect("symmetric finite input");
+        assert_close_f32(llt_solution.as_slice(), eigen_llt.as_slice());
+        assert_close_f32(ldlt_solution.as_slice(), eigen_ldlt.as_slice());
+        assert_close_f32(eigen.eigenvalues().as_slice(), eigen_values.as_slice());
+        assert_residual_f32(symmetric, llt_solution, square_rhs);
+        assert_residual_f32(symmetric, ldlt_solution, square_rhs);
     }
 }
 

@@ -4,7 +4,14 @@ The nightly workflow compares stack-algebra with Eigen, faer, and nalgebra
 through a shared set of deterministic dense operations. It runs on a
 GitHub-hosted Linux runner
 with a native CPU target and publishes the raw measurements plus a
-self-contained HTML report as the `nightly-benchmark-report` artifact.
+self-contained HTML report as the `nightly-benchmark-report` artifact. The
+four Rust benchmark groups and the native Eigen runner execute as parallel
+jobs; a final report job merges their measurements.
+
+Each report also contains runner provenance: commit and ref, dirty-tree state,
+runner OS/architecture, CPU model, kernel, Rust compiler, Cargo version, UTC
+generation time, and measurement count. These fields are shown in the report
+metadata line and written to `metadata.json` beside the HTML and CSV files.
 
 Nightly uses short Criterion windows (0.1 seconds of warmup, 0.1 seconds of
 measurement, and 10 samples) and five 5-millisecond Eigen samples so the full
@@ -42,6 +49,11 @@ python3 scripts/generate_benchmark_report.py \
   --csv-output benchmark-report/results.csv \
   --require-eigen
 ```
+
+For reproducible local reports, pass provenance as newline-delimited
+`key=value` fields with `--metadata-file`; inline `--metadata` uses the same
+keys separated by semicolons. The generator adds `generated_utc` and
+`measurement_count` automatically.
 
 The report generator also accepts one or more `--eigen-csv` files. CSV headers
 may use `operation`/`benchmark`, `library`, `shape`, `scalar`, `phase`, and

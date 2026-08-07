@@ -25,6 +25,41 @@
 //! kernels. Use `from_rows` for readable row-major literals, `from_columns`
 //! when data already comes from a column-major buffer, or `Map`/`StridedMap`
 //! to borrow external storage without copying.
+//!
+//! # Compile-time shape and scalar checks
+//!
+//! Matrix multiplication only accepts matching inner dimensions:
+//!
+//! ```compile_fail
+//! use stack_algebra::{matrix, Matrix};
+//!
+//! let lhs: Matrix<2, 3, f32> = matrix![1.0, 2.0, 3.0; 4.0, 5.0, 6.0];
+//! let rhs: Matrix<2, 2, f32> = matrix![1.0, 2.0; 3.0, 4.0];
+//! let _ = lhs * rhs;
+//! ```
+//!
+//! Arithmetic does not implicitly mix scalar types. Use [`Matrix::cast`] when
+//! an explicit conversion is intended:
+//!
+//! ```compile_fail
+//! use stack_algebra::{matrix, Matrix};
+//!
+//! let single: Matrix<2, 2, f32> = matrix![1.0, 0.0; 0.0, 1.0];
+//! let double: Matrix<2, 2, f64> = matrix![1.0, 0.0; 0.0, 1.0];
+//! let _ = single * double;
+//! ```
+//!
+//! Decomposition solves also require a right-hand side with the factor's
+//! compile-time row count:
+//!
+//! ```compile_fail
+//! use stack_algebra::{matrix, Matrix};
+//!
+//! let coefficient: Matrix<2, 2, f64> = matrix![2.0, 0.0; 0.0, 3.0];
+//! let factor = coefficient.try_cholesky().unwrap();
+//! let rhs: Matrix<3, 1, f64> = matrix![1.0; 2.0; 3.0];
+//! let _ = factor.solve(&rhs);
+//! ```
 
 mod algebra;
 mod block_sparse;
@@ -42,7 +77,6 @@ mod util;
 mod view;
 
 use core::{
-    mem::MaybeUninit,
     ops::{Add, Mul, Sub},
     slice,
 };
@@ -56,11 +90,9 @@ pub use block_sparse::{
     StaticBlockCscCholesky, StaticBlockCscCholeskyPattern, StaticBlockCscLdlt,
     StaticBlockCscLdltPattern, StaticBlockCscMatrix, StaticBlockCsrMatrix,
 };
-pub use bounded::{MatrixBuf, MatrixBufView, MatrixBufViewMut};
+pub use bounded::{MatrixBuf, MatrixBufError, MatrixBufView, MatrixBufViewMut};
 pub use geometry::{AffineTransform, AngleAxis, Isometry, Quaternion, RotationMatrix};
 pub use index::MatrixIndex;
-#[doc(hidden)]
-pub use kernels::{MatmulBackend, ReductionBackend, ScalarMatmul, ScalarReduction};
 pub use kernels::{MatrixScalar, ReductionScalar};
 pub use num::{AsPrimitive, Float, One, Real, Zero};
 pub use ops::{matmul_view_into, matvec_view, matvec_view_into};
@@ -70,7 +102,8 @@ pub use sparse::{
     StaticCscPattern,
 };
 pub use view::{
-    Block, BlockMut, Column, Map, MapMut, MatrixRead, MatrixWrite, Row, StridedMap, StridedMapMut,
+    Block, BlockMut, Column, Map, MapMut, MatrixRead, MatrixWrite, Row, StrideAxis, StridedMap,
+    StridedMapMut, ViewError,
 };
 
 #[doc(hidden)]
@@ -144,12 +177,17 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Element `(row, column)` is at `column * M + row`.
     #[inline]
     pub fn as_slice(&self) -> &[T] {
+        // SAFETY: `Matrix` is `repr(C)` with an array-of-arrays layout, so its
+        // elements are contiguous in column-major order and initialized.
         unsafe { slice::from_raw_parts(self.as_ptr(), M * N) }
     }
 
     /// Views the underlying data as a mutable contiguous column-major slice.
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
+        // SAFETY: `Matrix` is `repr(C)` with an array-of-arrays layout, so its
+        // elements are contiguous in column-major order and initialized. The
+        // exclusive borrow guarantees unique access for the returned slice.
         unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), M * N) }
     }
 
@@ -329,22 +367,6 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         }
     }
 
-    // /// Clone the current matrix.
-    // #[inline]
-    // pub fn clone(&self) -> Matrix<M, N, T>
-    // where
-    //     T: Copy,
-    // {
-    //     // let mut clone = zeros!(M, N, T);
-    //     let mut clone = unsafe { Matrix::<M, N, MaybeUninit<T>>::uninit().assume_init() };
-    //     for c in 0..N {
-    //         for r in 0..M {
-    //             clone[(r, c)] = self[(r, c)];
-    //         }
-    //     }
-    //     clone
-    // }
-
     /// Returns a transposed copy of the matrix.
     #[inline]
     pub fn transpose(&self) -> Matrix<N, M, T>
@@ -387,7 +409,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     where
         T: Real + ReductionScalar,
     {
-        T::Reduction::squared_norm(self)
+        T::squared_norm(self)
     }
 
     /// Returns the Frobenius norm, `sqrt(sum(aᵢⱼ²))`.
@@ -400,7 +422,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     where
         T: Real + ReductionScalar,
     {
-        T::Reduction::norm(self)
+        T::norm(self)
     }
 
     /// Returns a normalized copy divided by the Frobenius norm.
@@ -410,55 +432,6 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     {
         self / self.norm()
     }
-
-    // /// Returns an iterator over the rows in this matrix.
-    // #[inline]
-    // pub fn iter_rows(&self) -> IterRows<'_, T, M, N> {
-    //     IterRows::new(self)
-    // }
-
-    // /// Returns a mutable iterator over the rows in this matrix.
-    // #[inline]
-    // pub fn iter_rows_mut(&mut self) -> IterRowsMut<'_, T, M, N> {
-    //     IterRowsMut::new(self)
-    // }
-
-    // /// Returns an iterator over the columns in this matrix.
-    // #[inline]
-    // pub fn iter_columns(&self) -> IterColumns<'_, T, M, N> {
-    //     IterColumns::new(self)
-    // }
-
-    // /// Returns a mutable iterator over the columns in this matrix.
-    // #[inline]
-    // pub fn iter_columns_mut(&mut self) -> IterColumnsMut<'_, T, M, N> {
-    //     IterColumnsMut::new(self)
-    // }
-
-    // /// Returns a matrix of the same size as self, with function `f` applied to
-    // /// each element in column-major order.
-    // #[inline]
-    // pub fn map<F, U>(self, f: F) -> Matrix<M, N, U>
-    // where
-    //     F: FnMut(T) -> U,
-    // {
-    //     // SAFETY: the iterator has the exact number of elements required.
-    //     unsafe { new::collect_unchecked(self.into_iter().map(f)) }
-    // }
-
-    // /// Returns the L1 norm of the matrix.
-    // ///
-    // /// Also known as *Manhattan Distance* or *Taxicab norm*. L1 Norm is the sum
-    // /// of the magnitudes of the vectors in a space.
-    // pub fn l1_norm(&self) -> T
-    // where
-    //     T: Copy + Ord + Abs + Zero + Sum<T>,
-    // {
-    //     (0..N)
-    //         .map(|i| self.data[i].iter().copied().map(Abs::abs).sum())
-    //         .max()
-    //         .unwrap_or_else(Zero::zero)
-    // }
 }
 
 impl<const M: usize, T> Matrix<M, 1, T>
@@ -470,25 +443,9 @@ where
     /// Both vectors must have the same compile-time length and scalar type.
     #[inline]
     pub fn dot(&self, other: &Self) -> T {
-        T::Reduction::dot(self, other)
+        T::dot(self, other)
     }
 }
-
-// impl<const M: usize, const N: usize, T> Clone for Matrix<M, N, T>
-// where
-//     for<'a> &'a T,
-// {
-//     fn clone(&self) -> Self {
-//         // let mut clone = zeros!(M, N, T);
-//         let mut clone = unsafe { Matrix::<M, N, MaybeUninit<T>>::uninit().assume_init() };
-//         for c in 0..N {
-//             for r in 0..M {
-//                 clone[(r, c)] = &self[(r, c)];
-//             }
-//         }
-//         clone
-//     }
-// }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Square matrix functions
@@ -514,11 +471,11 @@ impl<T> Matrix<3, 1, T> {
     where
         for<'a> &'a T: Mul<&'a T, Output = T> + Sub<&'a T, Output = T>,
     {
-        let mut res = unsafe { Matrix::<3, 1, MaybeUninit<T>>::uninit().assume_init() };
-        res[0] = &(&self[1] * &other[2]) - &(&self[2] * &other[1]);
-        res[1] = &(&self[2] * &other[0]) - &(&self[0] * &other[2]);
-        res[2] = &(&self[0] * &other[1]) - &(&self[1] * &other[0]);
-        res
+        Self::from_columns([[
+            &(&self[1] * &other[2]) - &(&self[2] * &other[1]),
+            &(&self[2] * &other[0]) - &(&self[0] * &other[2]),
+            &(&self[0] * &other[1]) - &(&self[1] * &other[0]),
+        ]])
     }
 }
 

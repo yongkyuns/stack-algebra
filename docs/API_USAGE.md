@@ -74,6 +74,10 @@ let mapped = Map::<3, 2, f64>::from_slice(&raw).expect("six values");
 let qr = HouseholderQr::try_decompose_view(&mapped).expect("QR succeeds");
 ```
 
+Mapping errors are typed: match `ViewError::BufferTooShort`,
+`ViewError::SizeOverflow`, or `ViewError::ZeroStride` when input validation
+must be reported rather than handled with `expect`.
+
 `StridedMap` uses `inner_stride` for one row and `outer_stride` for one column:
 
 ```rust
@@ -251,7 +255,9 @@ let view = buffer.as_view::<8, 4>().expect("active dimensions match");
 `MatrixBuf` remains bounded storage rather than a dynamic decomposition
 interface. When active dimensions match compile-time dimensions, pass
 `view` to any `try_decompose_view` API without copying; use `to_matrix` when an
-owned `Matrix<M, N, T>` is needed.
+owned `Matrix<M, N, T>` is needed. Its construction, resize, conversion, and
+fixed-view operations return `MatrixBufError` with capacity, length, or shape
+details when they cannot satisfy the request.
 
 `MatrixBufView` and `MatrixBufViewMut` are the corresponding fixed-size
 read-only and mutable view types. Use `row` and `column` when an algorithm

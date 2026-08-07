@@ -70,6 +70,12 @@ impl<const D: usize, T, const LOWER: bool> MatrixRead<D, D, T>
     fn get(&self, row: usize, column: usize) -> Option<&T> {
         SelfAdjointView::get(self, row, column)
     }
+
+    #[inline]
+    fn get_in_bounds(&self, row: usize, column: usize) -> &T {
+        let (source_row, source_column) = Self::source_indices(row, column);
+        &self.matrix[(source_row, source_column)]
+    }
 }
 
 impl<const D: usize, T> Matrix<D, D, T> {
@@ -163,7 +169,7 @@ mod tests {
             Matrix::from_rows([[1, 20, 3], [20, 4, 30], [3, 30, 7]])
         );
         let vector = matrix![1_i32; 2; 3];
-        assert_eq!(matvec_view(&view, &vector), Some(matrix![50_i32; 118; 84]));
+        assert_eq!(matvec_view(&view, &vector), matrix![50_i32; 118; 84]);
     }
 
     #[test]

@@ -9,7 +9,7 @@ references in optional tests and benchmarks.
 
 | Property | Current behavior |
 | --- | --- |
-| Allocation | Core operations are stack allocated and allocation-free. |
+| Allocation | Core operations use fixed-size inline storage and are allocation-free. Placement follows the owner (local, static, embedded field, arena, or caller-managed buffer). |
 | Dimensions | `Matrix<M, N, T>` dimensions are compile-time constants. `MatrixBuf` adds bounded runtime-active dimensions. |
 | Layout | Matrices and vectors use column-major storage. |
 | Scalar types | `f32` and `f64` are the primary numerical types; integer scalar matrices support basic algebra. |
@@ -67,6 +67,11 @@ All dense decomposition view APIs consume `MatrixRead<M, N, T>`:
 known at a call site, `as_view::<M, N>()` and `as_view_mut::<M, N>()` expose the
 active region through the same zero-copy `MatrixRead`/`MatrixWrite` view APIs;
 use `to_matrix` only when an owned snapshot is required.
+
+`Map`, `StridedMap`, and `MatrixBuf` constructors return `ViewError` or
+`MatrixBufError`, including the required and available sizes or the mismatched
+shape. View arithmetic uses the const-generic shape and writes directly to its
+caller-provided output.
 
 View-based factorization fills factor-owned storage directly. It does not first
 create a second owning input matrix. Use `Matrix::from_view` when an owned
@@ -170,6 +175,7 @@ framework dependency.
 
 Use `RUSTFLAGS="-C target-cpu=native"` only when deploying to a matching CPU
 feature set. See [`API_USAGE.md`](API_USAGE.md) for build commands and
+[`targets.md`](targets.md) for the evidence matrix. See
 [`ROADMAP.md`](ROADMAP.md) for planned native block kernels and remaining
 numerical extensions.
 

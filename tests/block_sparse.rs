@@ -1,8 +1,8 @@
 use approx::assert_relative_eq;
 use stack_algebra::{
-    matrix, Matrix, SparseCholeskyError, StaticBlockCscCholesky, StaticBlockCscLdlt,
-    StaticBlockCscMatrix, StaticBlockCsrMatrix, StaticCscCholesky, StaticCscLdlt,
-    StaticCscOrdering,
+    matrix, CscError, Matrix, SparseCholeskyError, StaticBlockCscCholesky,
+    StaticBlockCscCholeskyPattern, StaticBlockCscLdlt, StaticBlockCscMatrix, StaticBlockCsrMatrix,
+    StaticCscCholesky, StaticCscLdlt, StaticCscOrdering,
 };
 
 type Blocks = StaticBlockCscMatrix<2, 2, 2, 2, 3, f64>;
@@ -48,6 +48,32 @@ fn block_csc_matvec_matches_expanded_matrix() {
 }
 
 #[test]
+fn block_csc_rejects_noncanonical_patterns() {
+    let block = Matrix::from_rows([[1.0_f64, 0.0], [0.0, 1.0]]);
+
+    assert_eq!(
+        Blocks::from_pattern(&[block], &[0], &[1, 1, 1]),
+        Err(CscError::InvalidColumnPointers)
+    );
+    assert_eq!(
+        Blocks::from_pattern(&[block], &[0], &[0, 1, 0]),
+        Err(CscError::InvalidColumnPointers)
+    );
+    assert_eq!(
+        Blocks::from_pattern(&[block], &[2], &[0, 1, 1]),
+        Err(CscError::InvalidRowIndices)
+    );
+    assert_eq!(
+        Blocks::from_pattern(&[block, block], &[0, 0], &[0, 2, 2]),
+        Err(CscError::InvalidRowIndices)
+    );
+    assert_eq!(
+        Blocks::from_pattern(&[block], &[], &[0, 1, 1]),
+        Err(CscError::LengthMismatch)
+    );
+}
+
+#[test]
 fn block_csr_reports_scalar_dimensions_and_blocks() {
     let values = [
         Matrix::from_rows([[1.0, 0.0], [0.0, 1.0]]),
@@ -88,6 +114,45 @@ fn block_csr_matvec_matches_expanded_matrix() {
 }
 
 #[test]
+fn block_csc_and_csr_preserve_the_same_matrix_and_numeric_updates() {
+    type Csc = StaticBlockCscMatrix<2, 2, 2, 3, 4, f64>;
+    type Csr = StaticBlockCsrMatrix<2, 2, 2, 3, 4, f64>;
+
+    let a = Matrix::from_rows([[1.0, 2.0], [3.0, 4.0]]);
+    let b = Matrix::from_rows([[5.0, 6.0], [7.0, 8.0]]);
+    let c = Matrix::from_rows([[2.0, -1.0], [0.0, 3.0]]);
+    let d = Matrix::from_rows([[4.0, 0.0], [1.0, 2.0]]);
+    let mut csc = Csc::from_pattern(&[a, b, c, d], &[0, 1, 1, 0], &[0, 2, 3, 4]).unwrap();
+    let mut csr = Csr::from_pattern(&[a, d, b, c], &[0, 2, 0, 1], &[0, 2, 4]).unwrap();
+
+    let rhs = [1.0, -2.0, 3.0, 4.0, -1.0, 2.0];
+    let mut csc_output = [0.0; 4];
+    let mut csr_output = [0.0; 4];
+    csc.matvec_into(&rhs, &mut csc_output).unwrap();
+    csr.matvec_into(&rhs, &mut csr_output).unwrap();
+    assert_eq!(csc_output, csr_output);
+    for row in 0..2 {
+        for column in 0..3 {
+            assert_eq!(csc.block(row, column), csr.block(row, column));
+        }
+    }
+
+    let updated_a = Matrix::from_rows([[2.0, 0.0], [0.0, 2.0]]);
+    let updated_b = Matrix::from_rows([[1.0, 0.0], [0.0, 1.0]]);
+    let updated_c = Matrix::from_rows([[3.0, 1.0], [1.0, 3.0]]);
+    let updated_d = Matrix::from_rows([[0.0, 1.0], [2.0, 0.0]]);
+    csc.set_values(&[updated_a, updated_b, updated_c, updated_d])
+        .unwrap();
+    csr.set_values(&[updated_a, updated_d, updated_b, updated_c])
+        .unwrap();
+    csc.matvec_into(&rhs, &mut csc_output).unwrap();
+    csr.matvec_into(&rhs, &mut csr_output).unwrap();
+    assert_eq!(csc_output, csr_output);
+    assert_eq!(csc.set_values(&[updated_a]), Err(CscError::LengthMismatch));
+    assert_eq!(csr.set_values(&[updated_a]), Err(CscError::LengthMismatch));
+}
+
+#[test]
 fn block_csr_rejects_noncanonical_patterns() {
     let values = [Matrix::from_rows([[1.0_f64, 0.0], [0.0, 1.0]])];
     assert!(CsrBlocks::from_pattern(&values, &[2], &[0, 1, 1]).is_err());
@@ -102,6 +167,74 @@ fn block_sparse_storage_footprints_are_compile_time_constants() {
     assert_eq!(CSR_BYTES, core::mem::size_of::<CsrBlocks>());
     assert!(CSC_BYTES >= 3 * core::mem::size_of::<Matrix<2, 2, f64>>());
     assert!(CSR_BYTES >= 3 * core::mem::size_of::<Matrix<2, 2, f64>>());
+}
+
+#[test]
+fn symbolic_block_pattern_reuses_numeric_storage_for_cholesky_and_ldlt() {
+    type Matrix3 = StaticBlockCscMatrix<1, 1, 3, 3, 5, f64>;
+    type Pattern = StaticBlockCscCholeskyPattern<1, 1, 3, 3, 5>;
+
+    let first = Matrix3::from_pattern(
+        &[
+            Matrix::from_rows([[4.0]]),
+            Matrix::from_rows([[1.0]]),
+            Matrix::from_rows([[3.0]]),
+            Matrix::from_rows([[1.0]]),
+            Matrix::from_rows([[2.0]]),
+        ],
+        &[0, 1, 1, 2, 2],
+        &[0, 2, 4, 5],
+    )
+    .unwrap();
+    let second = Matrix3::from_pattern(
+        &[
+            Matrix::from_rows([[5.0]]),
+            Matrix::from_rows([[0.5]]),
+            Matrix::from_rows([[4.0]]),
+            Matrix::from_rows([[0.25]]),
+            Matrix::from_rows([[3.0]]),
+        ],
+        &[0, 1, 1, 2, 2],
+        &[0, 2, 4, 5],
+    )
+    .unwrap();
+    let pattern = Pattern::analyze(&first).unwrap();
+    let rhs = Matrix::<3, 2, f64>::from_columns([[1.0, -2.0, 3.0], [0.5, 4.0, -1.0]]);
+    let second_dense = matrix![5.0_f64, 0.5, 0.0; 0.5, 4.0, 0.25; 0.0, 0.25, 3.0];
+
+    let direct_cholesky = StaticBlockCscCholesky::<1, 1, 3, 3, 5, f64>::decompose(&second).unwrap();
+    let mut reused_cholesky = pattern.factor(&first).unwrap();
+    assert_eq!(reused_cholesky.pattern(), pattern);
+    reused_cholesky.recompute(&second).unwrap();
+    assert_relative_eq!(
+        reused_cholesky.try_solve::<3, 2>(&rhs).unwrap(),
+        direct_cholesky.try_solve::<3, 2>(&rhs).unwrap(),
+        epsilon = 1e-12,
+        max_relative = 1e-12
+    );
+    assert_relative_eq!(
+        second_dense * reused_cholesky.try_solve::<3, 2>(&rhs).unwrap(),
+        rhs,
+        epsilon = 1e-12,
+        max_relative = 1e-12
+    );
+
+    let direct_ldlt = StaticBlockCscLdlt::<1, 1, 3, 3, 5, f64>::decompose(&second).unwrap();
+    let mut reused_ldlt = pattern.factor_ldlt(&first).unwrap();
+    assert_eq!(reused_ldlt.pattern(), pattern);
+    reused_ldlt.recompute(&second).unwrap();
+    assert_relative_eq!(
+        reused_ldlt.try_solve::<3, 2>(&rhs).unwrap(),
+        direct_ldlt.try_solve::<3, 2>(&rhs).unwrap(),
+        epsilon = 1e-12,
+        max_relative = 1e-12
+    );
+    assert_relative_eq!(
+        second_dense * reused_ldlt.try_solve::<3, 2>(&rhs).unwrap(),
+        rhs,
+        epsilon = 1e-12,
+        max_relative = 1e-12
+    );
 }
 
 #[test]

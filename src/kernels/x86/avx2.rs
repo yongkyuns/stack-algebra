@@ -303,6 +303,11 @@ impl MatmulBackend<f32> for X86Avx2Matmul {
     }
 
     #[inline]
+    fn rank_update_sub(target: &mut [f32], source: &[f32], scale: f32) {
+        unsafe { rank_update_sub_f32(target, source, scale) }
+    }
+
+    #[inline]
     fn rank_update_two_sub(
         target: &mut [f32],
         source_first: &[f32],
@@ -350,6 +355,11 @@ impl MatmulBackend<f64> for X86Avx2Matmul {
         block_end: usize,
     ) {
         unsafe { rank_k_update_f64(matrix, block_start, block_end) }
+    }
+
+    #[inline]
+    fn rank_update_sub(target: &mut [f64], source: &[f64], scale: f64) {
+        unsafe { rank_update_sub_f64(target, source, scale) }
     }
 
     #[inline]

@@ -11,8 +11,7 @@ mod x86;
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 mod arm;
 
-#[doc(hidden)]
-pub trait MatmulBackend<T> {
+pub(crate) trait MatmulBackend<T> {
     /// Multiplies fixed-size matrices into caller-provided output storage.
     ///
     /// Implementations are selected through [`MatrixScalar::Matmul`], so the
@@ -91,8 +90,7 @@ pub trait MatmulBackend<T> {
     }
 }
 
-#[doc(hidden)]
-pub trait ReductionBackend<T> {
+pub(crate) trait ReductionBackend<T> {
     /// Computes a fixed-size vector dot product.
     fn dot<const M: usize>(lhs: &Vector<M, T>, rhs: &Vector<M, T>) -> T;
 
@@ -130,46 +128,156 @@ pub trait ReductionBackend<T> {
     );
 }
 
-#[doc(hidden)]
-pub use portable::{ScalarMatmul, ScalarReduction};
+pub(crate) use portable::ScalarReduction;
 
-/// Associates a scalar type with its compile-time matrix multiplication kernel.
+/// Scalar support for fixed-size matrix multiplication and factorizations.
 ///
-/// Implement this trait for custom scalar types to enable matrix products. The
-/// `ScalarMatmul` kernel provides the portable fallback; specialized kernels
-/// can be associated when the scalar type has a matching implementation.
+/// Implementing this trait enables matrix multiplication and the dense
+/// factorization APIs for a scalar type. The default methods use portable
+/// scalar loops. Built-in floating-point types override those methods with
+/// target-selected kernels when available.
 pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
-    /// Backend used by [`crate::Matrix::mul_into`] and matrix multiplication.
+    /// Multiplies matrices into caller-provided output storage.
     ///
-    /// The default scalar implementations use [`ScalarMatmul`]. Architecture
-    /// modules can provide a packet backend for a scalar type when the target
-    /// exposes a suitable SIMD instruction set.
-    type Matmul: MatmulBackend<Self>;
+    /// This is an implementation hook for scalar types. Normal callers use
+    /// [`crate::Matrix::mul_into`] or the `*` operator instead.
+    #[doc(hidden)]
+    #[inline]
+    fn matmul<const M: usize, const N: usize, const P: usize>(
+        lhs: &Matrix<M, N, Self>,
+        rhs: &Matrix<N, P, Self>,
+        output: &mut Matrix<M, P, Self>,
+    ) {
+        portable::matmul_scalar(lhs, rhs, output);
+    }
+
+    /// Accumulates a dot product starting from `initial`.
+    #[doc(hidden)]
+    #[inline]
+    fn dot_accumulate(lhs: &[Self], rhs: &[Self], initial: Self) -> Self {
+        let mut result = initial;
+        for (lhs_value, rhs_value) in lhs.iter().zip(rhs.iter()) {
+            result = result + *lhs_value * *rhs_value;
+        }
+        result
+    }
+
+    /// Applies the symmetric rank-k update used by LDLᵀ factorization.
+    #[doc(hidden)]
+    #[inline]
+    fn symmetric_rank_k_update<const D: usize>(
+        matrix: &mut Matrix<D, D, Self>,
+        block_start: usize,
+        block_end: usize,
+    ) where
+        Self: Sub<Output = Self>,
+    {
+        for row in block_end..D {
+            for column in block_end..=row {
+                let mut value = matrix[(row, column)];
+                for index in block_start..block_end {
+                    value = value
+                        - matrix[(row, index)] * matrix[(index, index)] * matrix[(column, index)];
+                }
+                matrix[(row, column)] = value;
+            }
+        }
+    }
+
+    /// Subtracts `source * scale` from `target` elementwise.
+    #[doc(hidden)]
+    #[inline]
+    fn rank_update_sub(target: &mut [Self], source: &[Self], scale: Self)
+    where
+        Self: Sub<Output = Self>,
+    {
+        for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
+            *target_value = *target_value - *source_value * scale;
+        }
+    }
+
+    /// Subtracts two scaled sources from `target` elementwise.
+    #[doc(hidden)]
+    #[inline]
+    fn rank_update_two_sub(
+        target: &mut [Self],
+        source_first: &[Self],
+        scale_first: Self,
+        source_second: &[Self],
+        scale_second: Self,
+    ) where
+        Self: Sub<Output = Self>,
+    {
+        for ((target_value, first_value), second_value) in target
+            .iter_mut()
+            .zip(source_first.iter())
+            .zip(source_second.iter())
+        {
+            *target_value =
+                *target_value - *first_value * scale_first - *second_value * scale_second;
+        }
+    }
+
+    /// Divides every value in `target` by `divisor`.
+    #[doc(hidden)]
+    #[inline]
+    fn scale_divide(target: &mut [Self], divisor: Self)
+    where
+        Self: Div<Output = Self>,
+    {
+        for value in target {
+            *value = *value / divisor;
+        }
+    }
 }
 
-/// Associates a scalar type with its compile-time reduction kernels.
+/// Scalar support for fixed-size dot products, norms, and matrix-vector products.
 pub trait ReductionScalar: MatrixScalar {
-    /// Backend used by fixed-size dot, norm, and matrix-vector reductions.
-    ///
-    /// The default implementation is [`ScalarReduction`]. As with matrix
-    /// multiplication, choosing a backend is a type-level operation with no
-    /// runtime backend lookup.
-    type Reduction: ReductionBackend<Self>;
+    /// Computes a fixed-size dot product.
+    #[doc(hidden)]
+    #[inline]
+    fn dot<const M: usize>(lhs: &Vector<M, Self>, rhs: &Vector<M, Self>) -> Self {
+        ScalarReduction::dot(lhs, rhs)
+    }
+
+    /// Computes the raw sum of squared entries.
+    #[doc(hidden)]
+    #[inline]
+    fn squared_norm<const M: usize, const N: usize>(matrix: &Matrix<M, N, Self>) -> Self {
+        ScalarReduction::squared_norm(matrix)
+    }
+
+    /// Computes a scale-stable Frobenius norm.
+    #[doc(hidden)]
+    #[inline]
+    fn norm<const M: usize, const N: usize>(matrix: &Matrix<M, N, Self>) -> Self
+    where
+        Self: crate::Real,
+    {
+        ScalarReduction::norm(matrix)
+    }
+
+    /// Multiplies a matrix by a vector into caller-provided output storage.
+    #[doc(hidden)]
+    #[inline]
+    fn matvec<const M: usize, const N: usize>(
+        matrix: &Matrix<M, N, Self>,
+        vector: &Vector<N, Self>,
+        output: &mut Vector<M, Self>,
+    ) {
+        ScalarReduction::matvec(matrix, vector, output);
+    }
 }
 
 macro_rules! impl_scalar_matrix_scalar {
     ($($scalar:ty),+ $(,)?) => {
-        $(impl MatrixScalar for $scalar {
-            type Matmul = ScalarMatmul;
-        })+
+        $(impl MatrixScalar for $scalar {})+
     };
 }
 
 macro_rules! impl_scalar_reduction_scalar {
     ($($scalar:ty),+ $(,)?) => {
-        $(impl ReductionScalar for $scalar {
-            type Reduction = ScalarReduction;
-        })+
+        $(impl ReductionScalar for $scalar {})+
     };
 }
 
@@ -196,7 +304,7 @@ pub(crate) fn matmul<const M: usize, const N: usize, const P: usize, T>(
 ) where
     T: MatrixScalar,
 {
-    T::Matmul::run(lhs, rhs, output);
+    T::matmul(lhs, rhs, output);
 }
 
 #[inline]
@@ -207,7 +315,7 @@ pub(crate) fn matvec<const M: usize, const N: usize, T>(
 ) where
     T: ReductionScalar,
 {
-    T::Reduction::matvec(matrix, vector, output);
+    T::matvec(matrix, vector, output);
 }
 
 #[cfg(test)]
@@ -215,8 +323,59 @@ pub(crate) use portable::matmul_scalar;
 
 #[cfg(test)]
 mod tests {
-    use super::{matmul_scalar, MatmulBackend};
-    use crate::{Matrix, MatrixScalar};
+    use super::matmul_scalar;
+    use crate::{Matrix, MatrixScalar, ReductionScalar, Vector, Zero};
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    struct CustomScalar(i32);
+
+    impl core::ops::Add for CustomScalar {
+        type Output = Self;
+
+        fn add(self, rhs: Self) -> Self::Output {
+            Self(self.0 + rhs.0)
+        }
+    }
+
+    impl core::ops::Mul for CustomScalar {
+        type Output = Self;
+
+        fn mul(self, rhs: Self) -> Self::Output {
+            Self(self.0 * rhs.0)
+        }
+    }
+
+    impl Zero for CustomScalar {
+        fn zero() -> Self {
+            Self(0)
+        }
+
+        fn is_zero(&self) -> bool {
+            self.0 == 0
+        }
+    }
+
+    impl MatrixScalar for CustomScalar {}
+    impl ReductionScalar for CustomScalar {}
+
+    #[test]
+    fn custom_scalars_use_portable_defaults_without_backend_types() {
+        let lhs = Matrix::<2, 2, CustomScalar>::from_rows([
+            [CustomScalar(1), CustomScalar(2)],
+            [CustomScalar(3), CustomScalar(4)],
+        ]);
+        let rhs = Matrix::<2, 1, CustomScalar>::from_rows([[CustomScalar(5)], [CustomScalar(6)]]);
+        assert_eq!(
+            lhs * rhs,
+            Matrix::from_rows([[CustomScalar(17)], [CustomScalar(39)]])
+        );
+
+        let vector = Vector::<2, CustomScalar>::from_rows([[CustomScalar(5)], [CustomScalar(6)]]);
+        assert_eq!(
+            lhs.matvec(&vector),
+            Vector::from_rows([[CustomScalar(17)], [CustomScalar(39)]])
+        );
+    }
 
     fn next_value(state: &mut u64) -> f64 {
         *state = state
@@ -312,13 +471,7 @@ mod tests {
         let mut output = [1.0_f64, -2.0, 3.5, 4.0, -5.0, 6.25, 7.0];
         let first = [0.5_f64, 1.0, -2.0, 3.0, 4.0, -1.5, 2.5];
         let second = [-1.0_f64, 2.0, 0.5, -2.5, 1.5, 3.0, -4.0];
-        <f64 as MatrixScalar>::Matmul::rank_update_two_sub(
-            &mut output,
-            &first,
-            1.25,
-            &second,
-            -0.75,
-        );
+        <f64 as MatrixScalar>::rank_update_two_sub(&mut output, &first, 1.25, &second, -0.75);
 
         let expected = [-0.375, -1.75, 6.375, -1.625, -8.875, 10.375, 0.875];
         for (actual, expected) in output.iter().zip(expected) {
@@ -331,13 +484,7 @@ mod tests {
         let mut output = [1.0_f32, -2.0, 3.5, 4.0, -5.0, 6.25, 7.0];
         let first = [0.5_f32, 1.0, -2.0, 3.0, 4.0, -1.5, 2.5];
         let second = [-1.0_f32, 2.0, 0.5, -2.5, 1.5, 3.0, -4.0];
-        <f32 as MatrixScalar>::Matmul::rank_update_two_sub(
-            &mut output,
-            &first,
-            1.25,
-            &second,
-            -0.75,
-        );
+        <f32 as MatrixScalar>::rank_update_two_sub(&mut output, &first, 1.25, &second, -0.75);
 
         let expected = [-0.375, -1.75, 6.375, -1.625, -8.875, 10.375, 0.875];
         for (actual, expected) in output.iter().zip(expected) {
