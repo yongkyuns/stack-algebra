@@ -81,6 +81,18 @@ pub(crate) trait MatmulBackend<T> {
         }
     }
 
+    fn rotate_columns(first: &mut [T], second: &mut [T], cosine: T, sine: T)
+    where
+        T: Copy + Add<Output = T> + Mul<Output = T> + Sub<Output = T>,
+    {
+        for (first_value, second_value) in first.iter_mut().zip(second.iter_mut()) {
+            let left = *first_value;
+            let right = *second_value;
+            *first_value = cosine * left - sine * right;
+            *second_value = sine * left + cosine * right;
+        }
+    }
+
     fn scale_divide(target: &mut [T], divisor: T)
     where
         T: Copy + Div<Output = T>,
@@ -233,6 +245,21 @@ pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
         {
             *target_value =
                 *target_value - *first_value * scale_first - *second_value * scale_second;
+        }
+    }
+
+    /// Rotates two columns in place using a two-by-two orthogonal transform.
+    #[doc(hidden)]
+    #[inline]
+    fn rotate_columns(first: &mut [Self], second: &mut [Self], cosine: Self, sine: Self)
+    where
+        Self: Add<Output = Self> + Sub<Output = Self>,
+    {
+        for (first_value, second_value) in first.iter_mut().zip(second.iter_mut()) {
+            let left = *first_value;
+            let right = *second_value;
+            *first_value = cosine * left - sine * right;
+            *second_value = sine * left + cosine * right;
         }
     }
 

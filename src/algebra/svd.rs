@@ -2,19 +2,23 @@ use crate::view::MatrixRead;
 use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 
 #[inline]
-fn column_norm<const M: usize, const N: usize, T: Real>(
+fn column_norm<const M: usize, const N: usize, T: Real + MatrixScalar>(
     matrix: &Matrix<M, N, T>,
     column: usize,
 ) -> T {
-    let mut sum = T::zero();
-    let mut max_abs = T::zero();
-    for row in 0..M {
-        let value = matrix[(row, column)];
-        let absolute = value.abs();
-        max_abs = max_abs.max(absolute);
-        sum = sum + value * value;
+    let values_start = column * M;
+    let values_end = values_start + M;
+    let values = &matrix.as_slice()[values_start..values_end];
+    let sum = T::dot_accumulate(values, values, T::zero());
+    if sum.is_finite() && sum != T::zero() {
+        return sum.sqrt();
     }
-    if sum.is_finite() && (sum != T::zero() || max_abs == T::zero()) {
+
+    let mut max_abs = T::zero();
+    for &value in values {
+        max_abs = max_abs.max(value.abs());
+    }
+    if sum.is_finite() && max_abs == T::zero() {
         return sum.sqrt();
     }
     if max_abs.is_infinite() {
@@ -24,8 +28,8 @@ fn column_norm<const M: usize, const N: usize, T: Real>(
         return sum.sqrt();
     }
     let mut scaled_sum = T::zero();
-    for row in 0..M {
-        let ratio = matrix[(row, column)].abs() / max_abs;
+    for &value in values {
+        let ratio = value.abs() / max_abs;
         scaled_sum = scaled_sum + ratio * ratio;
     }
     max_abs * scaled_sum.sqrt()
@@ -163,16 +167,46 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
                     if scale == T::zero() {
                         continue;
                     }
-                    let mut app = T::zero();
-                    let mut aqq = T::zero();
-                    let mut apq = T::zero();
-                    for row in 0..M {
-                        let left = u[(row, p)] / scale;
-                        let right = u[(row, q)] / scale;
-                        app = app + left * left;
-                        aqq = aqq + right * right;
-                        apq = apq + left * right;
-                    }
+                    let left = &u.as_slice()[p * M..(p + 1) * M];
+                    let right = &u.as_slice()[q * M..(q + 1) * M];
+                    let scale_squared = scale * scale;
+                    let (app, aqq, apq) = if scale_squared.is_finite() && scale_squared != T::zero()
+                    {
+                        let raw_app = T::dot_accumulate(left, left, T::zero());
+                        let raw_aqq = T::dot_accumulate(right, right, T::zero());
+                        let raw_apq = T::dot_accumulate(left, right, T::zero());
+                        if raw_app.is_finite() && raw_aqq.is_finite() && raw_apq.is_finite() {
+                            (
+                                raw_app / scale_squared,
+                                raw_aqq / scale_squared,
+                                raw_apq / scale_squared,
+                            )
+                        } else {
+                            let mut app = T::zero();
+                            let mut aqq = T::zero();
+                            let mut apq = T::zero();
+                            for (&left, &right) in left.iter().zip(right.iter()) {
+                                let left = left / scale;
+                                let right = right / scale;
+                                app = app + left * left;
+                                aqq = aqq + right * right;
+                                apq = apq + left * right;
+                            }
+                            (app, aqq, apq)
+                        }
+                    } else {
+                        let mut app = T::zero();
+                        let mut aqq = T::zero();
+                        let mut apq = T::zero();
+                        for (&left, &right) in left.iter().zip(right.iter()) {
+                            let left = left / scale;
+                            let right = right / scale;
+                            app = app + left * left;
+                            aqq = aqq + right * right;
+                            apq = apq + left * right;
+                        }
+                        (app, aqq, apq)
+                    };
                     if !app.is_finite() || !aqq.is_finite() || !apq.is_finite() {
                         return Err(DecompositionError::NonFinite);
                     }
@@ -198,24 +232,14 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
                     let cosine = T::one() / (T::one() + tangent * tangent).sqrt();
                     let sine = tangent * cosine;
 
-                    for row in 0..M {
-                        let left = u[(row, p)];
-                        let right = u[(row, q)];
-                        u[(row, p)] = cosine * left - sine * right;
-                        u[(row, q)] = sine * left + cosine * right;
-                        if !u[(row, p)].is_finite() || !u[(row, q)].is_finite() {
-                            return Err(DecompositionError::NonFinite);
-                        }
-                    }
-                    for row in 0..N {
-                        let left = v[(row, p)];
-                        let right = v[(row, q)];
-                        v[(row, p)] = cosine * left - sine * right;
-                        v[(row, q)] = sine * left + cosine * right;
-                        if !v[(row, p)].is_finite() || !v[(row, q)].is_finite() {
-                            return Err(DecompositionError::NonFinite);
-                        }
-                    }
+                    let (u_prefix, u_suffix) = u.as_mut_slice().split_at_mut(q * M);
+                    let u_first = &mut u_prefix[p * M..(p + 1) * M];
+                    let u_second = &mut u_suffix[..M];
+                    T::rotate_columns(u_first, u_second, cosine, sine);
+                    let (v_prefix, v_suffix) = v.as_mut_slice().split_at_mut(q * N);
+                    let v_first = &mut v_prefix[p * N..(p + 1) * N];
+                    let v_second = &mut v_suffix[..N];
+                    T::rotate_columns(v_first, v_second, cosine, sine);
                     changed = true;
                 }
             }

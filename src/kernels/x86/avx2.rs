@@ -468,6 +468,11 @@ impl MatmulBackend<f32> for X86Avx2Matmul {
     }
 
     #[inline]
+    fn rotate_columns(first: &mut [f32], second: &mut [f32], cosine: f32, sine: f32) {
+        unsafe { rotate_columns_f32(first, second, cosine, sine) }
+    }
+
+    #[inline]
     fn scale_divide(target: &mut [f32], divisor: f32) {
         unsafe { scale_divide_f32(target, divisor) }
     }
@@ -529,6 +534,11 @@ impl MatmulBackend<f64> for X86Avx2Matmul {
                 scale_second,
             )
         }
+    }
+
+    #[inline]
+    fn rotate_columns(first: &mut [f64], second: &mut [f64], cosine: f64, sine: f64) {
+        unsafe { rotate_columns_f64(first, second, cosine, sine) }
     }
 
     #[inline]
@@ -869,6 +879,86 @@ pub(super) unsafe fn rank_update_two_sub_f64(
         *target.get_unchecked_mut(index) = *target.get_unchecked(index)
             - *source_first.get_unchecked(index) * scale_first
             - *source_second.get_unchecked(index) * scale_second;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn rotate_columns_f32(
+    first: &mut [f32],
+    second: &mut [f32],
+    cosine: f32,
+    sine: f32,
+) {
+    use core::arch::x86_64::{
+        _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps,
+        _mm256_sub_ps,
+    };
+    let cosine_value = cosine;
+    let sine_value = sine;
+    let cosine = _mm256_set1_ps(cosine);
+    let sine = _mm256_set1_ps(sine);
+    let mut index = 0;
+    while index + 8 <= first.len() && index + 8 <= second.len() {
+        let left = _mm256_loadu_ps(first.as_ptr().add(index));
+        let right = _mm256_loadu_ps(second.as_ptr().add(index));
+        _mm256_storeu_ps(
+            first.as_mut_ptr().add(index),
+            _mm256_sub_ps(_mm256_mul_ps(cosine, left), _mm256_mul_ps(sine, right)),
+        );
+        _mm256_storeu_ps(
+            second.as_mut_ptr().add(index),
+            _mm256_add_ps(_mm256_mul_ps(sine, left), _mm256_mul_ps(cosine, right)),
+        );
+        index += 8;
+    }
+    while index < first.len() && index < second.len() {
+        let left = first[index];
+        let right = second[index];
+        first[index] = cosine_value * left - sine_value * right;
+        second[index] = sine_value * left + cosine_value * right;
+        index += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn rotate_columns_f64(
+    first: &mut [f64],
+    second: &mut [f64],
+    cosine: f64,
+    sine: f64,
+) {
+    use core::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
+        _mm256_sub_pd,
+    };
+    let cosine_packet = _mm256_set1_pd(cosine);
+    let sine_packet = _mm256_set1_pd(sine);
+    let mut index = 0;
+    while index + 4 <= first.len() && index + 4 <= second.len() {
+        let left = _mm256_loadu_pd(first.as_ptr().add(index));
+        let right = _mm256_loadu_pd(second.as_ptr().add(index));
+        _mm256_storeu_pd(
+            first.as_mut_ptr().add(index),
+            _mm256_sub_pd(
+                _mm256_mul_pd(cosine_packet, left),
+                _mm256_mul_pd(sine_packet, right),
+            ),
+        );
+        _mm256_storeu_pd(
+            second.as_mut_ptr().add(index),
+            _mm256_add_pd(
+                _mm256_mul_pd(sine_packet, left),
+                _mm256_mul_pd(cosine_packet, right),
+            ),
+        );
+        index += 4;
+    }
+    while index < first.len() && index < second.len() {
+        let left = first[index];
+        let right = second[index];
+        first[index] = cosine * left - sine * right;
+        second[index] = sine * left + cosine * right;
         index += 1;
     }
 }

@@ -33,6 +33,16 @@ stack-algebra divided by Eigen.
 | Column-pivoted QR factor | `f32` | 11,630 | 13,263 | — | 0.88× |
 | Column-pivoted QR factor | `f64` | 11,851 | 14,051 | — | 0.84× |
 
+Focused native SVD factorization measurements use the same tall shapes as the
+Eigen reference:
+
+| Shape | Scalar | Stack-algebra | Eigen | Stack/Eigen |
+| --- | --- | ---: | ---: | ---: |
+| 6×3 | `f32` | 990 | 986 | 1.00× |
+| 6×3 | `f64` | 1,265 | 1,214 | 1.04× |
+| 15×6 | `f32` | 8,436 | 4,189 | 2.01× |
+| 15×6 | `f64` | 11,950 | 6,843 | 1.75× |
+
 The fast profile is for triage. Use longer measurement windows before making
 release decisions, especially for sub-microsecond operations. The LU values
 above are from focused sequential measurements after the follow-up kernel
@@ -65,7 +75,7 @@ measurements.
 
 1. Keep f64 matvec under regression monitoring; the focused native gap is now
    approximately 1.1× Eigen and does not justify a bespoke kernel.
-2. Align SVD shape coverage across libraries before drawing performance
-   conclusions from those rows.
+2. Improve the larger tall SVD path; its one-sided Jacobi implementation
+   remains materially slower than Eigen at 15×6.
 3. Validate the native kernels on non-x86 targets before adding more x86-only
    specialization.

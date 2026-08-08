@@ -68,6 +68,11 @@ macro_rules! impl_kernel_scalar {
             }
 
             #[inline]
+            fn rotate_columns(first: &mut [Self], second: &mut [Self], cosine: Self, sine: Self) {
+                <$matmul as MatmulBackend<$scalar>>::rotate_columns(first, second, cosine, sine);
+            }
+
+            #[inline]
             fn scale_divide(target: &mut [Self], divisor: Self) {
                 <$matmul as MatmulBackend<$scalar>>::scale_divide(target, divisor);
             }

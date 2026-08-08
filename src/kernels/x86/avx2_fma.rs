@@ -1190,6 +1190,11 @@ impl MatmulBackend<f32> for X86Avx2FmaMatmul {
     }
 
     #[inline]
+    fn rotate_columns(first: &mut [f32], second: &mut [f32], cosine: f32, sine: f32) {
+        unsafe { super::avx2::rotate_columns_f32(first, second, cosine, sine) }
+    }
+
+    #[inline]
     fn scale_divide(target: &mut [f32], divisor: f32) {
         unsafe { super::avx2::scale_divide_f32(target, divisor) }
     }
@@ -1250,6 +1255,11 @@ impl MatmulBackend<f64> for X86Avx2FmaMatmul {
                 scale_second,
             )
         }
+    }
+
+    #[inline]
+    fn rotate_columns(first: &mut [f64], second: &mut [f64], cosine: f64, sine: f64) {
+        unsafe { super::avx2::rotate_columns_f64(first, second, cosine, sine) }
     }
 
     #[inline]
