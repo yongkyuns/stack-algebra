@@ -455,13 +455,9 @@ where
         }
         let start = self.pattern.column_starts()[column];
         let end = self.column_end(column).unwrap_or(self.nnz());
-        for index in start..end {
-            match self.pattern.row_indices[index].cmp(&row) {
-                core::cmp::Ordering::Equal => return Ok(Some(index)),
-                core::cmp::Ordering::Greater => break,
-                core::cmp::Ordering::Less => {}
-            }
-        }
-        Ok(None)
+        Ok(self.pattern.row_indices[start..end]
+            .binary_search(&row)
+            .ok()
+            .map(|offset| start + offset))
     }
 }
