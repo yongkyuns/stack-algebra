@@ -11,6 +11,7 @@ mod x86;
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 mod arm;
 
+#[allow(dead_code)]
 pub(crate) trait MatmulBackend<T> {
     /// Multiplies fixed-size matrices into caller-provided output storage.
     ///
