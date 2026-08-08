@@ -211,6 +211,8 @@ fn sparse_ldlt_ordering_preserves_solution() {
     .unwrap();
     let ordering = StaticCscOrdering::minimum_degree(&matrix);
     let pattern = StaticCscLdltPattern::<4, 10>::analyze_with_ordering(&matrix, ordering).unwrap();
+    let one_shot = StaticCscLdlt::<4, 10, f64>::decompose_with_minimum_degree(&matrix).unwrap();
+    assert_eq!(one_shot.pattern().ordering(), ordering);
     let ordered = pattern.prepare_ordered(&matrix).unwrap();
     let factor = pattern.factor_ldlt_ordered(&ordered).unwrap();
     let mut reusable_factor = pattern.factor_ldlt_ordered(&ordered).unwrap();

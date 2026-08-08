@@ -233,6 +233,22 @@ where
         StaticBlockCscCholeskyPattern::analyze(matrix)?.factor(matrix)
     }
 
+    /// Performs minimum-degree symbolic analysis and native block
+    /// factorization.
+    #[inline]
+    pub fn decompose_with_minimum_degree<const MAX_A_BLOCK_NNZ: usize>(
+        matrix: &StaticBlockCscMatrix<
+            BLOCK_ROWS,
+            BLOCK_COLS,
+            BLOCK_GRID_ROWS,
+            BLOCK_GRID_COLS,
+            MAX_A_BLOCK_NNZ,
+            T,
+        >,
+    ) -> Result<Self, SparseCholeskyError> {
+        StaticBlockCscCholeskyPattern::analyze_with_minimum_degree(matrix)?.factor(matrix)
+    }
+
     /// Performs native block Cholesky factorization with a fixed block ordering.
     #[inline]
     pub fn decompose_with_ordering<const MAX_A_BLOCK_NNZ: usize>(

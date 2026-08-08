@@ -788,6 +788,14 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
         StaticCscCholeskyPattern::analyze(matrix)?.factor(matrix)
     }
 
+    /// Performs minimum-degree symbolic analysis and numeric factorization.
+    #[inline]
+    pub fn decompose_with_minimum_degree<const MAX_A_NNZ: usize>(
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<Self, SparseCholeskyError> {
+        StaticCscCholeskyPattern::analyze_with_minimum_degree(matrix)?.factor(matrix)
+    }
+
     /// Returns the reusable symbolic factor pattern.
     #[inline]
     pub fn pattern(&self) -> StaticCscCholeskyPattern<N, MAX_L_NNZ> {

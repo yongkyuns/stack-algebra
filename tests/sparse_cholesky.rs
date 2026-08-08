@@ -164,6 +164,8 @@ fn minimum_degree_ordering_reduces_star_fill_and_solves() {
     assert!(symbolic.lower().nnz() < 10);
 
     let factor = symbolic.factor(&matrix).unwrap();
+    let one_shot = StaticCscCholesky::<4, 10, f64>::decompose_with_minimum_degree(&matrix).unwrap();
+    assert_eq!(one_shot.pattern().ordering(), ordering);
     let ordered = symbolic.prepare_ordered(&matrix).unwrap();
     let permutation = ordering.permutation_for_pattern(matrix.pattern()).unwrap();
     let ordered_reuse = symbolic

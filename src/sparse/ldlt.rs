@@ -124,6 +124,14 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscLdlt<N, MAX_L_NNZ
         StaticCscCholeskyPattern::analyze(matrix)?.factor_ldlt(matrix)
     }
 
+    /// Performs minimum-degree symbolic analysis and numeric LDLᵀ factorization.
+    #[inline]
+    pub fn decompose_with_minimum_degree<const MAX_A_NNZ: usize>(
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<Self, SparseCholeskyError> {
+        StaticCscCholeskyPattern::analyze_with_minimum_degree(matrix)?.factor_ldlt(matrix)
+    }
+
     /// Performs analysis-time diagonal pivoting followed by sparse LDLᵀ.
     ///
     /// This supports 1x1 symmetric diagonal pivots. Matrices requiring a
