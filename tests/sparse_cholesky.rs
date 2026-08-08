@@ -156,6 +156,9 @@ fn minimum_degree_ordering_reduces_star_fill_and_solves() {
     )
     .unwrap();
     let ordering = StaticCscOrdering::minimum_degree(&matrix);
+    let convenience =
+        StaticCscCholeskyPattern::<4, 10>::analyze_with_minimum_degree(&matrix).unwrap();
+    assert_eq!(convenience.ordering(), ordering);
     let symbolic =
         StaticCscCholeskyPattern::<4, 10>::analyze_with_ordering(&matrix, ordering).unwrap();
     assert!(symbolic.lower().nnz() < 10);

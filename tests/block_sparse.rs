@@ -369,9 +369,11 @@ fn native_block_cholesky_ordering_preserves_solution() {
     let matrix = Star::from_pattern(&values, &[0, 1, 2, 3, 1, 2, 3], &[0, 4, 5, 6, 7]).unwrap();
     let scalar = matrix.to_scalar_csc::<4, 4, 10>().unwrap();
     let ordering = StaticCscOrdering::minimum_degree(&scalar);
-    let native =
-        StaticBlockCscCholesky::<1, 1, 4, 4, 10, f64>::decompose_with_ordering(&matrix, ordering)
+    let symbolic =
+        StaticBlockCscCholeskyPattern::<1, 1, 4, 4, 10>::analyze_with_minimum_degree(&matrix)
             .unwrap();
+    assert_eq!(symbolic.ordering(), ordering);
+    let native = symbolic.factor(&matrix).unwrap();
     let scalar_factor = StaticCscCholesky::<4, 10, f64>::decompose(&scalar).unwrap();
     let rhs = Matrix::<4, 1, f64>::from_columns([[1.0, 2.0, 3.0, 4.0]]);
     assert_relative_eq!(

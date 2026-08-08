@@ -208,6 +208,15 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         Ok(Self::from_lower(lower))
     }
 
+    /// Analyzes the matrix using the deterministic fixed-workspace
+    /// minimum-degree ordering.
+    #[inline]
+    pub fn analyze_with_minimum_degree<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<Self, SparseCholeskyError> {
+        Self::analyze_with_ordering(matrix, StaticCscOrdering::minimum_degree(matrix))
+    }
+
     /// Analyzes the matrix after applying a symmetric fixed-size ordering.
     #[inline]
     pub fn analyze_with_ordering<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(

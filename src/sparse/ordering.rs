@@ -152,12 +152,21 @@ impl<const N: usize> StaticCscOrdering<N> {
     pub fn minimum_degree<const MAX_NNZ: usize, T: Copy + Zero>(
         matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
     ) -> Self {
+        Self::minimum_degree_from_pattern(matrix.pattern())
+    }
+
+    /// Computes minimum degree directly from a validated symmetric CSC pattern.
+    #[inline]
+    #[allow(clippy::needless_range_loop)]
+    pub fn minimum_degree_from_pattern<const MAX_NNZ: usize>(
+        pattern: &StaticCscPattern<N, N, MAX_NNZ>,
+    ) -> Self {
         let mut adjacency = [[false; N]; N];
         for column in 0..N {
-            let start = matrix.column_starts()[column];
-            let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+            let start = pattern.column_starts()[column];
+            let end = pattern.column_end(column).unwrap_or(pattern.nnz());
             for index in start..end {
-                let row = matrix.row_indices()[index];
+                let row = pattern.row_indices()[index];
                 if row != column {
                     adjacency[row][column] = true;
                     adjacency[column][row] = true;
@@ -165,6 +174,12 @@ impl<const N: usize> StaticCscOrdering<N> {
             }
         }
 
+        Self::minimum_degree_from_adjacency(adjacency)
+    }
+
+    #[inline]
+    #[allow(clippy::needless_range_loop)]
+    pub(crate) fn minimum_degree_from_adjacency(mut adjacency: [[bool; N]; N]) -> Self {
         let mut eliminated = [false; N];
         let mut permutation = [0; N];
         for slot in permutation.iter_mut() {

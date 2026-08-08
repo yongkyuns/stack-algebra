@@ -122,6 +122,41 @@ impl<
         })
     }
 
+    /// Analyzes the matrix using the deterministic fixed-workspace
+    /// minimum-degree ordering.
+    #[inline]
+    #[allow(clippy::needless_range_loop)]
+    pub fn analyze_with_minimum_degree<const MAX_A_BLOCK_NNZ: usize, T: Copy + Zero>(
+        matrix: &StaticBlockCscMatrix<
+            BLOCK_ROWS,
+            BLOCK_COLS,
+            BLOCK_GRID_ROWS,
+            BLOCK_GRID_COLS,
+            MAX_A_BLOCK_NNZ,
+            T,
+        >,
+    ) -> Result<Self, SparseCholeskyError> {
+        if BLOCK_ROWS != BLOCK_COLS || BLOCK_GRID_ROWS != BLOCK_GRID_COLS {
+            return Err(SparseCholeskyError::Csc(CscError::LengthMismatch));
+        }
+        let mut adjacency = [[false; BLOCK_GRID_ROWS]; BLOCK_GRID_ROWS];
+        for column in 0..BLOCK_GRID_COLS {
+            let start = matrix.block_column_starts()[column];
+            let end = matrix.block_column_end(column).unwrap_or(matrix.nnz());
+            for index in start..end {
+                let row = matrix.block_row_indices()[index];
+                if row != column {
+                    adjacency[row][column] = true;
+                    adjacency[column][row] = true;
+                }
+            }
+        }
+        Self::analyze_with_ordering(
+            matrix,
+            StaticCscOrdering::minimum_degree_from_adjacency(adjacency),
+        )
+    }
+
     /// Analyzes block structure after applying a symmetric block ordering.
     #[inline]
     pub fn analyze_with_ordering<const MAX_A_BLOCK_NNZ: usize, T: Copy + Zero>(

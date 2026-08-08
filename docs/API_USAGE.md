@@ -286,6 +286,10 @@ factor.recompute(&a).expect("same sparsity pattern");
 Use `StaticCscCholeskyPattern::analyze` when symbolic analysis is shared by
 multiple factors. Use `prepare_ordered` plus `recompute_ordered` when the same
 permutation and coordinate transform are reused.
+For fill-heavy patterns, use
+`StaticCscCholeskyPattern::analyze_with_minimum_degree` to select the
+deterministic fixed-workspace ordering during analysis; the block CSC pattern
+provides the same method.
 
 `StaticCscLdltPattern` is the matching symbolic alias when the numeric phase
 uses sparse LDLT rather than Cholesky.

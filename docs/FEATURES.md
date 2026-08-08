@@ -111,6 +111,8 @@ adjoint eigendecomposition additionally supports caller-owned
   structure.
 - `StaticCscMatrix<ROWS, COLS, MAX_NNZ, T>`: fixed-capacity numeric CSC values.
 - `StaticCscOrdering<N>`: identity or deterministic minimum-degree ordering.
+- `StaticCscCholeskyPattern::analyze_with_minimum_degree` and the block CSC
+  counterpart select that ordering directly during symbolic analysis.
 - `StaticCscCholeskyPattern` + `StaticCscCholesky`: reusable sparse LLT with
   bounded symbolic fill.
 - `StaticCscLdlt`: sparse LDLT with no-pivot and analysis-time 1x1 diagonal
