@@ -99,7 +99,7 @@ pub use ops::{matmul_view_into, matvec_view, matvec_view_into};
 pub use sparse::{
     CscError, SparseCholeskyError, StaticCscCholesky, StaticCscCholeskyPattern, StaticCscLdlt,
     StaticCscLdltFactor, StaticCscLdltPattern, StaticCscMatrix, StaticCscOrdering,
-    StaticCscPattern,
+    StaticCscPattern, StaticCscPermutation,
 };
 pub use view::{
     Block, BlockMut, Column, Map, MapMut, MatrixRead, MatrixWrite, Row, StrideAxis, StridedMap,

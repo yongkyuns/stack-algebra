@@ -1,7 +1,93 @@
 use crate::Zero;
 
 use super::errors::CscError;
-use super::storage::StaticCscMatrix;
+use super::storage::{StaticCscMatrix, StaticCscPattern};
+
+/// A reusable sparse-coordinate permutation for a validated CSC pattern.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StaticCscPermutation<const N: usize, const MAX_NNZ: usize> {
+    pattern: StaticCscPattern<N, N, MAX_NNZ>,
+    source_indices: [usize; MAX_NNZ],
+    nnz: usize,
+}
+
+impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
+    /// Builds a reusable map from an original lower CSC pattern.
+    #[inline]
+    pub fn from_ordering(
+        matrix_pattern: &StaticCscPattern<N, N, MAX_NNZ>,
+        ordering: StaticCscOrdering<N>,
+    ) -> Result<Self, CscError> {
+        let mut entries = [(0usize, 0usize, 0usize); MAX_NNZ];
+        let mut entry_count = 0;
+        for column in 0..N {
+            let start = matrix_pattern.column_starts()[column];
+            let end = matrix_pattern
+                .column_end(column)
+                .unwrap_or(matrix_pattern.nnz());
+            for source_index in start..end {
+                let row = matrix_pattern.row_indices()[source_index];
+                if row < column {
+                    continue;
+                }
+                let ordered_row = ordering.inverse()[row];
+                let ordered_column = ordering.inverse()[column];
+                let (lower_row, lower_column) = if ordered_row >= ordered_column {
+                    (ordered_row, ordered_column)
+                } else {
+                    (ordered_column, ordered_row)
+                };
+                entries[entry_count] = (lower_column, lower_row, source_index);
+                entry_count += 1;
+            }
+        }
+        entries[..entry_count].sort_unstable_by_key(|&(column, row, _)| (column, row));
+
+        let mut row_indices = [0usize; MAX_NNZ];
+        let mut column_starts = [0usize; N];
+        let mut source_indices = [0usize; MAX_NNZ];
+        for (target_index, &(column, row, source_index)) in
+            entries[..entry_count].iter().enumerate()
+        {
+            row_indices[target_index] = row;
+            source_indices[target_index] = source_index;
+            if column + 1 < N {
+                column_starts[column + 1] += 1;
+            }
+        }
+        for column in 0..N {
+            if column + 1 < N {
+                column_starts[column + 1] += column_starts[column];
+            }
+        }
+        let pattern =
+            StaticCscPattern::from_parts(&row_indices[..entry_count], &column_starts, entry_count)?;
+        Ok(Self {
+            pattern,
+            source_indices,
+            nnz: entry_count,
+        })
+    }
+
+    /// Returns the ordered pattern.
+    #[inline]
+    pub const fn pattern(&self) -> StaticCscPattern<N, N, MAX_NNZ> {
+        self.pattern
+    }
+
+    /// Applies the precomputed coordinate map to a matrix's numeric values.
+    #[inline]
+    pub fn apply<T: Copy + Zero>(
+        &self,
+        matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
+    ) -> StaticCscMatrix<N, N, MAX_NNZ, T> {
+        let mut output = StaticCscMatrix::zero_with_pattern(self.pattern);
+        for target_index in 0..self.nnz {
+            output.values_mut()[target_index] = matrix.values()[self.source_indices[target_index]];
+        }
+        output
+    }
+}
 
 /// A fixed-capacity symmetric permutation for sparse factorization.
 ///
@@ -137,7 +223,18 @@ impl<const N: usize> StaticCscOrdering<N> {
         &self,
         matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
     ) -> Result<StaticCscMatrix<N, N, MAX_NNZ, T>, CscError> {
-        permute_matrix(matrix, *self)
+        Ok(self
+            .permutation_for_pattern(matrix.pattern())?
+            .apply(matrix))
+    }
+
+    /// Precomputes a reusable sparse-coordinate permutation for a CSC pattern.
+    #[inline]
+    pub fn permutation_for_pattern<const MAX_NNZ: usize>(
+        &self,
+        pattern: &StaticCscPattern<N, N, MAX_NNZ>,
+    ) -> Result<StaticCscPermutation<N, MAX_NNZ>, CscError> {
+        StaticCscPermutation::from_ordering(pattern, *self)
     }
 
     /// Returns whether this ordering leaves the scalar coordinates unchanged.
@@ -145,53 +242,4 @@ impl<const N: usize> StaticCscOrdering<N> {
     pub fn is_identity(&self) -> bool {
         self.permutation == Self::identity().permutation
     }
-}
-
-fn permute_matrix<const N: usize, const MAX_NNZ: usize, T: Copy + Zero>(
-    matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
-    ordering: StaticCscOrdering<N>,
-) -> Result<StaticCscMatrix<N, N, MAX_NNZ, T>, CscError> {
-    // Keep the permutation workspace proportional to the sparse structure.
-    // A dense `N x N` temporary makes ordering unusable for large sparse
-    // systems such as bundle adjustment.
-    let mut entries = [(0usize, 0usize, T::zero()); MAX_NNZ];
-    let mut entry_count = 0;
-    for column in 0..N {
-        let start = matrix.column_starts()[column];
-        let end = matrix.column_end(column).unwrap_or(matrix.nnz());
-        for index in start..end {
-            let row = matrix.row_indices()[index];
-            if row < column {
-                continue;
-            }
-            let ordered_row = ordering.inverse()[row];
-            let ordered_column = ordering.inverse()[column];
-            let (lower_row, lower_column) = if ordered_row >= ordered_column {
-                (ordered_row, ordered_column)
-            } else {
-                (ordered_column, ordered_row)
-            };
-            if entry_count == MAX_NNZ {
-                return Err(CscError::CapacityExceeded);
-            }
-            entries[entry_count] = (lower_row, lower_column, matrix.values()[index]);
-            entry_count += 1;
-        }
-    }
-
-    entries[..entry_count]
-        .sort_unstable_by(|left, right| left.1.cmp(&right.1).then(left.0.cmp(&right.0)));
-
-    let mut output = StaticCscMatrix::new();
-    let mut position = 0;
-    for column in 0..N {
-        output.pattern.column_starts[column] = position;
-        while position < entry_count && entries[position].1 == column {
-            output.pattern.row_indices[position] = entries[position].0;
-            output.values[position] = entries[position].2;
-            position += 1;
-        }
-    }
-    output.pattern.nnz = position;
-    Ok(output)
 }

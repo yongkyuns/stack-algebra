@@ -86,6 +86,46 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
         Ok(pattern)
     }
 
+    pub(crate) fn from_parts(
+        row_indices: &[usize],
+        column_starts: &[usize; COLS],
+        nnz: usize,
+    ) -> Result<Self, CscError> {
+        if nnz != row_indices.len() || nnz > MAX_NNZ {
+            return Err(CscError::LengthMismatch);
+        }
+        if COLS == 0 || column_starts[0] != 0 {
+            return Err(CscError::InvalidColumnPointers);
+        }
+        let mut previous = 0;
+        for &pointer in column_starts {
+            if pointer < previous || pointer > nnz {
+                return Err(CscError::InvalidColumnPointers);
+            }
+            previous = pointer;
+        }
+        for column in 0..COLS {
+            let start = column_starts[column];
+            let end = if column + 1 < COLS {
+                column_starts[column + 1]
+            } else {
+                nnz
+            };
+            let mut previous_row = None;
+            for &row in &row_indices[start..end] {
+                if row >= ROWS || previous_row.is_some_and(|previous| row <= previous) {
+                    return Err(CscError::InvalidRowIndices);
+                }
+                previous_row = Some(row);
+            }
+        }
+        let mut pattern = Self::new();
+        pattern.row_indices[..nnz].copy_from_slice(row_indices);
+        pattern.column_starts = *column_starts;
+        pattern.nnz = nnz;
+        Ok(pattern)
+    }
+
     /// Returns the number of stored entries.
     #[inline]
     pub const fn nnz(&self) -> usize {

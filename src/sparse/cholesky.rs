@@ -88,37 +88,110 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
     ) -> Result<Self, SparseCholeskyError> {
         validate_symmetric_structure(matrix)?;
-        let mut structure = StaticCscMatrix::<N, N, MAX_L_NNZ, u8>::new();
+        // Build the upper-column adjacency implied by the stored lower
+        // triangle.  For a lower entry (row, column), the corresponding
+        // upper entry is visited from column `row` with predecessor `column`.
+        let mut row_counts = [0usize; N];
         for column in 0..N {
-            let mut reachable = [false; N];
-            for (row, reachable_row) in reachable.iter_mut().enumerate().skip(column) {
-                *reachable_row = matrix.get(row, column).is_some();
-            }
-            reachable[column] = true;
-
-            // A previous column contributes fill to this column when its
-            // factor column contains the current row.
-            for previous in 0..column {
-                if structure.get(column, previous).is_some() {
-                    let start = structure.column_starts()[previous];
-                    let end = structure.column_end(previous).unwrap_or(structure.nnz());
-                    for index in start..end {
-                        let row = structure.row_indices()[index];
-                        if row >= column {
-                            reachable[row] = true;
-                        }
-                    }
+            let start = matrix.column_starts()[column];
+            let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+            for index in start..end {
+                let row = matrix.row_indices()[index];
+                if row > column {
+                    row_counts[row] += 1;
                 }
             }
-
-            for (row, &is_reachable) in reachable.iter().enumerate().skip(column) {
-                if is_reachable {
-                    structure.insert(row, column, 1)?;
+        }
+        let mut row_starts = [0usize; N];
+        for row in 1..N {
+            row_starts[row] = row_starts[row - 1] + row_counts[row - 1];
+        }
+        let mut row_cursor = row_starts;
+        let mut upper_columns = [0usize; MAX_A_NNZ];
+        for column in 0..N {
+            let start = matrix.column_starts()[column];
+            let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+            for index in start..end {
+                let row = matrix.row_indices()[index];
+                if row > column {
+                    upper_columns[row_cursor[row]] = column;
+                    row_cursor[row] += 1;
                 }
             }
         }
 
-        Ok(Self::from_lower(*structure.pattern()))
+        // Compute the elimination tree and the exact number of off-diagonal
+        // entries in each factor column.  This is the same reachability
+        // algorithm used by the C++ sparse solver and avoids an O(N²) dense
+        // reachability workspace for large bundle-adjustment systems.
+        let mut visited = [usize::MAX; N];
+        let mut parent = [usize::MAX; N];
+        let mut column_counts = [1usize; N];
+        for column in 0..N {
+            visited[column] = column;
+            let start = row_starts[column];
+            let end = if column + 1 < N {
+                row_starts[column + 1]
+            } else {
+                row_starts[column] + row_counts[column]
+            };
+            for &upper_column in &upper_columns[start..end] {
+                let mut node = upper_column;
+                while visited[node] != column {
+                    if parent[node] == usize::MAX {
+                        parent[node] = column;
+                    }
+                    column_counts[node] += 1;
+                    visited[node] = column;
+                    node = parent[node];
+                }
+            }
+        }
+
+        let mut column_starts = [0usize; N];
+        for column in 1..N {
+            column_starts[column] = column_starts[column - 1] + column_counts[column - 1];
+        }
+        let total_nnz = if N == 0 {
+            0
+        } else {
+            column_starts[N - 1] + column_counts[N - 1]
+        };
+        if total_nnz > MAX_L_NNZ {
+            return Err(SparseCholeskyError::CapacityExceeded);
+        }
+
+        let mut row_indices = [0usize; MAX_L_NNZ];
+        for column in 0..N {
+            row_indices[column_starts[column]] = column;
+        }
+        let mut cursors = column_starts;
+        for cursor in &mut cursors {
+            *cursor += 1;
+        }
+        visited = [usize::MAX; N];
+        for column in 0..N {
+            visited[column] = column;
+            let start = row_starts[column];
+            let end = if column + 1 < N {
+                row_starts[column + 1]
+            } else {
+                row_starts[column] + row_counts[column]
+            };
+            for &upper_column in &upper_columns[start..end] {
+                let mut node = upper_column;
+                while visited[node] != column {
+                    row_indices[cursors[node]] = column;
+                    cursors[node] += 1;
+                    visited[node] = column;
+                    node = parent[node];
+                }
+            }
+        }
+
+        let lower =
+            StaticCscPattern::from_parts(&row_indices[..total_nnz], &column_starts, total_nnz)?;
+        Ok(Self::from_lower(lower))
     }
 
     /// Analyzes the matrix after applying a symmetric fixed-size ordering.
@@ -669,6 +742,20 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
         pattern.refactorize(matrix, self)
     }
 
+    /// Recomputes numeric values using caller-retained symbolic metadata.
+    ///
+    /// This avoids rebuilding the update schedule on every iteration. Retain
+    /// the [`StaticCscCholeskyPattern`] returned by symbolic analysis when a
+    /// factor is updated repeatedly.
+    #[inline]
+    pub fn recompute_with_pattern<const MAX_A_NNZ: usize>(
+        &mut self,
+        pattern: &StaticCscCholeskyPattern<N, MAX_L_NNZ>,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<(), SparseCholeskyError> {
+        pattern.refactorize(matrix, self)
+    }
+
     /// Recomputes numeric values from coordinates already transformed by
     /// [`StaticCscCholeskyPattern::prepare_ordered`].
     #[inline]
@@ -677,6 +764,16 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
         let pattern = self.pattern();
+        pattern.factorize_ordered(matrix, self)
+    }
+
+    /// Recomputes ordered coordinates using caller-retained symbolic metadata.
+    #[inline]
+    pub fn recompute_ordered_with_pattern<const MAX_A_NNZ: usize>(
+        &mut self,
+        pattern: &StaticCscCholeskyPattern<N, MAX_L_NNZ>,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<(), SparseCholeskyError> {
         pattern.factorize_ordered(matrix, self)
     }
 

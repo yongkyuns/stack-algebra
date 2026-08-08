@@ -170,8 +170,13 @@ fn sparse_ordering_permutation_preserves_canonical_lower_csc() {
     .unwrap();
     let ordering = StaticCscOrdering::<3>::from_permutation(&[2, 0, 1]).unwrap();
     let permuted = ordering.permute(&matrix).unwrap();
+    let reusable = ordering
+        .permutation_for_pattern(matrix.pattern())
+        .unwrap()
+        .apply(&matrix);
 
     assert_eq!(permuted.row_indices(), &[0, 1, 2, 1, 2, 2]);
     assert_eq!(permuted.column_starts(), &[0, 3, 5]);
     assert_eq!(permuted.values(), &[6.0, 3.0, 5.0, 1.0, 2.0, 4.0]);
+    assert_eq!(reusable, permuted);
 }

@@ -153,6 +153,20 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscLdlt<N, MAX_L_NNZ
         pattern.refactorize_ldlt(matrix, self)
     }
 
+    /// Recomputes numeric values using caller-retained symbolic metadata.
+    ///
+    /// This avoids rebuilding the update schedule on every iteration. Retain
+    /// the [`StaticCscCholeskyPattern`] returned by symbolic analysis when a
+    /// factor is updated repeatedly.
+    #[inline]
+    pub fn recompute_with_pattern<const MAX_A_NNZ: usize>(
+        &mut self,
+        pattern: &StaticCscCholeskyPattern<N, MAX_L_NNZ>,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<(), SparseCholeskyError> {
+        pattern.refactorize_ldlt(matrix, self)
+    }
+
     /// Recomputes LDLᵀ values from coordinates already transformed by
     /// [`StaticCscCholeskyPattern::prepare_ordered`].
     #[inline]
@@ -161,6 +175,16 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscLdlt<N, MAX_L_NNZ
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
         let pattern = self.pattern();
+        pattern.factorize_ldlt_ordered(matrix, self)
+    }
+
+    /// Recomputes ordered coordinates using caller-retained symbolic metadata.
+    #[inline]
+    pub fn recompute_ordered_with_pattern<const MAX_A_NNZ: usize>(
+        &mut self,
+        pattern: &StaticCscCholeskyPattern<N, MAX_L_NNZ>,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<(), SparseCholeskyError> {
         pattern.factorize_ldlt_ordered(matrix, self)
     }
 

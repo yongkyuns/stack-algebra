@@ -512,7 +512,9 @@ fn bench_stack_matrix<
     group.bench_with_input(BenchmarkId::new("stack-factor-reuse", N), &N, |bench, _| {
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
-                factor.recompute(black_box(&matrix)).unwrap();
+                factor
+                    .recompute_with_pattern(black_box(&symbolic), black_box(&matrix))
+                    .unwrap();
             }
             black_box(&factor);
         });
@@ -579,7 +581,9 @@ fn bench_stack_ldlt<const N: usize, T: Real + FromPrimitive>(
     group.bench_with_input(BenchmarkId::new("stack-factor-reuse", N), &N, |bench, _| {
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
-                factor.recompute(black_box(&matrix)).unwrap();
+                factor
+                    .recompute_with_pattern(black_box(&symbolic), black_box(&matrix))
+                    .unwrap();
             }
             black_box(&factor);
         });
@@ -823,7 +827,7 @@ fn bench_stack_ordered_star<const N: usize, T: Real + FromPrimitive>(
             bench.iter(|| {
                 for _ in 0..BATCH_SIZE {
                     factor_with_permutation
-                        .recompute(black_box(&matrix))
+                        .recompute_with_pattern(black_box(&symbolic), black_box(&matrix))
                         .unwrap();
                 }
                 black_box(&factor_with_permutation);
@@ -836,7 +840,9 @@ fn bench_stack_ordered_star<const N: usize, T: Real + FromPrimitive>(
         |bench, _| {
             bench.iter(|| {
                 for _ in 0..BATCH_SIZE {
-                    factor.recompute_ordered(black_box(&ordered)).unwrap();
+                    factor
+                        .recompute_ordered_with_pattern(black_box(&symbolic), black_box(&ordered))
+                        .unwrap();
                 }
                 black_box(&factor);
             });

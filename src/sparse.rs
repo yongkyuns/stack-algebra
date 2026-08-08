@@ -47,7 +47,7 @@ pub use cholesky::{StaticCscCholesky, StaticCscCholeskyPattern};
 pub(crate) use errors::map_ldlt_error;
 pub use errors::{CscError, SparseCholeskyError};
 pub use ldlt::{StaticCscLdlt, StaticCscLdltFactor};
-pub use ordering::StaticCscOrdering;
+pub use ordering::{StaticCscOrdering, StaticCscPermutation};
 pub use storage::{StaticCscMatrix, StaticCscPattern};
 
 /// Symbolic CSC pattern shared by sparse LLT and no-pivot LDLᵀ.

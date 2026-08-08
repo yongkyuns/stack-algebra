@@ -46,7 +46,8 @@ fn sparse_ldlt_unified_factor_uses_native_sparse_path() {
 fn sparse_ldlt_reuses_factor_storage() {
     let matrix = indefinite_matrix();
     let mut factor = StaticCscLdlt::<3, 6, f64>::decompose(&matrix).unwrap();
-    factor.recompute(&matrix).unwrap();
+    let pattern = StaticCscLdltPattern::<3, 6>::analyze(&matrix).unwrap();
+    factor.recompute_with_pattern(&pattern, &matrix).unwrap();
     let rhs = vector![2.0; -1.0; 4.0];
     let dense = matrix![4.0, 1.0, 2.0; 1.0, -3.0, 1.0; 2.0, 1.0, 2.0];
 
