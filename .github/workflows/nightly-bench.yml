@@ -23,11 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cache Rust benchmark build
+      - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
-          path: target/release
-          key: ${{ runner.os }}-${{ runner.arch }}-rust-bench-native-${{ hashFiles('Cargo.toml', 'src/**', 'benches/**') }}-${{ matrix.bench }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
       - name: Install Eigen
         run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
       - name: Run benchmark
@@ -53,11 +57,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Cache native Eigen benchmark
-        uses: actions/cache@v4
-        with:
-          path: target/eigen-native-bench
-          key: ${{ runner.os }}-${{ runner.arch }}-eigen-native-${{ hashFiles('eigen/native_bench.cpp') }}-march-native
       - name: Install Eigen
         run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
       - name: Run native Eigen benchmark
