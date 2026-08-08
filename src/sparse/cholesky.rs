@@ -22,6 +22,8 @@ pub struct StaticCscCholeskyPattern<const N: usize, const MAX_L_NNZ: usize> {
     update_starts: [usize; N],
     update_indices: [usize; MAX_L_NNZ],
     update_columns: [usize; MAX_L_NNZ],
+    update_row_starts: [usize; MAX_L_NNZ],
+    update_contiguous: [bool; MAX_L_NNZ],
     update_nnz: usize,
 }
 
@@ -57,6 +59,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         }
         let mut update_indices = [0usize; MAX_L_NNZ];
         let mut update_columns = [0usize; MAX_L_NNZ];
+        let mut update_row_starts = [0usize; MAX_L_NNZ];
+        let mut update_contiguous = [false; MAX_L_NNZ];
         let mut update_cursor = update_starts;
         for column in 0..N {
             let start = lower.column_starts()[column];
@@ -66,6 +70,12 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                 let position = update_cursor[row];
                 update_indices[position] = index;
                 update_columns[position] = column;
+                let first_row = lower.row_indices()[index];
+                update_row_starts[position] = first_row;
+                update_contiguous[position] = lower.row_indices()[index..end]
+                    .iter()
+                    .enumerate()
+                    .all(|(offset, &candidate)| candidate == first_row + offset);
                 update_cursor[row] += 1;
             }
         }
@@ -76,6 +86,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             update_starts,
             update_indices,
             update_columns,
+            update_row_starts,
+            update_contiguous,
             update_nnz,
         }
     }
@@ -475,9 +487,17 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                     .lower
                     .column_end(previous)
                     .unwrap_or(output.lower.nnz());
-                for index in lower_index..end {
-                    let row = output.lower.row_indices()[index];
-                    work[row] = work[row] - output.lower.values()[index] * scale;
+                if self.update_contiguous[update] {
+                    let row_start = self.update_row_starts[update];
+                    for offset in 0..(end - lower_index) {
+                        let row = row_start + offset;
+                        work[row] = work[row] - output.lower.values()[lower_index + offset] * scale;
+                    }
+                } else {
+                    for index in lower_index..end {
+                        let row = output.lower.row_indices()[index];
+                        work[row] = work[row] - output.lower.values()[index] * scale;
+                    }
                 }
             }
 
@@ -545,9 +565,18 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                     .lower
                     .column_end(previous)
                     .unwrap_or(output.lower.nnz());
-                for index in lower_index..end {
-                    let row = output.lower.row_indices()[index];
-                    work[row] = work[row] - output.lower.values()[index] * lower_column;
+                if self.update_contiguous[update] {
+                    let row_start = self.update_row_starts[update];
+                    for offset in 0..(end - lower_index) {
+                        let row = row_start + offset;
+                        work[row] =
+                            work[row] - output.lower.values()[lower_index + offset] * lower_column;
+                    }
+                } else {
+                    for index in lower_index..end {
+                        let row = output.lower.row_indices()[index];
+                        work[row] = work[row] - output.lower.values()[index] * lower_column;
+                    }
                 }
             }
 
