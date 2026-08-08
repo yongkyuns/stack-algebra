@@ -4,12 +4,16 @@ use std::hint::black_box;
 use std::{ffi::c_void, marker::PhantomData};
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use dyn_stack::{MemBuffer, MemStack};
 use faer::prelude::Solve;
+use faer::sparse::linalg::cholesky::{
+    factorize_symbolic_cholesky, CholeskySymbolicParams, SymmetricOrdering,
+};
 use faer::sparse::linalg::solvers::{Llt, SymbolicLlt};
 use faer::sparse::{SparseColMat, SymbolicSparseColMat};
-use faer::{Mat, Side};
+use faer::{Mat, Par, Side};
 use faer_traits::ComplexField;
-use num_traits::FromPrimitive;
+use num_traits::{FromPrimitive, Zero};
 use stack_algebra::{
     Matrix, MatrixScalar, Real, StaticCscCholeskyPattern, StaticCscLdltPattern, StaticCscMatrix,
     StaticCscOrdering,
@@ -675,7 +679,7 @@ fn bench_eigen_ldlt<const N: usize, T: EigenSparseLdltScalar + FromPrimitive>(
     group.finish();
 }
 
-fn bench_faer_matrix<const N: usize, T: ComplexField + FromPrimitive>(
+fn bench_faer_matrix<const N: usize, T: ComplexField + FromPrimitive + Zero>(
     criterion: &mut Criterion,
     scalar_name: &str,
     pattern_name: &str,
@@ -711,6 +715,39 @@ fn bench_faer_matrix<const N: usize, T: ComplexField + FromPrimitive>(
             }
         });
     });
+    let symbolic_storage = factorize_symbolic_cholesky(
+        matrix.symbolic(),
+        Side::Lower,
+        SymmetricOrdering::Amd,
+        CholeskySymbolicParams::default(),
+    )
+    .unwrap();
+    let mut numeric_storage = vec![T::zero(); symbolic_storage.len_val()];
+    let mut scratch_storage = MemBuffer::new(
+        symbolic_storage.factorize_numeric_llt_scratch::<T>(Par::Seq, Default::default()),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("faer-factor-reuse-storage", N),
+        &N,
+        |bench, _| {
+            bench.iter(|| {
+                for _ in 0..BATCH_SIZE {
+                    let stack = MemStack::new(&mut scratch_storage);
+                    black_box(symbolic_storage.factorize_numeric_llt(
+                        black_box(&mut numeric_storage),
+                        black_box(matrix.as_ref()),
+                        Side::Lower,
+                        Default::default(),
+                        Par::Seq,
+                        stack,
+                        Default::default(),
+                    ))
+                    .unwrap();
+                }
+                black_box(&numeric_storage);
+            });
+        },
+    );
     group.bench_with_input(BenchmarkId::new("faer-solve", N), &N, |bench, _| {
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
@@ -723,7 +760,7 @@ fn bench_faer_matrix<const N: usize, T: ComplexField + FromPrimitive>(
     group.finish();
 }
 
-fn bench_faer<const N: usize, T: ComplexField + FromPrimitive>(
+fn bench_faer<const N: usize, T: ComplexField + FromPrimitive + Zero>(
     criterion: &mut Criterion,
     scalar_name: &str,
 ) {

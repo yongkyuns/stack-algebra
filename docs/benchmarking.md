@@ -100,6 +100,11 @@ fixed directory layout.
   `add_to_value` updates and is specific to the fixed-capacity assembly API.
   Ordered sparse cases also report one-shot `stack-permute` separately from
   `stack-permute-reuse`, which uses a retained coordinate map.
+  `faer-factor-reuse` measures faer's high-level constructor, including its
+  numeric-buffer allocation; `faer-factor-reuse-storage` uses faer's low-level
+  numeric API with reusable factor and scratch storage. Compare ordered cases
+  with the same ordering policy: faer uses AMD by default, while the default
+  stack-algebra path preserves identity ordering.
   Reusable-factor solve timings exclude the one-time factorization; factor-
   and-solve timings include both. Do not compare these phases as if they were
   the same operation.
