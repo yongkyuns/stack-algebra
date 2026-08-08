@@ -43,7 +43,7 @@ fn assert_orthonormal_columns<const M: usize, const N: usize>(
     tolerance: f64,
 ) {
     assert_close(
-        &(&columns.transpose() * *columns),
+        &(columns.transpose() * *columns),
         &Matrix::<N, N, f64>::eye(),
         tolerance,
     );

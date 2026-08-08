@@ -6,7 +6,8 @@ use crate::{
 };
 
 use super::{
-    block_ldlt, block_rank_update_ldlt_sub, block_solve_right_ldlt_transpose, StaticBlockCscMatrix,
+    ldlt::{block_ldlt, block_rank_update_ldlt_sub, block_solve_right_ldlt_transpose},
+    storage::StaticBlockCscMatrix,
 };
 
 /// Symbolic pattern for a native block sparse Cholesky factor.
