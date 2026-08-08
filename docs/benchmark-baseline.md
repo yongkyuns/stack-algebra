@@ -20,8 +20,8 @@ stack-algebra divided by Eigen.
 | --- | --- | ---: | ---: | ---: | ---: |
 | Matrix multiply | `f32` | 1,021 | 1,378 | 1,088 | 0.74× |
 | Matrix multiply | `f64` | 1,637 | 2,493 | 1,827 | 0.66× |
-| Matrix-vector multiply | `f32` | 36 | 99 | 174 | 0.36× |
-| Matrix-vector multiply | `f64` | 104 | 63 | 163 | 1.65× |
+| Matrix-vector multiply | `f32` | 33 | 52 | 174 | 0.64× |
+| Matrix-vector multiply | `f64` | 68 | 61 | 163 | 1.11× |
 | LLT factor | `f32` | 3,594 | 3,991 | 3,367 | 0.90× |
 | LLT factor | `f64` | 3,294 | 3,847 | 2,869 | 0.86× |
 | LDLT factor | `f32` | 4,793 | 4,953 | 2,783 | 0.97× |
@@ -53,14 +53,16 @@ After the initial native baseline, three targeted changes were made:
 The comparison benchmark now calls `Matrix::matvec_into` for stack-algebra;
 the previous version called the generic `mul_into` matrix-multiply path while
 Eigen was measuring its dedicated matrix-vector product. Focused `32×32`
-measurements after that correction put f32/f64 matvec at approximately 36/104
-ns per operation. The remaining material gap is f64 matvec at about 1.6× the
-short native Eigen sample; LU and pivoted QR are close to the native Eigen
-reference.
+Repeated native sequential measurements after that correction put f32/f64
+matvec at approximately 33/68 ns per operation. The f64 result is within about
+15% of the Eigen reference; the earlier 1.6× result came from a parallel fast
+sweep sharing the CPU and a stale non-native local benchmark artifact. LU and
+pivoted QR are close to the native Eigen reference.
 
 ## Remaining priorities
 
-1. Improve f64 matvec, whose focused result remains about 1.6× Eigen.
+1. Keep f64 matvec under regression monitoring; the focused native gap is now
+   approximately 1.1× Eigen and does not justify a bespoke kernel.
 2. Align SVD shape coverage across libraries before drawing performance
    conclusions from those rows.
 3. Validate the native kernels on non-x86 targets before adding more x86-only
