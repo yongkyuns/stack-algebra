@@ -40,10 +40,10 @@ jobs:
         run: |
           if [ "${{ matrix.bench }}" = comparison ]; then
             cargo bench --bench comparison -- \
-              --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
+              --warm-up-time 0.02 --measurement-time 0.02 --sample-size 10
           else
             cargo bench --all-features --bench "${{ matrix.bench }}" -- \
-              --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
+              --warm-up-time 0.02 --measurement-time 0.02 --sample-size 10
           fi
       - name: Upload Criterion measurements
         uses: actions/upload-artifact@v4
