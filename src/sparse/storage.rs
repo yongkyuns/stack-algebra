@@ -403,18 +403,13 @@ where
         }
         let start = self.pattern.column_starts()[column];
         let end = self.column_end(column).unwrap_or(self.nnz());
-        let mut position = end;
-        for index in start..end {
-            let existing = self.pattern.row_indices[index];
-            if existing == row {
-                self.values[index] = value;
+        let position = match self.pattern.row_indices[start..end].binary_search(&row) {
+            Ok(offset) => {
+                self.values[start + offset] = value;
                 return Ok(());
             }
-            if existing > row {
-                position = index;
-                break;
-            }
-        }
+            Err(offset) => start + offset,
+        };
         if self.nnz() == MAX_NNZ {
             return Err(CscError::CapacityExceeded);
         }
