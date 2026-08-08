@@ -11,13 +11,15 @@ fn column_norm<const M: usize, const N: usize, T: Real + MatrixScalar>(
     let values_end = (column + 1) * M;
     let values = &matrix.as_slice()[values_start..values_end];
     let sum = T::dot_accumulate(values, values, T::zero());
-    let mut max_abs = T::zero();
-    for &value in values {
-        let absolute = value.abs();
-        max_abs = max_abs.max(absolute);
+    if sum.is_finite() && sum != T::zero() {
+        return sum.sqrt();
     }
 
-    if sum.is_finite() && (sum != T::zero() || max_abs == T::zero()) {
+    let mut max_abs = T::zero();
+    for &value in values {
+        max_abs = max_abs.max(value.abs());
+    }
+    if sum.is_finite() && max_abs == T::zero() {
         return sum.sqrt();
     }
     if max_abs.is_infinite() {

@@ -30,8 +30,8 @@ stack-algebra divided by Eigen.
 | LU factor | `f64` | 5,689 | 7,693 | 6,960 | 0.74× |
 | QR factor | `f32` | 12,643 | 11,422 | — | 1.11× |
 | QR factor | `f64` | 9,499 | 12,938 | — | 0.73× |
-| Column-pivoted QR factor | `f32` | 16,890 | 14,043 | — | 1.20× |
-| Column-pivoted QR factor | `f64` | 15,437 | 11,961 | — | 1.29× |
+| Column-pivoted QR factor | `f32` | 11,630 | 13,263 | — | 0.88× |
+| Column-pivoted QR factor | `f64` | 11,851 | 14,051 | — | 0.84× |
 
 The fast profile is for triage. Use longer measurement windows before making
 release decisions, especially for sub-microsecond operations. The LU values
@@ -48,7 +48,8 @@ After the initial native baseline, three targeted changes were made:
 - LU factorization updates contiguous column tails through the SIMD rank-update
   kernel rather than scalar strided row updates.
 - Pivoted QR column norms use the SIMD dot kernel while retaining the existing
-  scaled overflow fallback.
+  scaled overflow fallback; the max-absolute scan is now fallback-only for
+  finite norms.
 
 The comparison benchmark now calls `Matrix::matvec_into` for stack-algebra;
 the previous version called the generic `mul_into` matrix-multiply path while
@@ -57,7 +58,8 @@ Repeated native sequential measurements after that correction put f32/f64
 matvec at approximately 33/68 ns per operation. The f64 result is within about
 15% of the Eigen reference; the earlier 1.6× result came from a parallel fast
 sweep sharing the CPU and a stale non-native local benchmark artifact. LU and
-pivoted QR are close to the native Eigen reference.
+pivoted QR are at or below the native Eigen reference in the focused native
+measurements.
 
 ## Remaining priorities
 
