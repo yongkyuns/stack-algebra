@@ -579,25 +579,21 @@ void benchmark_tall_svd_factor(const char* name) {
   // Eigen does not support thin U/V factors for fixed-size matrices. Use the
   // supported full fixed-size decomposition so this remains a static-storage
   // comparison instead of silently switching the reference to dynamic Eigen.
-  using Svd = Eigen::JacobiSVD<Matrix<Scalar, Rows, Columns>,
-                               Eigen::NoQRPreconditioner | Eigen::ComputeFullU |
-                                   Eigen::ComputeFullV>;
+  using Svd = Eigen::JacobiSVD<Matrix<Scalar, Rows, Columns>, Eigen::NoQRPreconditioner>;
   auto input = make_tall_system<Scalar, Rows, Columns>();
   Svd factor;
   benchmark_case(name, [&] {
     auto* input_pointer = opaque(&input);
-    factor.compute(*input_pointer);
+    factor.compute(*input_pointer, Eigen::ComputeFullU | Eigen::ComputeFullV);
     opaque(&factor);
   });
 }
 
 template <typename Scalar, int Rows, int Columns>
 void benchmark_tall_svd_solve(const char* name) {
-  using Svd = Eigen::JacobiSVD<Matrix<Scalar, Rows, Columns>,
-                               Eigen::NoQRPreconditioner | Eigen::ComputeFullU |
-                                   Eigen::ComputeFullV>;
+  using Svd = Eigen::JacobiSVD<Matrix<Scalar, Rows, Columns>, Eigen::NoQRPreconditioner>;
   auto input = make_tall_system<Scalar, Rows, Columns>();
-  Svd factor(input);
+  Svd factor(input, Eigen::ComputeFullU | Eigen::ComputeFullV);
   auto rhs = make_rhs<Scalar, Rows, 1>();
   Matrix<Scalar, Columns, 1> solution;
   benchmark_case(name, [&] {
