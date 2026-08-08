@@ -5,12 +5,22 @@ mod neon;
 
 use neon::{NeonMatmul, NeonReduction};
 
+#[inline]
+fn primitive_mul_add_f32(lhs: f32, rhs: f32, addend: f32) -> f32 {
+    f32::mul_add(lhs, rhs, addend)
+}
+
+#[inline]
+fn primitive_mul_add_f64(lhs: f64, rhs: f64, addend: f64) -> f64 {
+    f64::mul_add(lhs, rhs, addend)
+}
+
 macro_rules! impl_neon_scalar {
-    ($scalar:ty) => {
+    ($scalar:ty, $mul_add:ident) => {
         impl MatrixScalar for $scalar {
             #[inline]
             fn mul_add(lhs: Self, rhs: Self, addend: Self) -> Self {
-                lhs.mul_add(rhs, addend)
+                $mul_add(lhs, rhs, addend)
             }
 
             #[inline]
@@ -102,5 +112,5 @@ macro_rules! impl_neon_scalar {
     };
 }
 
-impl_neon_scalar!(f32);
-impl_neon_scalar!(f64);
+impl_neon_scalar!(f32, primitive_mul_add_f32);
+impl_neon_scalar!(f64, primitive_mul_add_f64);
