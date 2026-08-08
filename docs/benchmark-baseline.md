@@ -38,10 +38,10 @@ Eigen reference:
 
 | Shape | Scalar | Stack-algebra | Eigen | Stack/Eigen |
 | --- | --- | ---: | ---: | ---: |
-| 6×3 | `f32` | 990 | 986 | 1.00× |
-| 6×3 | `f64` | 1,265 | 1,214 | 1.04× |
-| 15×6 | `f32` | 8,436 | 4,189 | 2.01× |
-| 15×6 | `f64` | 11,950 | 6,843 | 1.75× |
+| 6×3 | `f32` | 778 | 986 | 0.79× |
+| 6×3 | `f64` | 962 | 1,214 | 0.79× |
+| 15×6 | `f32` | 5,796 | 4,189 | 1.38× |
+| 15×6 | `f64` | 8,654 | 6,843 | 1.26× |
 
 The fast profile is for triage. Use longer measurement windows before making
 release decisions, especially for sub-microsecond operations. The LU values
@@ -76,6 +76,6 @@ measurements.
 1. Keep f64 matvec under regression monitoring; the focused native gap is now
    approximately 1.1× Eigen and does not justify a bespoke kernel.
 2. Improve the larger tall SVD path; its one-sided Jacobi implementation
-   remains materially slower than Eigen at 15×6.
+   remains about 1.3× slower than Eigen at 15×6.
 3. Validate the native kernels on non-x86 targets before adding more x86-only
    specialization.

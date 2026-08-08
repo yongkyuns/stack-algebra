@@ -172,9 +172,7 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
                     let scale_squared = scale * scale;
                     let (app, aqq, apq) = if scale_squared.is_finite() && scale_squared != T::zero()
                     {
-                        let raw_app = T::dot_accumulate(left, left, T::zero());
-                        let raw_aqq = T::dot_accumulate(right, right, T::zero());
-                        let raw_apq = T::dot_accumulate(left, right, T::zero());
+                        let (raw_app, raw_aqq, raw_apq) = T::symmetric_dot(left, right);
                         if raw_app.is_finite() && raw_aqq.is_finite() && raw_apq.is_finite() {
                             (
                                 raw_app / scale_squared,

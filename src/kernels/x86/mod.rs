@@ -33,6 +33,11 @@ macro_rules! impl_kernel_scalar {
             }
 
             #[inline]
+            fn symmetric_dot(lhs: &[Self], rhs: &[Self]) -> (Self, Self, Self) {
+                <$matmul as MatmulBackend<$scalar>>::symmetric_dot(lhs, rhs)
+            }
+
+            #[inline]
             fn symmetric_rank_k_update<const D: usize>(
                 matrix: &mut Matrix<D, D, Self>,
                 block_start: usize,

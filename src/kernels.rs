@@ -34,6 +34,21 @@ pub(crate) trait MatmulBackend<T> {
         result
     }
 
+    fn symmetric_dot(lhs: &[T], rhs: &[T]) -> (T, T, T)
+    where
+        T: Copy + Zero + Add<Output = T> + Mul<Output = T>,
+    {
+        let mut lhs_squared = T::zero();
+        let mut rhs_squared = T::zero();
+        let mut product = T::zero();
+        for (left, right) in lhs.iter().zip(rhs.iter()) {
+            lhs_squared = lhs_squared + *left * *left;
+            rhs_squared = rhs_squared + *right * *right;
+            product = product + *left * *right;
+        }
+        (lhs_squared, rhs_squared, product)
+    }
+
     fn symmetric_rank_k_update<const D: usize>(
         matrix: &mut Matrix<D, D, T>,
         block_start: usize,
@@ -190,6 +205,20 @@ pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
             result = result + *lhs_value * *rhs_value;
         }
         result
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    fn symmetric_dot(lhs: &[Self], rhs: &[Self]) -> (Self, Self, Self) {
+        let mut lhs_squared = Self::zero();
+        let mut rhs_squared = Self::zero();
+        let mut product = Self::zero();
+        for (left, right) in lhs.iter().zip(rhs.iter()) {
+            lhs_squared = lhs_squared + *left * *left;
+            rhs_squared = rhs_squared + *right * *right;
+            product = product + *left * *right;
+        }
+        (lhs_squared, rhs_squared, product)
     }
 
     /// Applies the symmetric rank-k update used by LDLᵀ factorization.
@@ -528,6 +557,42 @@ mod tests {
         }
     }
 
+    fn check_symmetric_dot_f64<const M: usize>() {
+        let lhs = generated_f64::<M, 1>(101);
+        let rhs = generated_f64::<M, 1>(131);
+        let (lhs_squared, rhs_squared, product) =
+            f64::symmetric_dot(lhs.as_slice(), rhs.as_slice());
+        let mut expected_lhs = 0.0;
+        let mut expected_rhs = 0.0;
+        let mut expected_product = 0.0;
+        for index in 0..M {
+            expected_lhs += lhs[index] * lhs[index];
+            expected_rhs += rhs[index] * rhs[index];
+            expected_product += lhs[index] * rhs[index];
+        }
+        assert!((lhs_squared - expected_lhs).abs() <= 1e-13);
+        assert!((rhs_squared - expected_rhs).abs() <= 1e-13);
+        assert!((product - expected_product).abs() <= 1e-13);
+    }
+
+    fn check_symmetric_dot_f32<const M: usize>() {
+        let lhs = generated_f32::<M, 1>(101);
+        let rhs = generated_f32::<M, 1>(131);
+        let (lhs_squared, rhs_squared, product) =
+            f32::symmetric_dot(lhs.as_slice(), rhs.as_slice());
+        let mut expected_lhs = 0.0_f64;
+        let mut expected_rhs = 0.0_f64;
+        let mut expected_product = 0.0_f64;
+        for index in 0..M {
+            expected_lhs += lhs[index] as f64 * lhs[index] as f64;
+            expected_rhs += rhs[index] as f64 * rhs[index] as f64;
+            expected_product += lhs[index] as f64 * rhs[index] as f64;
+        }
+        assert!((lhs_squared as f64 - expected_lhs).abs() <= 2e-5);
+        assert!((rhs_squared as f64 - expected_rhs).abs() <= 2e-5);
+        assert!((product as f64 - expected_product).abs() <= 2e-5);
+    }
+
     #[test]
     fn scalar_f64_matmul_covers_tails_and_rectangular_shapes() {
         check_f64::<1, 1, 1>();
@@ -540,6 +605,18 @@ mod tests {
         check_f64::<6, 15, 6>();
         check_f64::<15, 15, 15>();
         check_f64::<16, 16, 16>();
+    }
+
+    #[test]
+    fn symmetric_dot_covers_packet_tails() {
+        check_symmetric_dot_f64::<3>();
+        check_symmetric_dot_f64::<4>();
+        check_symmetric_dot_f64::<15>();
+        check_symmetric_dot_f64::<16>();
+        check_symmetric_dot_f32::<3>();
+        check_symmetric_dot_f32::<8>();
+        check_symmetric_dot_f32::<15>();
+        check_symmetric_dot_f32::<16>();
     }
 
     #[test]

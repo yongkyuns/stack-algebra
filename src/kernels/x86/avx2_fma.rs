@@ -396,6 +396,80 @@ unsafe fn reduction_squared_norm_f64<const M: usize, const N: usize>(
 }
 
 #[target_feature(enable = "avx2,fma")]
+unsafe fn symmetric_dot_f32(lhs: &[f32], rhs: &[f32]) -> (f32, f32, f32) {
+    use core::arch::x86_64::{
+        _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+    };
+    let mut lhs_accumulator = _mm256_setzero_ps();
+    let mut rhs_accumulator = _mm256_setzero_ps();
+    let mut product_accumulator = _mm256_setzero_ps();
+    let mut index = 0;
+    while index + 8 <= lhs.len() {
+        let left = _mm256_loadu_ps(lhs.as_ptr().add(index));
+        let right = _mm256_loadu_ps(rhs.as_ptr().add(index));
+        lhs_accumulator = _mm256_fmadd_ps(left, left, lhs_accumulator);
+        rhs_accumulator = _mm256_fmadd_ps(right, right, rhs_accumulator);
+        product_accumulator = _mm256_fmadd_ps(left, right, product_accumulator);
+        index += 8;
+    }
+    let mut lhs_lanes = [0.0_f32; 8];
+    let mut rhs_lanes = [0.0_f32; 8];
+    let mut product_lanes = [0.0_f32; 8];
+    _mm256_storeu_ps(lhs_lanes.as_mut_ptr(), lhs_accumulator);
+    _mm256_storeu_ps(rhs_lanes.as_mut_ptr(), rhs_accumulator);
+    _mm256_storeu_ps(product_lanes.as_mut_ptr(), product_accumulator);
+    let mut lhs_sum = lhs_lanes.iter().copied().sum();
+    let mut rhs_sum = rhs_lanes.iter().copied().sum();
+    let mut product_sum = product_lanes.iter().copied().sum();
+    while index < lhs.len() {
+        let left = lhs[index];
+        let right = rhs[index];
+        lhs_sum += left * left;
+        rhs_sum += right * right;
+        product_sum += left * right;
+        index += 1;
+    }
+    (lhs_sum, rhs_sum, product_sum)
+}
+
+#[target_feature(enable = "avx2,fma")]
+unsafe fn symmetric_dot_f64(lhs: &[f64], rhs: &[f64]) -> (f64, f64, f64) {
+    use core::arch::x86_64::{
+        _mm256_fmadd_pd, _mm256_loadu_pd, _mm256_setzero_pd, _mm256_storeu_pd,
+    };
+    let mut lhs_accumulator = _mm256_setzero_pd();
+    let mut rhs_accumulator = _mm256_setzero_pd();
+    let mut product_accumulator = _mm256_setzero_pd();
+    let mut index = 0;
+    while index + 4 <= lhs.len() {
+        let left = _mm256_loadu_pd(lhs.as_ptr().add(index));
+        let right = _mm256_loadu_pd(rhs.as_ptr().add(index));
+        lhs_accumulator = _mm256_fmadd_pd(left, left, lhs_accumulator);
+        rhs_accumulator = _mm256_fmadd_pd(right, right, rhs_accumulator);
+        product_accumulator = _mm256_fmadd_pd(left, right, product_accumulator);
+        index += 4;
+    }
+    let mut lhs_lanes = [0.0_f64; 4];
+    let mut rhs_lanes = [0.0_f64; 4];
+    let mut product_lanes = [0.0_f64; 4];
+    _mm256_storeu_pd(lhs_lanes.as_mut_ptr(), lhs_accumulator);
+    _mm256_storeu_pd(rhs_lanes.as_mut_ptr(), rhs_accumulator);
+    _mm256_storeu_pd(product_lanes.as_mut_ptr(), product_accumulator);
+    let mut lhs_sum = lhs_lanes.iter().copied().sum();
+    let mut rhs_sum = rhs_lanes.iter().copied().sum();
+    let mut product_sum = product_lanes.iter().copied().sum();
+    while index < lhs.len() {
+        let left = lhs[index];
+        let right = rhs[index];
+        lhs_sum += left * left;
+        rhs_sum += right * right;
+        product_sum += left * right;
+        index += 1;
+    }
+    (lhs_sum, rhs_sum, product_sum)
+}
+
+#[target_feature(enable = "avx2,fma")]
 unsafe fn reduction_matvec_f32<const M: usize, const N: usize>(
     matrix: &Matrix<M, N, f32>,
     vector: &Vector<N, f32>,
@@ -1157,6 +1231,11 @@ impl MatmulBackend<f32> for X86Avx2FmaMatmul {
     }
 
     #[inline]
+    fn symmetric_dot(lhs: &[f32], rhs: &[f32]) -> (f32, f32, f32) {
+        unsafe { symmetric_dot_f32(lhs, rhs) }
+    }
+
+    #[inline]
     fn rank_update_sub(target: &mut [f32], source: &[f32], scale: f32) {
         unsafe { super::avx2::rank_update_sub_f32(target, source, scale) }
     }
@@ -1222,6 +1301,11 @@ impl MatmulBackend<f64> for X86Avx2FmaMatmul {
     #[inline]
     fn dot(lhs: &[f64], rhs: &[f64], initial: f64) -> f64 {
         unsafe { super::avx2::dot_slices_f64(lhs, rhs, initial) }
+    }
+
+    #[inline]
+    fn symmetric_dot(lhs: &[f64], rhs: &[f64]) -> (f64, f64, f64) {
+        unsafe { symmetric_dot_f64(lhs, rhs) }
     }
 
     #[inline]
