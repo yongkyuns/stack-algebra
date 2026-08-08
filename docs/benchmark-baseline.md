@@ -60,7 +60,7 @@ reference.
 
 ## Remaining priorities
 
-1. Improve f64 matvec, whose focused result remains about 2× Eigen.
+1. Improve f64 matvec, whose focused result remains about 1.6× Eigen.
 2. Align SVD shape coverage across libraries before drawing performance
    conclusions from those rows.
 3. Validate the native kernels on non-x86 targets before adding more x86-only
