@@ -133,6 +133,10 @@ fn validated_pattern_can_be_reused_for_numeric_updates() {
     assert_eq!(pattern.nnz(), 4);
     assert_eq!(pattern.column_starts(), &[0, 2, 2]);
     assert_eq!(pattern.column_end(2), Some(4));
+    assert_eq!(pattern.entry_index(0, 0), Some(0));
+    assert_eq!(pattern.entry_index(2, 0), Some(1));
+    assert_eq!(pattern.entry_index(3, 1), None);
+    assert_eq!(pattern.entry_index(usize::MAX, 0), None);
 
     let mut matrix = StaticCscMatrix::with_pattern(pattern, &[1.0, 2.0, 3.0, 4.0]).unwrap();
     assert_eq!(matrix.pattern(), &pattern);

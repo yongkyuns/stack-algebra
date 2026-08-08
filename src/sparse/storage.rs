@@ -156,6 +156,20 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
             self.nnz
         })
     }
+
+    /// Returns the value-array index for an existing `(row, column)` entry.
+    #[inline]
+    pub fn entry_index(&self, row: usize, column: usize) -> Option<usize> {
+        if row >= ROWS || column >= COLS {
+            return None;
+        }
+        let start = self.column_starts[column];
+        let end = self.column_end(column).unwrap_or(self.nnz);
+        self.row_indices[start..end]
+            .binary_search(&row)
+            .ok()
+            .map(|offset| start + offset)
+    }
 }
 
 impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize> Default

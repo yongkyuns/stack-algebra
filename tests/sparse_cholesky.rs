@@ -147,6 +147,16 @@ fn symbolic_fill_in_is_bounded() {
 }
 
 #[test]
+fn missing_diagonal_does_not_reuse_workspace_values() {
+    type MissingDiagonal = StaticCscMatrix<2, 2, 1, f64>;
+    let matrix = MissingDiagonal::from_pattern(&[1.0], &[1], &[0, 1, 1]).unwrap();
+    assert_eq!(
+        StaticCscCholesky::<2, 3, f64>::decompose(&matrix),
+        Err(SparseCholeskyError::NotPositiveDefinite)
+    );
+}
+
+#[test]
 fn minimum_degree_ordering_reduces_star_fill_and_solves() {
     type Star = StaticCscMatrix<4, 4, 10, f64>;
     let matrix = Star::from_pattern(
