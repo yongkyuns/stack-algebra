@@ -50,6 +50,7 @@ jobs:
       - run: cargo check --target thumbv6m-none-eabi --no-default-features
       - run: cargo check --target thumbv7em-none-eabihf --no-default-features
       - run: cargo check --target riscv32imc-unknown-none-elf --no-default-features
+      - run: cargo check --target aarch64-unknown-none --no-default-features
       - run: cargo check --target wasm32-unknown-unknown --no-default-features
       - run: qemu-tests/run_cortex_m.sh
       - run: qemu-tests/run_riscv32.sh
