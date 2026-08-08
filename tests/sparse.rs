@@ -1,4 +1,4 @@
-use stack_algebra::{vector, CscError, StaticCscMatrix, StaticCscPattern};
+use stack_algebra::{vector, CscError, StaticCscMatrix, StaticCscOrdering, StaticCscPattern};
 
 type Matrix = StaticCscMatrix<4, 3, 5, f64>;
 
@@ -142,4 +142,36 @@ fn validated_pattern_can_be_reused_for_numeric_updates() {
         StaticCscMatrix::<4, 3, 5, f64>::with_pattern(pattern, &[1.0]),
         Err(CscError::LengthMismatch)
     );
+}
+
+#[test]
+fn zero_pattern_supports_allocation_free_numeric_assembly() {
+    let pattern =
+        StaticCscPattern::<3, 3, 5>::from_arrays(&[0, 1, 1, 2, 2], &[0, 2, 4, 5]).unwrap();
+    let mut matrix = StaticCscMatrix::<3, 3, 5, f64>::zero_with_pattern(pattern);
+
+    matrix.add_to_value(0, 0, 2.0).unwrap();
+    matrix.add_to_value(1, 0, 3.0).unwrap();
+    matrix.add_to_value(1, 1, 4.0).unwrap();
+    matrix.add_to_value(2, 1, 5.0).unwrap();
+    matrix.add_to_value(2, 2, 6.0).unwrap();
+
+    assert_eq!(matrix.values(), &[2.0, 3.0, 4.0, 5.0, 6.0]);
+    assert_eq!(matrix.add_to_value(0, 2, 1.0), Err(CscError::EntryNotFound));
+}
+
+#[test]
+fn sparse_ordering_permutation_preserves_canonical_lower_csc() {
+    let matrix = StaticCscMatrix::<3, 3, 6, f64>::from_pattern(
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        &[0, 1, 2, 1, 2, 2],
+        &[0, 3, 5, 6],
+    )
+    .unwrap();
+    let ordering = StaticCscOrdering::<3>::from_permutation(&[2, 0, 1]).unwrap();
+    let permuted = ordering.permute(&matrix).unwrap();
+
+    assert_eq!(permuted.row_indices(), &[0, 1, 2, 1, 2, 2]);
+    assert_eq!(permuted.column_starts(), &[0, 3, 5]);
+    assert_eq!(permuted.values(), &[6.0, 3.0, 5.0, 1.0, 2.0, 4.0]);
 }

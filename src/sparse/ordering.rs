@@ -140,8 +140,9 @@ impl<const N: usize> StaticCscOrdering<N> {
         permute_matrix(matrix, *self)
     }
 
+    /// Returns whether this ordering leaves the scalar coordinates unchanged.
     #[inline]
-    pub(crate) fn is_identity(&self) -> bool {
+    pub fn is_identity(&self) -> bool {
         self.permutation == Self::identity().permutation
     }
 }
@@ -150,8 +151,11 @@ fn permute_matrix<const N: usize, const MAX_NNZ: usize, T: Copy + Zero>(
     matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
     ordering: StaticCscOrdering<N>,
 ) -> Result<StaticCscMatrix<N, N, MAX_NNZ, T>, CscError> {
-    let mut present = [[false; N]; N];
-    let mut mapped_values = [[T::zero(); N]; N];
+    // Keep the permutation workspace proportional to the sparse structure.
+    // A dense `N x N` temporary makes ordering unusable for large sparse
+    // systems such as bundle adjustment.
+    let mut entries = [(0usize, 0usize, T::zero()); MAX_NNZ];
+    let mut entry_count = 0;
     for column in 0..N {
         let start = matrix.column_starts()[column];
         let end = matrix.column_end(column).unwrap_or(matrix.nnz());
@@ -167,26 +171,25 @@ fn permute_matrix<const N: usize, const MAX_NNZ: usize, T: Copy + Zero>(
             } else {
                 (ordered_column, ordered_row)
             };
-            if !present[lower_column][lower_row] {
-                present[lower_column][lower_row] = true;
-                mapped_values[lower_column][lower_row] = matrix.values()[index];
+            if entry_count == MAX_NNZ {
+                return Err(CscError::CapacityExceeded);
             }
+            entries[entry_count] = (lower_row, lower_column, matrix.values()[index]);
+            entry_count += 1;
         }
     }
+
+    entries[..entry_count]
+        .sort_unstable_by(|left, right| left.1.cmp(&right.1).then(left.0.cmp(&right.0)));
 
     let mut output = StaticCscMatrix::new();
     let mut position = 0;
     for column in 0..N {
         output.pattern.column_starts[column] = position;
-        for row in column..N {
-            if present[column][row] {
-                if position == MAX_NNZ {
-                    return Err(CscError::CapacityExceeded);
-                }
-                output.pattern.row_indices[position] = row;
-                output.values[position] = mapped_values[column][row];
-                position += 1;
-            }
+        while position < entry_count && entries[position].1 == column {
+            output.pattern.row_indices[position] = entries[position].0;
+            output.values[position] = entries[position].2;
+            position += 1;
         }
     }
     output.pattern.nnz = position;

@@ -1,4 +1,4 @@
-use core::ops::{Add, Mul};
+use core::ops::{Add, AddAssign, Mul};
 
 use crate::{Matrix, Zero};
 
@@ -210,6 +210,15 @@ where
         Ok(matrix)
     }
 
+    /// Creates a zero-valued matrix from a validated symbolic pattern.
+    #[inline]
+    pub fn zero_with_pattern(pattern: StaticCscPattern<ROWS, COLS, MAX_NNZ>) -> Self {
+        Self {
+            values: [T::zero(); MAX_NNZ],
+            pattern,
+        }
+    }
+
     /// Returns the validated symbolic sparsity pattern.
     #[inline]
     pub fn pattern(&self) -> &StaticCscPattern<ROWS, COLS, MAX_NNZ> {
@@ -313,6 +322,22 @@ where
             .find_entry(row, column)?
             .ok_or(CscError::EntryNotFound)?;
         self.values[index] = value;
+        Ok(())
+    }
+
+    /// Adds to an existing stored entry without changing the sparsity pattern.
+    ///
+    /// This is useful when assembling a normal equation matrix whose symbolic
+    /// CSC pattern was prepared before numeric factorization.
+    #[inline]
+    pub fn add_to_value(&mut self, row: usize, column: usize, value: T) -> Result<(), CscError>
+    where
+        T: AddAssign,
+    {
+        let index = self
+            .find_entry(row, column)?
+            .ok_or(CscError::EntryNotFound)?;
+        self.values[index] += value;
         Ok(())
     }
 
