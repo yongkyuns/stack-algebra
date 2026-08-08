@@ -14,6 +14,7 @@ use stack_algebra::{
     Matrix, MatrixScalar, Real, StaticCscCholeskyPattern, StaticCscLdltPattern, StaticCscMatrix,
     StaticCscOrdering,
 };
+use std::ops::AddAssign;
 
 const MAX_NNZ: usize = 128;
 const MAX_STAR_NNZ: usize = 1024;
@@ -470,7 +471,11 @@ fn faer_rhs<const N: usize, T: ComplexField + FromPrimitive>() -> Mat<T> {
     Mat::from_fn(N, 1, |row, _| cast((row + 1) as f64))
 }
 
-fn bench_stack_matrix<const N: usize, const CAPACITY: usize, T: Real + FromPrimitive>(
+fn bench_stack_matrix<
+    const N: usize,
+    const CAPACITY: usize,
+    T: Real + FromPrimitive + AddAssign,
+>(
     criterion: &mut Criterion,
     scalar_name: &str,
     pattern_name: &str,
@@ -512,6 +517,27 @@ fn bench_stack_matrix<const N: usize, const CAPACITY: usize, T: Real + FromPrimi
             black_box(&factor);
         });
     });
+    group.bench_with_input(BenchmarkId::new("stack-assemble", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                let mut assembled = StaticCscMatrix::zero_with_pattern(*matrix.pattern());
+                for column in 0..N {
+                    let start = matrix.column_starts()[column];
+                    let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+                    for index in start..end {
+                        assembled
+                            .add_to_value(
+                                matrix.row_indices()[index],
+                                column,
+                                matrix.values()[index],
+                            )
+                            .unwrap();
+                    }
+                }
+                black_box(&assembled);
+            }
+        });
+    });
     group.bench_with_input(BenchmarkId::new("stack-solve", N), &N, |bench, _| {
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
@@ -523,7 +549,7 @@ fn bench_stack_matrix<const N: usize, const CAPACITY: usize, T: Real + FromPrimi
     group.finish();
 }
 
-fn bench_stack<const N: usize, T: Real + FromPrimitive>(
+fn bench_stack<const N: usize, T: Real + FromPrimitive + AddAssign>(
     criterion: &mut Criterion,
     scalar_name: &str,
 ) {
@@ -745,7 +771,7 @@ fn bench_eigen<const N: usize, T: EigenSparseScalar + FromPrimitive>(
     bench_eigen_matrix(criterion, scalar_name, stack_matrix::<N, T>());
 }
 
-fn bench_pattern<const N: usize, T: Real + ComplexField + FromPrimitive>(
+fn bench_pattern<const N: usize, T: Real + ComplexField + FromPrimitive + AddAssign>(
     criterion: &mut Criterion,
     scalar_name: &str,
 ) {

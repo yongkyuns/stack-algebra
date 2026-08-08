@@ -94,10 +94,13 @@ fixed directory layout.
   fixed-size Eigen/nalgebra cases where available. faer and dynamic cases are
   labelled explicitly; a dynamic allocation path is not presented as an
   apples-to-apples static-storage result.
-- Factorization, symbolic analysis, refactorization, and solve are separate
-  phases. Reusable-factor solve timings exclude the one-time factorization;
-  factor-and-solve timings include both. Do not compare these phases as if they
-  were the same operation.
+- Sparse benchmarks separate symbolic analysis, numeric assembly into a
+  validated pattern, factorization, refactorization, and solve. The
+  `stack-assemble` phase measures repeated `zero_with_pattern` plus
+  `add_to_value` updates and is specific to the fixed-capacity assembly API.
+  Reusable-factor solve timings exclude the one-time factorization; factor-
+  and-solve timings include both. Do not compare these phases as if they were
+  the same operation.
 - The dense LDLT suite includes both factor-and-solve cases and reusable
   two-right-hand-side solve cases; the latter keeps factorization outside the
   timed region.
