@@ -66,6 +66,14 @@ int sparse_llt_solve(SparseLltContext<Scalar>* context, const Scalar* rhs, std::
 }
 
 template <typename Scalar>
+int sparse_llt_matvec(SparseLltContext<Scalar>* context, const Scalar* rhs, Scalar* output) {
+  Eigen::Map<const DynamicVector<Scalar>> rhs_map(rhs, context->matrix.rows());
+  Eigen::Map<DynamicVector<Scalar>> output_map(output, context->matrix.rows());
+  output_map.noalias() = context->matrix * rhs_map;
+  return 1;
+}
+
+template <typename Scalar>
 void sparse_llt_destroy(SparseLltContext<Scalar>* context) {
   delete context;
 }
@@ -533,6 +541,10 @@ DEFINE_DENSE_LDLT_WRAPPERS(f64, double)
   extern "C" int sa_eigen_sparse_llt_solve_##SUFFIX(                                              \
       void* opaque, const SCALAR* rhs, std::size_t columns, SCALAR* output) {                     \
     return sparse_llt_solve(static_cast<SparseLltContext<SCALAR>*>(opaque), rhs, columns, output); \
+  }                                                                                                 \
+  extern "C" int sa_eigen_sparse_llt_matvec_##SUFFIX(                                             \
+      void* opaque, const SCALAR* rhs, SCALAR* output) {                                            \
+    return sparse_llt_matvec(static_cast<SparseLltContext<SCALAR>*>(opaque), rhs, output);          \
   }                                                                                                 \
   extern "C" void sa_eigen_sparse_llt_destroy_##SUFFIX(void* opaque) {                           \
     sparse_llt_destroy(static_cast<SparseLltContext<SCALAR>*>(opaque));                            \

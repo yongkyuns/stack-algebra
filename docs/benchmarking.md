@@ -96,8 +96,17 @@ fixed directory layout.
   apples-to-apples static-storage result.
 - Sparse benchmarks separate symbolic analysis, numeric assembly into a
   validated pattern, factorization, refactorization, and solve. The
+  `stack-matvec` and `faer-matvec` phases measure sparse matrix–vector
+  multiplication into reusable output storage with identical input patterns
+  and sequential execution. The Eigen bridge covers sparse LLT matvec for the
+  tridiagonal reference case; the standalone `sparse-matvec` group covers
+  tridiagonal, banded, and star patterns at larger dimensions without requiring
+  factorization capacity.
   `stack-assemble` phase measures repeated `zero_with_pattern` plus
-  `add_to_value` updates and is specific to the fixed-capacity assembly API.
+  coordinate-based `add_to_value` updates and is specific to the fixed-capacity
+  assembly API. `stack-assemble-indexed` uses entry positions precomputed from
+  the validated pattern and measures the no-lookup update path. Use the latter
+  when a generated workload assembles the same symbolic pattern repeatedly.
   Ordered sparse cases also report one-shot `stack-permute` separately from
   `stack-permute-reuse`, which uses a retained coordinate map.
   `faer-factor-reuse` measures faer's high-level constructor, including its

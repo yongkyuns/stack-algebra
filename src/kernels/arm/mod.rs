@@ -9,6 +9,11 @@ macro_rules! impl_neon_scalar {
     ($scalar:ty) => {
         impl MatrixScalar for $scalar {
             #[inline]
+            fn mul_add(lhs: Self, rhs: Self, addend: Self) -> Self {
+                lhs.mul_add(rhs, addend)
+            }
+
+            #[inline]
             fn matmul<const M: usize, const N: usize, const P: usize>(
                 lhs: &Matrix<M, N, Self>,
                 rhs: &Matrix<N, P, Self>,

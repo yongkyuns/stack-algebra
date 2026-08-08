@@ -9,9 +9,10 @@ use faer::prelude::Solve;
 use faer::sparse::linalg::cholesky::{
     factorize_symbolic_cholesky, CholeskySymbolicParams, SymmetricOrdering,
 };
+use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::linalg::solvers::{Llt, SymbolicLlt};
 use faer::sparse::{SparseColMat, SymbolicSparseColMat};
-use faer::{Mat, Par, Side};
+use faer::{Accum, Mat, Par, Side};
 use faer_traits::ComplexField;
 use num_traits::{FromPrimitive, Zero};
 use stack_algebra::{
@@ -41,12 +42,13 @@ trait EigenSparseScalar: Real {
         columns: usize,
         output: *mut Self,
     ) -> i32;
+    unsafe fn matvec(context: *mut c_void, rhs: *const Self, output: *mut Self) -> i32;
     unsafe fn destroy(context: *mut c_void);
 }
 
 #[cfg(feature = "eigen-compare")]
 macro_rules! impl_eigen_sparse_scalar {
-    ($scalar:ty, $create:ident, $analyze:ident, $factorize:ident, $solve:ident, $destroy:ident) => {
+    ($scalar:ty, $create:ident, $analyze:ident, $factorize:ident, $solve:ident, $matvec:ident, $destroy:ident) => {
         unsafe extern "C" {
             fn $create(
                 row_indices: *const usize,
@@ -63,6 +65,7 @@ macro_rules! impl_eigen_sparse_scalar {
                 columns: usize,
                 output: *mut $scalar,
             ) -> i32;
+            fn $matvec(context: *mut c_void, rhs: *const $scalar, output: *mut $scalar) -> i32;
             fn $destroy(context: *mut c_void);
         }
 
@@ -94,6 +97,10 @@ macro_rules! impl_eigen_sparse_scalar {
                 $solve(context, rhs, columns, output)
             }
 
+            unsafe fn matvec(context: *mut c_void, rhs: *const Self, output: *mut Self) -> i32 {
+                $matvec(context, rhs, output)
+            }
+
             unsafe fn destroy(context: *mut c_void) {
                 $destroy(context)
             }
@@ -108,6 +115,7 @@ impl_eigen_sparse_scalar!(
     sa_eigen_sparse_llt_analyze_f32,
     sa_eigen_sparse_llt_factorize_f32,
     sa_eigen_sparse_llt_solve_f32,
+    sa_eigen_sparse_llt_matvec_f32,
     sa_eigen_sparse_llt_destroy_f32
 );
 #[cfg(feature = "eigen-compare")]
@@ -117,6 +125,7 @@ impl_eigen_sparse_scalar!(
     sa_eigen_sparse_llt_analyze_f64,
     sa_eigen_sparse_llt_factorize_f64,
     sa_eigen_sparse_llt_solve_f64,
+    sa_eigen_sparse_llt_matvec_f64,
     sa_eigen_sparse_llt_destroy_f64
 );
 
@@ -169,6 +178,19 @@ impl<T: EigenSparseScalar> EigenSparseLlt<T> {
                     self.context,
                     rhs.as_slice().as_ptr(),
                     P,
+                    output.as_mut_slice().as_mut_ptr(),
+                )
+            },
+            1
+        );
+    }
+
+    fn matvec<const N: usize>(&self, rhs: &Matrix<N, 1, T>, output: &mut Matrix<N, 1, T>) {
+        assert_eq!(
+            unsafe {
+                T::matvec(
+                    self.context,
+                    rhs.as_slice().as_ptr(),
                     output.as_mut_slice().as_mut_ptr(),
                 )
             },
@@ -478,7 +500,7 @@ fn faer_rhs<const N: usize, T: ComplexField + FromPrimitive>() -> Mat<T> {
 fn bench_stack_matrix<
     const N: usize,
     const CAPACITY: usize,
-    T: Real + FromPrimitive + AddAssign,
+    T: Real + FromPrimitive + AddAssign + MatrixScalar,
 >(
     criterion: &mut Criterion,
     scalar_name: &str,
@@ -489,6 +511,20 @@ fn bench_stack_matrix<
     let mut factor = symbolic.factor(&matrix).unwrap();
     let rhs = stack_rhs::<N, T>();
     let mut solution = Matrix::<N, 1, T>::zeros();
+    let mut matvec_output = Matrix::<N, 1, T>::zeros();
+    let mut entry_indices = [0usize; CAPACITY];
+    let mut entry_count = 0;
+    for column in 0..N {
+        let start = matrix.column_starts()[column];
+        let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+        for index in start..end {
+            entry_indices[entry_count] = matrix
+                .pattern()
+                .entry_index(matrix.row_indices()[index], column)
+                .unwrap();
+            entry_count += 1;
+        }
+    }
 
     let mut group = criterion.benchmark_group(format!("sparse-llt/{scalar_name}/{pattern_name}"));
     group.bench_with_input(BenchmarkId::new("stack-analyze", N), &N, |bench, _| {
@@ -544,6 +580,23 @@ fn bench_stack_matrix<
             }
         });
     });
+    group.bench_with_input(
+        BenchmarkId::new("stack-assemble-indexed", N),
+        &N,
+        |bench, _| {
+            bench.iter(|| {
+                for _ in 0..BATCH_SIZE {
+                    let mut assembled: StaticCscMatrix<N, N, CAPACITY, T> =
+                        StaticCscMatrix::zero_with_pattern(*matrix.pattern());
+                    let values = assembled.values_mut();
+                    for &entry in &entry_indices[..entry_count] {
+                        values[entry] += matrix.values()[entry];
+                    }
+                    black_box(&assembled);
+                }
+            });
+        },
+    );
     group.bench_with_input(BenchmarkId::new("stack-solve", N), &N, |bench, _| {
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
@@ -552,10 +605,18 @@ fn bench_stack_matrix<
             black_box(&solution);
         });
     });
+    group.bench_with_input(BenchmarkId::new("stack-matvec", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                matrix.matvec_into(black_box(&rhs), black_box(&mut matvec_output));
+            }
+            black_box(&matvec_output);
+        });
+    });
     group.finish();
 }
 
-fn bench_stack<const N: usize, T: Real + FromPrimitive + AddAssign>(
+fn bench_stack<const N: usize, T: Real + FromPrimitive + AddAssign + MatrixScalar>(
     criterion: &mut Criterion,
     scalar_name: &str,
 ) {
@@ -690,6 +751,7 @@ fn bench_faer_matrix<const N: usize, T: ComplexField + FromPrimitive + Zero>(
         Llt::try_new_with_symbolic(symbolic.clone(), matrix.as_ref(), Side::Lower).unwrap();
     let rhs = faer_rhs::<N, T>();
     let mut solution = faer_rhs::<N, T>();
+    let mut matvec_output = Mat::<T>::zeros(N, 1);
 
     let mut group = criterion.benchmark_group(format!("sparse-llt/{scalar_name}/{pattern_name}"));
     group.bench_with_input(BenchmarkId::new("faer-analyze", N), &N, |bench, _| {
@@ -757,6 +819,21 @@ fn bench_faer_matrix<const N: usize, T: ComplexField + FromPrimitive + Zero>(
             black_box(&solution);
         });
     });
+    group.bench_with_input(BenchmarkId::new("faer-matvec", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                sparse_dense_matmul(
+                    black_box(matvec_output.as_mut()),
+                    Accum::Replace,
+                    black_box(matrix.as_ref()),
+                    black_box(rhs.as_ref()),
+                    cast(1.0),
+                    Par::Seq,
+                );
+            }
+            black_box(&matvec_output);
+        });
+    });
     group.finish();
 }
 
@@ -768,17 +845,30 @@ fn bench_faer<const N: usize, T: ComplexField + FromPrimitive + Zero>(
 }
 
 #[cfg(feature = "eigen-compare")]
-fn bench_eigen_matrix<const N: usize, T: EigenSparseScalar + FromPrimitive>(
+fn bench_eigen_matrix<
+    const N: usize,
+    const CAPACITY: usize,
+    T: EigenSparseScalar + FromPrimitive + MatrixScalar,
+>(
     criterion: &mut Criterion,
     scalar_name: &str,
-    matrix: StaticCscMatrix<N, N, MAX_NNZ, T>,
+    pattern_name: &str,
+    matrix: StaticCscMatrix<N, N, CAPACITY, T>,
 ) {
     let factor = EigenSparseLlt::new(&matrix);
     factor.analyze();
     factor.factorize();
     let rhs = stack_rhs::<N, T>();
     let mut solution = Matrix::<N, 1, T>::zeros();
-    let mut group = criterion.benchmark_group(format!("sparse-llt/eigen/{scalar_name}/tridiag"));
+    let mut matvec_output = Matrix::<N, 1, T>::zeros();
+    let mut stack_matvec_output = Matrix::<N, 1, T>::zeros();
+    matrix.matvec_into(&rhs, &mut stack_matvec_output);
+    factor.matvec(&rhs, &mut matvec_output);
+    for row in 0..N {
+        assert!((stack_matvec_output[(row, 0)] - matvec_output[(row, 0)]).abs() <= cast(1.0e-5));
+    }
+    let mut group =
+        criterion.benchmark_group(format!("sparse-llt/eigen/{scalar_name}/{pattern_name}"));
     group.bench_with_input(BenchmarkId::new("eigen-analyze", N), &N, |bench, _| {
         bench.iter(|| {
             for _ in 0..BATCH_SIZE {
@@ -801,18 +891,72 @@ fn bench_eigen_matrix<const N: usize, T: EigenSparseScalar + FromPrimitive>(
             black_box(&solution);
         });
     });
+    group.bench_with_input(BenchmarkId::new("eigen-matvec", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.matvec(&rhs, &mut matvec_output);
+            }
+            black_box(&matvec_output);
+        });
+    });
     group.finish();
 }
 
 #[cfg(feature = "eigen-compare")]
-fn bench_eigen<const N: usize, T: EigenSparseScalar + FromPrimitive>(
+fn bench_eigen<const N: usize, T: EigenSparseScalar + FromPrimitive + MatrixScalar>(
     criterion: &mut Criterion,
     scalar_name: &str,
 ) {
-    bench_eigen_matrix(criterion, scalar_name, stack_matrix::<N, T>());
+    bench_eigen_matrix(criterion, scalar_name, "tridiag", stack_matrix::<N, T>());
 }
 
-fn bench_pattern<const N: usize, T: Real + ComplexField + FromPrimitive + AddAssign>(
+#[cfg(feature = "eigen-compare")]
+fn bench_eigen_pattern<const N: usize, T: EigenSparseScalar + FromPrimitive + MatrixScalar>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+) {
+    bench_eigen_matvec(criterion, scalar_name, "band2", stack_banded::<N, 2, T>());
+    bench_eigen_matvec(criterion, scalar_name, "star", stack_star::<N, T>());
+}
+
+#[cfg(feature = "eigen-compare")]
+fn bench_eigen_matvec<
+    const N: usize,
+    const CAPACITY: usize,
+    T: EigenSparseScalar + FromPrimitive + MatrixScalar,
+>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+    pattern_name: &str,
+    matrix: StaticCscMatrix<N, N, CAPACITY, T>,
+) {
+    let factor = EigenSparseLlt::new(&matrix);
+    let rhs = stack_rhs::<N, T>();
+    let mut output = Matrix::<N, 1, T>::zeros();
+    let mut expected = Matrix::<N, 1, T>::zeros();
+    matrix.matvec_into(&rhs, &mut expected);
+    factor.matvec(&rhs, &mut output);
+    for row in 0..N {
+        assert!((expected[(row, 0)] - output[(row, 0)]).abs() <= cast(1.0e-5));
+    }
+
+    let mut group =
+        criterion.benchmark_group(format!("sparse-llt/eigen/{scalar_name}/{pattern_name}"));
+    group.bench_with_input(BenchmarkId::new("eigen-matvec", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                factor.matvec(&rhs, &mut output);
+            }
+            black_box(&output);
+        });
+    });
+    group.finish();
+}
+
+fn bench_pattern<
+    const N: usize,
+    T: Real + ComplexField + FromPrimitive + AddAssign + MatrixScalar,
+>(
     criterion: &mut Criterion,
     scalar_name: &str,
 ) {
@@ -821,6 +965,71 @@ fn bench_pattern<const N: usize, T: Real + ComplexField + FromPrimitive + AddAss
     bench_stack_matrix(criterion, scalar_name, "star", stack_star::<N, T>());
     bench_faer_matrix::<N, T>(criterion, scalar_name, "star", faer_star::<N, T>());
     bench_stack_ordered_star::<N, T>(criterion, scalar_name);
+}
+
+fn bench_stack_matvec_only<
+    const N: usize,
+    const CAPACITY: usize,
+    T: Real + FromPrimitive + MatrixScalar,
+>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+    pattern_name: &str,
+    matrix: StaticCscMatrix<N, N, CAPACITY, T>,
+) {
+    let rhs = stack_rhs::<N, T>();
+    let mut output = Matrix::<N, 1, T>::zeros();
+    let mut group =
+        criterion.benchmark_group(format!("sparse-matvec/{scalar_name}/{pattern_name}"));
+    group.bench_with_input(BenchmarkId::new("stack-matvec", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                matrix.matvec_into(black_box(&rhs), black_box(&mut output));
+            }
+            black_box(&output);
+        });
+    });
+    group.finish();
+}
+
+fn bench_faer_matvec_only<const N: usize, T: ComplexField + FromPrimitive>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+    pattern_name: &str,
+    matrix: SparseColMat<usize, T>,
+) {
+    let rhs = faer_rhs::<N, T>();
+    let mut output = Mat::<T>::zeros(N, 1);
+    let mut group =
+        criterion.benchmark_group(format!("sparse-matvec/{scalar_name}/{pattern_name}"));
+    group.bench_with_input(BenchmarkId::new("faer-matvec", N), &N, |bench, _| {
+        bench.iter(|| {
+            for _ in 0..BATCH_SIZE {
+                sparse_dense_matmul(
+                    black_box(output.as_mut()),
+                    Accum::Replace,
+                    black_box(matrix.as_ref()),
+                    black_box(rhs.as_ref()),
+                    cast(1.0),
+                    Par::Seq,
+                );
+            }
+            black_box(&output);
+        });
+    });
+    group.finish();
+}
+
+fn bench_matvec_pattern<const N: usize, T: Real + ComplexField + FromPrimitive + MatrixScalar>(
+    criterion: &mut Criterion,
+    scalar_name: &str,
+) {
+    bench_stack_matvec_only(criterion, scalar_name, "tridiag", stack_matrix::<N, T>());
+    bench_faer_matvec_only::<N, T>(criterion, scalar_name, "tridiag", faer_matrix::<N, T>());
+    bench_stack_matvec_only(criterion, scalar_name, "band2", stack_banded::<N, 2, T>());
+    bench_faer_matvec_only::<N, T>(criterion, scalar_name, "band2", faer_banded::<N, 2, T>());
+    bench_stack_matvec_only(criterion, scalar_name, "star", stack_star::<N, T>());
+    bench_faer_matvec_only::<N, T>(criterion, scalar_name, "star", faer_star::<N, T>());
 }
 
 fn bench_stack_ordered_star<const N: usize, T: Real + FromPrimitive>(
@@ -930,8 +1139,10 @@ fn bench_all(criterion: &mut Criterion) {
             #[cfg(feature = "eigen-compare")]
             {
                 bench_eigen::<15, f32>(criterion, scalar_name);
+                bench_eigen_pattern::<32, f32>(criterion, scalar_name);
             }
             bench_pattern::<15, f32>(criterion, scalar_name);
+            bench_matvec_pattern::<32, f32>(criterion, scalar_name);
         } else {
             bench_stack::<3, f64>(criterion, scalar_name);
             bench_stack::<6, f64>(criterion, scalar_name);
@@ -950,8 +1161,10 @@ fn bench_all(criterion: &mut Criterion) {
             #[cfg(feature = "eigen-compare")]
             {
                 bench_eigen::<15, f64>(criterion, scalar_name);
+                bench_eigen_pattern::<32, f64>(criterion, scalar_name);
             }
             bench_pattern::<15, f64>(criterion, scalar_name);
+            bench_matvec_pattern::<32, f64>(criterion, scalar_name);
         }
     }
 }

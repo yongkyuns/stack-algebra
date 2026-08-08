@@ -64,6 +64,15 @@ After the initial native baseline, three targeted changes were made:
   Jacobi iteration; the pairwise Jacobi statistics use one fused packet pass.
 - The Jacobi fast path now uses raw finite dot products directly and retains
   scaled accumulation only for overflow, underflow, or zero-norm cases.
+- Sparse CSC matvec now works through borrowed contiguous value, index, and
+  vector/output slices instead of matrix indexing in the inner loop. In a
+  longer isolated 32×32 banded `f32` run, this reduced stack-algebra from
+  approximately 7.65 µs to 6.82 µs, matching the Eigen reference at about
+  6.82 µs. The change is portable and does not add an ISA-specific path.
+- `MatrixScalar::mul_add` now provides a compile-time fused-accumulation hook;
+  x86 and Arm floating-point backends use the scalar FMA operation while the
+  portable implementation retains `add + multiply`. The isolated 32×32
+  banded `f64` path improved to approximately 7.0 µs from about 8.2 µs.
 
 The comparison benchmark now calls `Matrix::matvec_into` for stack-algebra;
 the previous version called the generic `mul_into` matrix-multiply path while

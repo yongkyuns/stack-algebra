@@ -15,9 +15,24 @@ mod sse2;
 #[cfg(all(target_feature = "sse2", not(target_feature = "avx2")))]
 use sse2::{X86Sse2Matmul, X86Sse2Reduction};
 
+#[inline]
+fn primitive_mul_add_f32(lhs: f32, rhs: f32, addend: f32) -> f32 {
+    f32::mul_add(lhs, rhs, addend)
+}
+
+#[inline]
+fn primitive_mul_add_f64(lhs: f64, rhs: f64, addend: f64) -> f64 {
+    f64::mul_add(lhs, rhs, addend)
+}
+
 macro_rules! impl_kernel_scalar {
-    ($scalar:ty, $matmul:ty, $reduction:ty) => {
+    ($scalar:ty, $mul_add:ident, $matmul:ty, $reduction:ty) => {
         impl MatrixScalar for $scalar {
+            #[inline]
+            fn mul_add(lhs: Self, rhs: Self, addend: Self) -> Self {
+                $mul_add(lhs, rhs, addend)
+            }
+
             #[inline]
             fn matmul<const M: usize, const N: usize, const P: usize>(
                 lhs: &Matrix<M, N, Self>,
@@ -118,11 +133,11 @@ macro_rules! impl_kernel_scalar {
 }
 
 #[cfg(target_feature = "avx2")]
-impl_kernel_scalar!(f32, X86Avx2Matmul, X86Avx2Reduction);
+impl_kernel_scalar!(f32, primitive_mul_add_f32, X86Avx2Matmul, X86Avx2Reduction);
 #[cfg(target_feature = "avx2")]
-impl_kernel_scalar!(f64, X86Avx2Matmul, X86Avx2Reduction);
+impl_kernel_scalar!(f64, primitive_mul_add_f64, X86Avx2Matmul, X86Avx2Reduction);
 
 #[cfg(all(target_feature = "sse2", not(target_feature = "avx2")))]
-impl_kernel_scalar!(f32, X86Sse2Matmul, X86Sse2Reduction);
+impl_kernel_scalar!(f32, primitive_mul_add_f32, X86Sse2Matmul, X86Sse2Reduction);
 #[cfg(all(target_feature = "sse2", not(target_feature = "avx2")))]
-impl_kernel_scalar!(f64, X86Sse2Matmul, X86Sse2Reduction);
+impl_kernel_scalar!(f64, primitive_mul_add_f64, X86Sse2Matmul, X86Sse2Reduction);

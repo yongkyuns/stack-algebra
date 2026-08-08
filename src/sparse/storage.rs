@@ -1,6 +1,6 @@
-use core::ops::{Add, AddAssign, Mul};
+use core::ops::AddAssign;
 
-use crate::{Matrix, Zero};
+use crate::{Matrix, MatrixScalar, Zero};
 
 use super::errors::CscError;
 
@@ -431,18 +431,21 @@ where
     #[inline]
     pub fn matvec_into(&self, vector: &Matrix<COLS, 1, T>, output: &mut Matrix<ROWS, 1, T>)
     where
-        T: Add<Output = T> + Mul<Output = T>,
+        T: MatrixScalar,
     {
-        for row in output.iter_mut() {
-            *row = T::zero();
+        let vector_values = vector.as_slice();
+        let output_values = output.as_mut_slice();
+        let matrix_values = self.values();
+        let row_indices = self.row_indices();
+        for value in output_values.iter_mut() {
+            *value = T::zero();
         }
-        for column in 0..COLS {
-            let value = vector[column];
-            for index in
-                self.pattern.column_starts[column]..self.column_end(column).unwrap_or(self.nnz())
-            {
-                let row = self.pattern.row_indices[index];
-                output[row] = output[row] + self.values[index] * value;
+        for (column, &value) in vector_values.iter().enumerate() {
+            let start = self.pattern.column_starts[column];
+            let end = self.column_end(column).unwrap_or(self.nnz());
+            for index in start..end {
+                let row = row_indices[index];
+                output_values[row] = T::mul_add(matrix_values[index], value, output_values[row]);
             }
         }
     }
@@ -451,7 +454,7 @@ where
     #[inline]
     pub fn matvec(&self, vector: &Matrix<COLS, 1, T>) -> Matrix<ROWS, 1, T>
     where
-        T: Add<Output = T> + Mul<Output = T>,
+        T: MatrixScalar,
     {
         let mut output = Matrix::<ROWS, 1, T>::zeros();
         self.matvec_into(vector, &mut output);

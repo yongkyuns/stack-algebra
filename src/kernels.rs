@@ -182,6 +182,14 @@ pub(crate) use portable::ScalarReduction;
 /// scalar loops. Built-in floating-point types override those methods with
 /// target-selected kernels when available.
 pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
+    /// Computes `lhs * rhs + addend` using the scalar backend's preferred
+    /// arithmetic operation.
+    #[doc(hidden)]
+    #[inline]
+    fn mul_add(lhs: Self, rhs: Self, addend: Self) -> Self {
+        addend + lhs * rhs
+    }
+
     /// Multiplies matrices into caller-provided output storage.
     ///
     /// This is an implementation hook for scalar types. Normal callers use

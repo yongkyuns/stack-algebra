@@ -271,7 +271,7 @@ Build a canonical pattern once, update values repeatedly, and reuse the factor:
 use stack_algebra::{Matrix, StaticCscCholesky, StaticCscMatrix};
 
 type Sparse = StaticCscMatrix<3, 3, 5, f64>;
-let a = Sparse::from_pattern(
+let mut a = Sparse::from_pattern(
     &[4.0, 1.0, 3.0, 1.0, 2.0],
     &[0, 1, 1, 2, 2],
     &[0, 2, 4, 5],
@@ -280,6 +280,11 @@ let mut factor = StaticCscCholesky::<3, 8, f64>::decompose(&a)
     .expect("SPD sparse input");
 let rhs = Matrix::<3, 1, f64>::from_columns([[1.0, 2.0, 3.0]]);
 let x = factor.solve(&rhs);
+
+// Reuse a validated entry position when assembling the same pattern.
+let entry = a.pattern().entry_index(1, 0).expect("stored entry");
+let values = a.values_mut();
+values[entry] += 0.5;
 factor.recompute(&a).expect("same sparsity pattern");
 ```
 

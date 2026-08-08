@@ -39,9 +39,9 @@ StaticCscCholesky|src/sparse/cholesky.rs|docs/API_USAGE.md
 StaticCscLdltPattern|src/sparse.rs|docs/API_USAGE.md
 StaticCscLdlt|src/sparse/ldlt.rs|docs/API_USAGE.md
 StaticCscLdltFactor|src/sparse/ldlt.rs|docs/FEATURES.md
-StaticBlockCscMatrix|src/block_sparse.rs|docs/API_USAGE.md
-StaticBlockCsrMatrix|src/block_sparse.rs|docs/API_USAGE.md
-StaticBlockCscCholeskyPattern|src/block_sparse.rs|docs/FEATURES.md
-StaticBlockCscCholesky|src/block_sparse.rs|docs/FEATURES.md
-StaticBlockCscLdltPattern|src/block_sparse.rs|docs/FEATURES.md
-StaticBlockCscLdlt|src/block_sparse.rs|docs/API_USAGE.md
+StaticBlockCscMatrix|src/block_sparse/storage.rs|docs/API_USAGE.md
+StaticBlockCsrMatrix|src/block_sparse/csr.rs|docs/API_USAGE.md
+StaticBlockCscCholeskyPattern|src/block_sparse/symbolic.rs|docs/FEATURES.md
+StaticBlockCscCholesky|src/block_sparse/cholesky.rs|docs/FEATURES.md
+StaticBlockCscLdltPattern|src/block_sparse/symbolic.rs|docs/FEATURES.md
+StaticBlockCscLdlt|src/block_sparse/ldlt.rs|docs/API_USAGE.md
