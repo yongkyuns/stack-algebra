@@ -462,8 +462,11 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         output.lower.pattern = self.lower;
         output.ordering = StaticCscOrdering::identity();
 
+        let mut work = [T::zero(); N];
         for column in 0..N {
-            let mut work = [T::zero(); N];
+            for value in &mut work[column..] {
+                *value = T::zero();
+            }
             let matrix_start = matrix.column_starts()[column];
             let matrix_end = matrix.column_end(column).unwrap_or(matrix.nnz());
             for index in matrix_start..matrix_end {
@@ -540,8 +543,11 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         output.lower.pattern = self.lower;
         output.ordering = StaticCscOrdering::identity();
 
+        let mut work = [T::zero(); N];
         for column in 0..N {
-            let mut work = [T::zero(); N];
+            for value in &mut work[column..] {
+                *value = T::zero();
+            }
             let matrix_start = matrix.column_starts()[column];
             let matrix_end = matrix.column_end(column).unwrap_or(matrix.nnz());
             for index in matrix_start..matrix_end {
