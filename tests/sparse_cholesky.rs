@@ -162,6 +162,11 @@ fn minimum_degree_ordering_reduces_star_fill_and_solves() {
 
     let factor = symbolic.factor(&matrix).unwrap();
     let ordered = symbolic.prepare_ordered(&matrix).unwrap();
+    let permutation = ordering.permutation_for_pattern(matrix.pattern()).unwrap();
+    let ordered_reuse = symbolic
+        .prepare_ordered_with_permutation(&permutation, &matrix)
+        .unwrap();
+    assert_eq!(ordered_reuse, ordered);
     let ordered_factor = symbolic.factor_ordered(&ordered).unwrap();
     let mut reusable_factor = StaticCscCholesky::<4, 10, f64>::decompose(&matrix).unwrap();
     reusable_factor

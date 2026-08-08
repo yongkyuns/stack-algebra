@@ -98,6 +98,8 @@ fixed directory layout.
   validated pattern, factorization, refactorization, and solve. The
   `stack-assemble` phase measures repeated `zero_with_pattern` plus
   `add_to_value` updates and is specific to the fixed-capacity assembly API.
+  Ordered sparse cases also report one-shot `stack-permute` separately from
+  `stack-permute-reuse`, which uses a retained coordinate map.
   Reusable-factor solve timings exclude the one-time factorization; factor-
   and-solve timings include both. Do not compare these phases as if they were
   the same operation.

@@ -795,7 +795,10 @@ fn bench_stack_ordered_star<const N: usize, T: Real + FromPrimitive>(
     let symbolic =
         StaticCscCholeskyPattern::<N, MAX_STAR_NNZ>::analyze_with_ordering(&matrix, ordering)
             .unwrap();
-    let ordered = symbolic.prepare_ordered(&matrix).unwrap();
+    let permutation = ordering.permutation_for_pattern(matrix.pattern()).unwrap();
+    let ordered = symbolic
+        .prepare_ordered_with_permutation(&permutation, &matrix)
+        .unwrap();
     let mut factor = symbolic.factor_ordered(&ordered).unwrap();
     let mut factor_with_permutation = symbolic.factor(&matrix).unwrap();
     let rhs = stack_rhs::<N, T>();
@@ -808,6 +811,17 @@ fn bench_stack_ordered_star<const N: usize, T: Real + FromPrimitive>(
             }
         });
     });
+    group.bench_with_input(
+        BenchmarkId::new("stack-permute-reuse", N),
+        &N,
+        |bench, _| {
+            bench.iter(|| {
+                for _ in 0..BATCH_SIZE {
+                    black_box(permutation.apply(black_box(&matrix)));
+                }
+            });
+        },
+    );
     group.bench_with_input(
         BenchmarkId::new("stack-factor-with-permutation", N),
         &N,

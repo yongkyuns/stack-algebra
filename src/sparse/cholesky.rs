@@ -1,7 +1,9 @@
 use crate::{Matrix, Real, Zero};
 
 use super::ldlt::StaticCscLdlt;
-use super::{SparseCholeskyError, StaticCscMatrix, StaticCscOrdering, StaticCscPattern};
+use super::{
+    SparseCholeskyError, StaticCscMatrix, StaticCscOrdering, StaticCscPattern, StaticCscPermutation,
+};
 
 /// Symbolic pattern for a fixed-capacity simplicial sparse Cholesky factor.
 ///
@@ -244,6 +246,22 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
     ) -> Result<StaticCscMatrix<N, N, MAX_A_NNZ, T>, SparseCholeskyError> {
         validate_symmetric_structure(matrix)?;
         let ordered = self.ordering.permute(matrix)?;
+        self.validate_factor_pattern(&ordered)?;
+        Ok(ordered)
+    }
+
+    /// Prepares ordered coordinates using a caller-retained permutation map.
+    ///
+    /// Build the map once with [`StaticCscOrdering::permutation_for_pattern`]
+    /// when the same sparse structure is transformed repeatedly.
+    #[inline]
+    pub fn prepare_ordered_with_permutation<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(
+        &self,
+        permutation: &StaticCscPermutation<N, MAX_A_NNZ>,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Result<StaticCscMatrix<N, N, MAX_A_NNZ, T>, SparseCholeskyError> {
+        validate_symmetric_structure(matrix)?;
+        let ordered = permutation.apply(matrix);
         self.validate_factor_pattern(&ordered)?;
         Ok(ordered)
     }
