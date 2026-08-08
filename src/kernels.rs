@@ -89,6 +89,23 @@ pub(crate) trait MatmulBackend<T> {
             *value = *value / divisor;
         }
     }
+
+    fn cholesky_update_column<const D: usize>(
+        matrix: &mut Matrix<D, D, T>,
+        column: usize,
+        diagonal: T,
+    ) where
+        T: Copy + Mul<Output = T> + Sub<Output = T> + Div<Output = T>,
+    {
+        let data = matrix.as_mut_slice();
+        for row in (column + 1)..D {
+            let mut value = data[column * D + row];
+            for previous in 0..column {
+                value = value - data[previous * D + row] * data[previous * D + column];
+            }
+            data[column * D + row] = value / diagonal;
+        }
+    }
 }
 
 pub(crate) trait ReductionBackend<T> {
@@ -228,6 +245,25 @@ pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
     {
         for value in target {
             *value = *value / divisor;
+        }
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    fn cholesky_update_column<const D: usize>(
+        matrix: &mut Matrix<D, D, Self>,
+        column: usize,
+        diagonal: Self,
+    ) where
+        Self: Sub<Output = Self> + Div<Output = Self>,
+    {
+        let data = matrix.as_mut_slice();
+        for row in (column + 1)..D {
+            let mut value = data[column * D + row];
+            for previous in 0..column {
+                value = value - data[previous * D + row] * data[previous * D + column];
+            }
+            data[column * D + row] = value / diagonal;
         }
     }
 }
@@ -439,6 +475,32 @@ mod tests {
         }
     }
 
+    fn check_matvec_f64<const M: usize, const N: usize>() {
+        let matrix = generated_f64::<M, N>(41);
+        let vector = generated_f64::<N, 1>(73);
+        let actual = matrix.matvec(&vector);
+        for row in 0..M {
+            let mut expected = 0.0;
+            for column in 0..N {
+                expected += matrix[(row, column)] * vector[(column, 0)];
+            }
+            assert!((actual[row] - expected).abs() <= 1e-13);
+        }
+    }
+
+    fn check_matvec_f32<const M: usize, const N: usize>() {
+        let matrix = generated_f32::<M, N>(41);
+        let vector = generated_f32::<N, 1>(73);
+        let actual = matrix.matvec(&vector);
+        for row in 0..M {
+            let mut expected = 0.0_f64;
+            for column in 0..N {
+                expected += matrix[(row, column)] as f64 * vector[(column, 0)] as f64;
+            }
+            assert!((actual[row] as f64 - expected).abs() <= 2e-6);
+        }
+    }
+
     #[test]
     fn scalar_f64_matmul_covers_tails_and_rectangular_shapes() {
         check_f64::<1, 1, 1>();
@@ -465,6 +527,17 @@ mod tests {
         check_f32::<6, 15, 6>();
         check_f32::<15, 15, 15>();
         check_f32::<16, 16, 16>();
+    }
+
+    #[test]
+    fn matvec_covers_packet_pairs_and_tails() {
+        check_matvec_f64::<3, 5>();
+        check_matvec_f64::<8, 15>();
+        check_matvec_f64::<16, 16>();
+        check_matvec_f64::<32, 32>();
+        check_matvec_f32::<7, 9>();
+        check_matvec_f32::<16, 15>();
+        check_matvec_f32::<32, 32>();
     }
 
     #[test]

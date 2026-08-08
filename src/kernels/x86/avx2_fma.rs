@@ -22,7 +22,7 @@ impl ReductionBackend<f32> for X86Avx2FmaReduction {
         vector: &Vector<N, f32>,
         output: &mut Vector<M, f32>,
     ) {
-        unsafe { super::avx2::reduction_matvec_f32(matrix, vector, output) }
+        unsafe { reduction_matvec_f32(matrix, vector, output) }
     }
 }
 
@@ -43,7 +43,7 @@ impl ReductionBackend<f64> for X86Avx2FmaReduction {
         vector: &Vector<N, f64>,
         output: &mut Vector<M, f64>,
     ) {
-        unsafe { super::avx2::reduction_matvec_f64(matrix, vector, output) }
+        unsafe { reduction_matvec_f64(matrix, vector, output) }
     }
 }
 
@@ -393,6 +393,178 @@ unsafe fn reduction_squared_norm_f64<const M: usize, const N: usize>(
         index += 1;
     }
     result
+}
+
+#[target_feature(enable = "avx2,fma")]
+unsafe fn reduction_matvec_f32<const M: usize, const N: usize>(
+    matrix: &Matrix<M, N, f32>,
+    vector: &Vector<N, f32>,
+    output: &mut Vector<M, f32>,
+) {
+    use core::arch::x86_64::{
+        _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_set1_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+    };
+    let matrix_values = matrix.as_slice();
+    let output_values = output.as_mut_slice();
+    let mut row = 0;
+    while row + 32 <= M {
+        let mut accumulators = [_mm256_setzero_ps(); 4];
+        for column in 0..N {
+            let factor = _mm256_set1_ps(vector[column]);
+            let offset = column * M + row;
+            accumulators[0] = _mm256_fmadd_ps(
+                _mm256_loadu_ps(matrix_values.as_ptr().add(offset)),
+                factor,
+                accumulators[0],
+            );
+            accumulators[1] = _mm256_fmadd_ps(
+                _mm256_loadu_ps(matrix_values.as_ptr().add(offset + 8)),
+                factor,
+                accumulators[1],
+            );
+            accumulators[2] = _mm256_fmadd_ps(
+                _mm256_loadu_ps(matrix_values.as_ptr().add(offset + 16)),
+                factor,
+                accumulators[2],
+            );
+            accumulators[3] = _mm256_fmadd_ps(
+                _mm256_loadu_ps(matrix_values.as_ptr().add(offset + 24)),
+                factor,
+                accumulators[3],
+            );
+        }
+        for (index, accumulator) in accumulators.into_iter().enumerate() {
+            _mm256_storeu_ps(output_values.as_mut_ptr().add(row + index * 8), accumulator);
+        }
+        row += 32;
+    }
+    while row + 16 <= M {
+        let mut accumulators = [_mm256_setzero_ps(); 2];
+        for column in 0..N {
+            let factor = _mm256_set1_ps(vector[column]);
+            let offset = column * M + row;
+            accumulators[0] = _mm256_fmadd_ps(
+                _mm256_loadu_ps(matrix_values.as_ptr().add(offset)),
+                factor,
+                accumulators[0],
+            );
+            accumulators[1] = _mm256_fmadd_ps(
+                _mm256_loadu_ps(matrix_values.as_ptr().add(offset + 8)),
+                factor,
+                accumulators[1],
+            );
+        }
+        for (index, accumulator) in accumulators.into_iter().enumerate() {
+            _mm256_storeu_ps(output_values.as_mut_ptr().add(row + index * 8), accumulator);
+        }
+        row += 16;
+    }
+    while row + 8 <= M {
+        let mut accumulator = _mm256_setzero_ps();
+        for column in 0..N {
+            accumulator = _mm256_fmadd_ps(
+                _mm256_loadu_ps(matrix_values.as_ptr().add(column * M + row)),
+                _mm256_set1_ps(vector[column]),
+                accumulator,
+            );
+        }
+        _mm256_storeu_ps(output_values.as_mut_ptr().add(row), accumulator);
+        row += 8;
+    }
+    while row < M {
+        let mut value = 0.0_f32;
+        for column in 0..N {
+            value += matrix[(row, column)] * vector[column];
+        }
+        output[row] = value;
+        row += 1;
+    }
+}
+
+#[target_feature(enable = "avx2,fma")]
+unsafe fn reduction_matvec_f64<const M: usize, const N: usize>(
+    matrix: &Matrix<M, N, f64>,
+    vector: &Vector<N, f64>,
+    output: &mut Vector<M, f64>,
+) {
+    use core::arch::x86_64::{
+        _mm256_fmadd_pd, _mm256_loadu_pd, _mm256_set1_pd, _mm256_setzero_pd, _mm256_storeu_pd,
+    };
+    let matrix_values = matrix.as_slice();
+    let output_values = output.as_mut_slice();
+    let mut row = 0;
+    while row + 16 <= M {
+        let mut accumulators = [_mm256_setzero_pd(); 4];
+        for column in 0..N {
+            let factor = _mm256_set1_pd(vector[column]);
+            let offset = column * M + row;
+            accumulators[0] = _mm256_fmadd_pd(
+                _mm256_loadu_pd(matrix_values.as_ptr().add(offset)),
+                factor,
+                accumulators[0],
+            );
+            accumulators[1] = _mm256_fmadd_pd(
+                _mm256_loadu_pd(matrix_values.as_ptr().add(offset + 4)),
+                factor,
+                accumulators[1],
+            );
+            accumulators[2] = _mm256_fmadd_pd(
+                _mm256_loadu_pd(matrix_values.as_ptr().add(offset + 8)),
+                factor,
+                accumulators[2],
+            );
+            accumulators[3] = _mm256_fmadd_pd(
+                _mm256_loadu_pd(matrix_values.as_ptr().add(offset + 12)),
+                factor,
+                accumulators[3],
+            );
+        }
+        for (index, accumulator) in accumulators.into_iter().enumerate() {
+            _mm256_storeu_pd(output_values.as_mut_ptr().add(row + index * 4), accumulator);
+        }
+        row += 16;
+    }
+    while row + 8 <= M {
+        let mut accumulators = [_mm256_setzero_pd(); 2];
+        for column in 0..N {
+            let factor = _mm256_set1_pd(vector[column]);
+            let offset = column * M + row;
+            accumulators[0] = _mm256_fmadd_pd(
+                _mm256_loadu_pd(matrix_values.as_ptr().add(offset)),
+                factor,
+                accumulators[0],
+            );
+            accumulators[1] = _mm256_fmadd_pd(
+                _mm256_loadu_pd(matrix_values.as_ptr().add(offset + 4)),
+                factor,
+                accumulators[1],
+            );
+        }
+        for (index, accumulator) in accumulators.into_iter().enumerate() {
+            _mm256_storeu_pd(output_values.as_mut_ptr().add(row + index * 4), accumulator);
+        }
+        row += 8;
+    }
+    while row + 4 <= M {
+        let mut accumulator = _mm256_setzero_pd();
+        for column in 0..N {
+            accumulator = _mm256_fmadd_pd(
+                _mm256_loadu_pd(matrix_values.as_ptr().add(column * M + row)),
+                _mm256_set1_pd(vector[column]),
+                accumulator,
+            );
+        }
+        _mm256_storeu_pd(output_values.as_mut_ptr().add(row), accumulator);
+        row += 4;
+    }
+    while row < M {
+        let mut value = 0.0_f64;
+        for column in 0..N {
+            value += matrix[(row, column)] * vector[column];
+        }
+        output[row] = value;
+        row += 1;
+    }
 }
 
 #[target_feature(enable = "avx2,fma")]
@@ -1021,6 +1193,15 @@ impl MatmulBackend<f32> for X86Avx2FmaMatmul {
     fn scale_divide(target: &mut [f32], divisor: f32) {
         unsafe { super::avx2::scale_divide_f32(target, divisor) }
     }
+
+    #[inline]
+    fn cholesky_update_column<const D: usize>(
+        matrix: &mut Matrix<D, D, f32>,
+        column: usize,
+        diagonal: f32,
+    ) {
+        unsafe { super::avx2::cholesky_update_column_f32(matrix, column, diagonal) }
+    }
 }
 
 impl MatmulBackend<f64> for X86Avx2FmaMatmul {
@@ -1074,5 +1255,14 @@ impl MatmulBackend<f64> for X86Avx2FmaMatmul {
     #[inline]
     fn scale_divide(target: &mut [f64], divisor: f64) {
         unsafe { super::avx2::scale_divide_f64(target, divisor) }
+    }
+
+    #[inline]
+    fn cholesky_update_column<const D: usize>(
+        matrix: &mut Matrix<D, D, f64>,
+        column: usize,
+        diagonal: f64,
+    ) {
+        unsafe { super::avx2::cholesky_update_column_f64(matrix, column, diagonal) }
     }
 }

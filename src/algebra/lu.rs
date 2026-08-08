@@ -152,10 +152,18 @@ impl<const D: usize, T: Real + MatrixScalar> PartialPivLu<D, T> {
                 let multiplier = output.upper[(row, diagonal)] / pivot;
                 output.lower[(row, diagonal)] = multiplier;
                 output.upper[(row, diagonal)] = T::zero();
-                for column in (diagonal + 1)..D {
-                    output.upper[(row, column)] =
-                        output.upper[(row, column)] - multiplier * output.upper[(diagonal, column)];
-                }
+            }
+            let tail_len = D - diagonal - 1;
+            let multiplier_start = diagonal * D + diagonal + 1;
+            let multiplier_end = multiplier_start + tail_len;
+            for column in (diagonal + 1)..D {
+                let target_start = column * D + diagonal + 1;
+                let scale = output.upper[(diagonal, column)];
+                T::rank_update_sub(
+                    &mut output.upper.as_mut_slice()[target_start..target_start + tail_len],
+                    &output.lower.as_slice()[multiplier_start..multiplier_end],
+                    scale,
+                );
             }
         }
     }

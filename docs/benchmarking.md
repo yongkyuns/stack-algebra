@@ -50,6 +50,27 @@ python3 scripts/generate_benchmark_report.py \
   --require-eigen
 ```
 
+### Fast full sweep
+
+For broad triage, run all six Rust benchmark targets in parallel with short,
+bounded Criterion windows. The script uses native CPU instructions for both
+Rust (`-C target-cpu=native`) and Eigen (`-march=native`) unless the caller
+provides explicit `RUSTFLAGS` or `CXXFLAGS`:
+
+```sh
+EIGEN3_INCLUDE_DIR=/usr/include/eigen3 scripts/bench_fast.sh
+```
+
+The default profile uses 10 ms warmup, 20 ms measurement, and 10 samples per
+case. Override `BENCH_WARMUP_TIME`, `BENCH_MEASUREMENT_TIME`, and
+`BENCH_SAMPLE_SIZE` when trading coverage for stability; Criterion requires at
+least 10 samples. Logs are written to `benchmark-report/raw/fast/`; the
+generated report is the same `benchmark-report/index.html` used by the longer
+run.
+
+This profile is for identifying regressions and ranking metrics. Use the longer
+windows above before making release or architecture decisions.
+
 For reproducible local reports, pass provenance as newline-delimited
 `key=value` fields with `--metadata-file`; inline `--metadata` uses the same
 keys separated by semicolons. The generator adds `generated_utc` and

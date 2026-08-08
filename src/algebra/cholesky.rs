@@ -105,32 +105,36 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
         output: &mut Self,
     ) -> Result<(), DecompositionError> {
         let input = matrix.as_slice();
-        let lower = output.lower.as_mut_slice();
+        output.lower = Matrix::zeros();
+        for column in 0..D {
+            for row in column..D {
+                output.lower[(row, column)] = input[column * D + row];
+            }
+        }
 
         for column in 0..D {
             let column_offset = column * D;
-            for row in column..D {
-                let mut value = input[column_offset + row];
-                for previous in 0..column {
-                    let previous_offset = previous * D;
-                    value = value - lower[previous_offset + row] * lower[previous_offset + column];
-                }
+            let mut diagonal = input[column_offset + column];
+            for previous in 0..column {
+                let previous_offset = previous * D;
+                let factor = output.lower.as_slice()[previous_offset + column];
+                diagonal = diagonal - factor * factor;
+            }
 
-                if row == column {
-                    if !value.is_finite() {
-                        return Err(DecompositionError::NonFinite);
-                    }
-                    if value <= T::zero() {
-                        return Err(DecompositionError::NotPositiveDefinite);
-                    }
-                    lower[column_offset + row] = value.sqrt();
-                } else {
-                    let multiplier = value / lower[column_offset + column];
-                    if !multiplier.is_finite() {
-                        return Err(DecompositionError::NonFinite);
-                    }
-                    lower[column_offset + row] = multiplier;
-                }
+            if !diagonal.is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
+            if diagonal <= T::zero() {
+                return Err(DecompositionError::NotPositiveDefinite);
+            }
+            let diagonal = diagonal.sqrt();
+            output.lower.as_mut_slice()[column_offset + column] = diagonal;
+            T::cholesky_update_column(&mut output.lower, column, diagonal);
+            if !output.lower.as_slice()[column_offset + column + 1..column_offset + D]
+                .iter()
+                .all(|value| value.is_finite())
+            {
+                return Err(DecompositionError::NonFinite);
             }
         }
 

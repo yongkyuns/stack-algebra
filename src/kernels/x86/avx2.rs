@@ -1,4 +1,7 @@
-use crate::{Matrix, Vector};
+use crate::Matrix;
+
+#[cfg(not(target_feature = "fma"))]
+use crate::Vector;
 
 #[cfg(not(target_feature = "fma"))]
 use super::super::{MatmulBackend, ReductionBackend};
@@ -207,6 +210,7 @@ unsafe fn reduction_squared_norm_f64<const M: usize, const N: usize>(
     result
 }
 
+#[cfg(not(target_feature = "fma"))]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn reduction_matvec_f32<const M: usize, const N: usize>(
     matrix: &Matrix<M, N, f32>,
@@ -218,6 +222,74 @@ pub(super) unsafe fn reduction_matvec_f32<const M: usize, const N: usize>(
         _mm256_storeu_ps,
     };
     let mut row = 0;
+    while row + 32 <= M {
+        let mut first = _mm256_setzero_ps();
+        let mut second = _mm256_setzero_ps();
+        let mut third = _mm256_setzero_ps();
+        let mut fourth = _mm256_setzero_ps();
+        for column in 0..N {
+            let factor = _mm256_set1_ps(vector[column]);
+            let offset = column * M + row;
+            first = _mm256_add_ps(
+                first,
+                _mm256_mul_ps(
+                    _mm256_loadu_ps(matrix.as_slice().as_ptr().add(offset)),
+                    factor,
+                ),
+            );
+            second = _mm256_add_ps(
+                second,
+                _mm256_mul_ps(
+                    _mm256_loadu_ps(matrix.as_slice().as_ptr().add(offset + 8)),
+                    factor,
+                ),
+            );
+            third = _mm256_add_ps(
+                third,
+                _mm256_mul_ps(
+                    _mm256_loadu_ps(matrix.as_slice().as_ptr().add(offset + 16)),
+                    factor,
+                ),
+            );
+            fourth = _mm256_add_ps(
+                fourth,
+                _mm256_mul_ps(
+                    _mm256_loadu_ps(matrix.as_slice().as_ptr().add(offset + 24)),
+                    factor,
+                ),
+            );
+        }
+        _mm256_storeu_ps(output.as_mut_slice().as_mut_ptr().add(row), first);
+        _mm256_storeu_ps(output.as_mut_slice().as_mut_ptr().add(row + 8), second);
+        _mm256_storeu_ps(output.as_mut_slice().as_mut_ptr().add(row + 16), third);
+        _mm256_storeu_ps(output.as_mut_slice().as_mut_ptr().add(row + 24), fourth);
+        row += 32;
+    }
+    while row + 16 <= M {
+        let mut first = _mm256_setzero_ps();
+        let mut second = _mm256_setzero_ps();
+        for column in 0..N {
+            let factor = _mm256_set1_ps(vector[column]);
+            let offset = column * M + row;
+            first = _mm256_add_ps(
+                first,
+                _mm256_mul_ps(
+                    _mm256_loadu_ps(matrix.as_slice().as_ptr().add(offset)),
+                    factor,
+                ),
+            );
+            second = _mm256_add_ps(
+                second,
+                _mm256_mul_ps(
+                    _mm256_loadu_ps(matrix.as_slice().as_ptr().add(offset + 8)),
+                    factor,
+                ),
+            );
+        }
+        _mm256_storeu_ps(output.as_mut_slice().as_mut_ptr().add(row), first);
+        _mm256_storeu_ps(output.as_mut_slice().as_mut_ptr().add(row + 8), second);
+        row += 16;
+    }
     while row + 8 <= M {
         let mut accumulator = _mm256_setzero_ps();
         for column in 0..N {
@@ -240,6 +312,7 @@ pub(super) unsafe fn reduction_matvec_f32<const M: usize, const N: usize>(
     }
 }
 
+#[cfg(not(target_feature = "fma"))]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn reduction_matvec_f64<const M: usize, const N: usize>(
     matrix: &Matrix<M, N, f64>,
@@ -251,6 +324,74 @@ pub(super) unsafe fn reduction_matvec_f64<const M: usize, const N: usize>(
         _mm256_storeu_pd,
     };
     let mut row = 0;
+    while row + 16 <= M {
+        let mut first = _mm256_setzero_pd();
+        let mut second = _mm256_setzero_pd();
+        let mut third = _mm256_setzero_pd();
+        let mut fourth = _mm256_setzero_pd();
+        for column in 0..N {
+            let factor = _mm256_set1_pd(vector[column]);
+            let offset = column * M + row;
+            first = _mm256_add_pd(
+                first,
+                _mm256_mul_pd(
+                    _mm256_loadu_pd(matrix.as_slice().as_ptr().add(offset)),
+                    factor,
+                ),
+            );
+            second = _mm256_add_pd(
+                second,
+                _mm256_mul_pd(
+                    _mm256_loadu_pd(matrix.as_slice().as_ptr().add(offset + 4)),
+                    factor,
+                ),
+            );
+            third = _mm256_add_pd(
+                third,
+                _mm256_mul_pd(
+                    _mm256_loadu_pd(matrix.as_slice().as_ptr().add(offset + 8)),
+                    factor,
+                ),
+            );
+            fourth = _mm256_add_pd(
+                fourth,
+                _mm256_mul_pd(
+                    _mm256_loadu_pd(matrix.as_slice().as_ptr().add(offset + 12)),
+                    factor,
+                ),
+            );
+        }
+        _mm256_storeu_pd(output.as_mut_slice().as_mut_ptr().add(row), first);
+        _mm256_storeu_pd(output.as_mut_slice().as_mut_ptr().add(row + 4), second);
+        _mm256_storeu_pd(output.as_mut_slice().as_mut_ptr().add(row + 8), third);
+        _mm256_storeu_pd(output.as_mut_slice().as_mut_ptr().add(row + 12), fourth);
+        row += 16;
+    }
+    while row + 8 <= M {
+        let mut first = _mm256_setzero_pd();
+        let mut second = _mm256_setzero_pd();
+        for column in 0..N {
+            let factor = _mm256_set1_pd(vector[column]);
+            let offset = column * M + row;
+            first = _mm256_add_pd(
+                first,
+                _mm256_mul_pd(
+                    _mm256_loadu_pd(matrix.as_slice().as_ptr().add(offset)),
+                    factor,
+                ),
+            );
+            second = _mm256_add_pd(
+                second,
+                _mm256_mul_pd(
+                    _mm256_loadu_pd(matrix.as_slice().as_ptr().add(offset + 4)),
+                    factor,
+                ),
+            );
+        }
+        _mm256_storeu_pd(output.as_mut_slice().as_mut_ptr().add(row), first);
+        _mm256_storeu_pd(output.as_mut_slice().as_mut_ptr().add(row + 4), second);
+        row += 8;
+    }
     while row + 4 <= M {
         let mut accumulator = _mm256_setzero_pd();
         for column in 0..N {
@@ -330,6 +471,15 @@ impl MatmulBackend<f32> for X86Avx2Matmul {
     fn scale_divide(target: &mut [f32], divisor: f32) {
         unsafe { scale_divide_f32(target, divisor) }
     }
+
+    #[inline]
+    fn cholesky_update_column<const D: usize>(
+        matrix: &mut Matrix<D, D, f32>,
+        column: usize,
+        diagonal: f32,
+    ) {
+        unsafe { cholesky_update_column_f32(matrix, column, diagonal) }
+    }
 }
 
 #[cfg(not(target_feature = "fma"))]
@@ -385,6 +535,15 @@ impl MatmulBackend<f64> for X86Avx2Matmul {
     fn scale_divide(target: &mut [f64], divisor: f64) {
         unsafe { scale_divide_f64(target, divisor) }
     }
+
+    #[inline]
+    fn cholesky_update_column<const D: usize>(
+        matrix: &mut Matrix<D, D, f64>,
+        column: usize,
+        diagonal: f64,
+    ) {
+        unsafe { cholesky_update_column_f64(matrix, column, diagonal) }
+    }
 }
 
 #[target_feature(enable = "avx2")]
@@ -422,6 +581,106 @@ pub(super) unsafe fn scale_divide_f64(target: &mut [f64], divisor: f64) {
     while index < target.len() {
         *target.get_unchecked_mut(index) = *target.get_unchecked(index) / divisor;
         index += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn cholesky_update_column_f32<const D: usize>(
+    matrix: &mut Matrix<D, D, f32>,
+    column: usize,
+    diagonal: f32,
+) {
+    use core::arch::x86_64::{
+        _mm256_div_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps,
+        _mm256_sub_ps,
+    };
+    let data = matrix.as_mut_slice();
+    let mut row = column + 1;
+    while row + 8 <= D {
+        let mut value = _mm256_loadu_ps(data.as_ptr().add(column * D + row));
+        for previous in 0..column {
+            value = _mm256_sub_ps(
+                value,
+                _mm256_mul_ps(
+                    _mm256_loadu_ps(data.as_ptr().add(previous * D + row)),
+                    _mm256_set1_ps(data[previous * D + column]),
+                ),
+            );
+        }
+        _mm256_storeu_ps(data.as_mut_ptr().add(column * D + row), value);
+        row += 8;
+    }
+    while row < D {
+        let mut value = data[column * D + row];
+        for previous in 0..column {
+            value -= data[previous * D + row] * data[previous * D + column];
+        }
+        data[column * D + row] = value;
+        row += 1;
+    }
+    let divisor = _mm256_set1_ps(diagonal);
+    row = column + 1;
+    while row + 8 <= D {
+        let value = _mm256_loadu_ps(data.as_ptr().add(column * D + row));
+        _mm256_storeu_ps(
+            data.as_mut_ptr().add(column * D + row),
+            _mm256_div_ps(value, divisor),
+        );
+        row += 8;
+    }
+    while row < D {
+        data[column * D + row] /= diagonal;
+        row += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+pub(super) unsafe fn cholesky_update_column_f64<const D: usize>(
+    matrix: &mut Matrix<D, D, f64>,
+    column: usize,
+    diagonal: f64,
+) {
+    use core::arch::x86_64::{
+        _mm256_div_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
+        _mm256_sub_pd,
+    };
+    let data = matrix.as_mut_slice();
+    let mut row = column + 1;
+    while row + 4 <= D {
+        let mut value = _mm256_loadu_pd(data.as_ptr().add(column * D + row));
+        for previous in 0..column {
+            value = _mm256_sub_pd(
+                value,
+                _mm256_mul_pd(
+                    _mm256_loadu_pd(data.as_ptr().add(previous * D + row)),
+                    _mm256_set1_pd(data[previous * D + column]),
+                ),
+            );
+        }
+        _mm256_storeu_pd(data.as_mut_ptr().add(column * D + row), value);
+        row += 4;
+    }
+    while row < D {
+        let mut value = data[column * D + row];
+        for previous in 0..column {
+            value -= data[previous * D + row] * data[previous * D + column];
+        }
+        data[column * D + row] = value;
+        row += 1;
+    }
+    let divisor = _mm256_set1_pd(diagonal);
+    row = column + 1;
+    while row + 4 <= D {
+        let value = _mm256_loadu_pd(data.as_ptr().add(column * D + row));
+        _mm256_storeu_pd(
+            data.as_mut_ptr().add(column * D + row),
+            _mm256_div_pd(value, divisor),
+        );
+        row += 4;
+    }
+    while row < D {
+        data[column * D + row] /= diagonal;
+        row += 1;
     }
 }
 

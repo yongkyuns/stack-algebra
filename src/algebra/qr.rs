@@ -2,18 +2,19 @@ use crate::view::MatrixRead;
 use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 
 #[inline]
-fn column_norm<const M: usize, const N: usize, T: Real>(
+fn column_norm<const M: usize, const N: usize, T: Real + MatrixScalar>(
     matrix: &Matrix<M, N, T>,
     column: usize,
     start_row: usize,
 ) -> T {
-    let mut sum = T::zero();
+    let values_start = column * M + start_row;
+    let values_end = (column + 1) * M;
+    let values = &matrix.as_slice()[values_start..values_end];
+    let sum = T::dot_accumulate(values, values, T::zero());
     let mut max_abs = T::zero();
-    for row in start_row..M {
-        let value = matrix[(row, column)];
+    for &value in values {
         let absolute = value.abs();
         max_abs = max_abs.max(absolute);
-        sum = sum + value * value;
     }
 
     if sum.is_finite() && (sum != T::zero() || max_abs == T::zero()) {
@@ -40,23 +41,52 @@ fn finite_matrix<const M: usize, const N: usize, T: Real>(matrix: &Matrix<M, N, 
 }
 
 #[inline]
-fn apply_reflector_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
+fn apply_reflector_in_place<
+    const M: usize,
+    const N: usize,
+    const P: usize,
+    T: Real + MatrixScalar,
+>(
     factors: &Matrix<M, N, T>,
     column: usize,
     coefficient: T,
     transformed: &mut Matrix<M, P, T>,
     rhs_column: usize,
 ) {
-    let mut dot = transformed[(column, rhs_column)];
-    for row in (column + 1)..M {
-        dot = dot + factors[(row, column)] * transformed[(row, rhs_column)];
-    }
+    let tail_len = M - column - 1;
+    let dot = if tail_len <= 8 {
+        let mut dot = transformed[(column, rhs_column)];
+        for row in (column + 1)..M {
+            dot = dot + factors[(row, column)] * transformed[(row, rhs_column)];
+        }
+        dot
+    } else {
+        let source_start = column * M + column + 1;
+        let source_end = source_start + tail_len;
+        let target_start = rhs_column * M + column + 1;
+        let target_end = target_start + tail_len;
+        T::dot_accumulate(
+            &factors.as_slice()[source_start..source_end],
+            &transformed.as_slice()[target_start..target_end],
+            transformed[(column, rhs_column)],
+        )
+    };
     let scale = coefficient * dot;
     if scale.is_finite() {
         transformed[(column, rhs_column)] = transformed[(column, rhs_column)] - scale;
-        for row in (column + 1)..M {
-            transformed[(row, rhs_column)] =
-                transformed[(row, rhs_column)] - scale * factors[(row, column)];
+        if tail_len <= 8 {
+            for row in (column + 1)..M {
+                transformed[(row, rhs_column)] =
+                    transformed[(row, rhs_column)] - scale * factors[(row, column)];
+            }
+        } else {
+            let source_start = column * M + column + 1;
+            let target_start = rhs_column * M + column + 1;
+            T::rank_update_sub(
+                &mut transformed.as_mut_slice()[target_start..target_start + tail_len],
+                &factors.as_slice()[source_start..source_start + tail_len],
+                scale,
+            );
         }
         return;
     }
@@ -93,7 +123,12 @@ fn apply_reflector_in_place<const M: usize, const N: usize, const P: usize, T: R
 }
 
 #[inline]
-fn apply_q_transpose_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
+fn apply_q_transpose_in_place<
+    const M: usize,
+    const N: usize,
+    const P: usize,
+    T: Real + MatrixScalar,
+>(
     factors: &Matrix<M, N, T>,
     coefficients: &Vector<N, T>,
     transformed: &mut Matrix<M, P, T>,
@@ -111,7 +146,7 @@ fn apply_q_transpose_in_place<const M: usize, const N: usize, const P: usize, T:
 }
 
 #[inline]
-fn apply_q_in_place<const M: usize, const N: usize, const P: usize, T: Real>(
+fn apply_q_in_place<const M: usize, const N: usize, const P: usize, T: Real + MatrixScalar>(
     factors: &Matrix<M, N, T>,
     coefficients: &Vector<N, T>,
     transformed: &mut Matrix<M, P, T>,
@@ -1097,6 +1132,24 @@ mod tests {
         let qr = input.householder_qr();
         let transformed = qr.apply_q_transpose(&input);
         assert_relative_eq!(transformed, qr.r(), epsilon = 1e-12, max_relative = 1e-12);
+    }
+
+    #[test]
+    fn reconstructs_packetized_square_matrix() {
+        let input = Matrix::<16, 16, f64>::from_fn(|row, column| {
+            if row == column {
+                20.0 + row as f64
+            } else {
+                (row + 2 * column + 1) as f64 / 19.0
+            }
+        });
+        let qr = input.householder_qr();
+        assert_relative_eq!(
+            qr.apply_q(&qr.r()),
+            input,
+            epsilon = 1e-10,
+            max_relative = 1e-10
+        );
     }
 
     #[test]

@@ -164,7 +164,7 @@ macro_rules! scalar_benchmarks {
                 g.bench_function(BenchmarkId::new("stack-algebra", &shape), |b| {
                     b.iter(|| {
                         for _ in 0..BATCH {
-                            a.mul_into(black_box(&x), black_box(&mut so));
+                            a.matvec_into(black_box(&x), black_box(&mut so));
                         }
                     })
                 });

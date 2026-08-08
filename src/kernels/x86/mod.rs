@@ -71,6 +71,17 @@ macro_rules! impl_kernel_scalar {
             fn scale_divide(target: &mut [Self], divisor: Self) {
                 <$matmul as MatmulBackend<$scalar>>::scale_divide(target, divisor);
             }
+
+            #[inline]
+            fn cholesky_update_column<const D: usize>(
+                matrix: &mut Matrix<D, D, Self>,
+                column: usize,
+                diagonal: Self,
+            ) {
+                <$matmul as MatmulBackend<$scalar>>::cholesky_update_column(
+                    matrix, column, diagonal,
+                );
+            }
         }
 
         impl ReductionScalar for $scalar {
