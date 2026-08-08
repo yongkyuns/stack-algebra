@@ -1,6 +1,8 @@
 use crate::view::MatrixRead;
 use crate::{DecompositionError, Matrix, MatrixScalar, Real, Vector};
 
+use super::qr::HouseholderQr;
+
 #[inline]
 fn column_norm<const M: usize, const N: usize, T: Real + MatrixScalar>(
     matrix: &Matrix<M, N, T>,
@@ -143,6 +145,10 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
 
     #[inline]
     fn try_factorize_storage(output: &mut Self) -> Result<(), DecompositionError> {
+        if M > N {
+            return Self::try_factorize_tall(output);
+        }
+
         output.v = Matrix::<N, N, T>::eye();
         output.singular_values = Vector::<N, T>::zeros();
         let u = &mut output.u;
@@ -157,28 +163,28 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
             let mut changed = false;
             for p in 0..N {
                 for q in (p + 1)..N {
-                    let mut scale = T::zero();
-                    for row in 0..M {
-                        scale = scale.max(u[(row, p)].abs()).max(u[(row, q)].abs());
-                    }
-                    if !scale.is_finite() {
-                        return Err(DecompositionError::NonFinite);
-                    }
-                    if scale == T::zero() {
-                        continue;
-                    }
                     let left = &u.as_slice()[p * M..(p + 1) * M];
                     let right = &u.as_slice()[q * M..(q + 1) * M];
-                    let scale_squared = scale * scale;
-                    let (app, aqq, apq) = if scale_squared.is_finite() && scale_squared != T::zero()
+                    let (raw_app, raw_aqq, raw_apq) = T::symmetric_dot(left, right);
+                    let raw_gram_scale = raw_app.sqrt() * raw_aqq.sqrt();
+                    let (app, aqq, apq) = if raw_app.is_finite()
+                        && raw_aqq.is_finite()
+                        && raw_apq.is_finite()
+                        && raw_gram_scale.is_finite()
+                        && raw_gram_scale != T::zero()
+                        && (raw_app != T::zero() || raw_aqq != T::zero() || raw_apq != T::zero())
                     {
-                        let (raw_app, raw_aqq, raw_apq) = T::symmetric_dot(left, right);
-                        if raw_app.is_finite() && raw_aqq.is_finite() && raw_apq.is_finite() {
-                            (
-                                raw_app / scale_squared,
-                                raw_aqq / scale_squared,
-                                raw_apq / scale_squared,
-                            )
+                        (raw_app, raw_aqq, raw_apq)
+                    } else {
+                        let mut scale = T::zero();
+                        for row in 0..M {
+                            scale = scale.max(left[row].abs()).max(right[row].abs());
+                        }
+                        if !scale.is_finite() {
+                            return Err(DecompositionError::NonFinite);
+                        }
+                        if scale == T::zero() {
+                            (T::zero(), T::zero(), T::zero())
                         } else {
                             let mut app = T::zero();
                             let mut aqq = T::zero();
@@ -192,18 +198,6 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
                             }
                             (app, aqq, apq)
                         }
-                    } else {
-                        let mut app = T::zero();
-                        let mut aqq = T::zero();
-                        let mut apq = T::zero();
-                        for (&left, &right) in left.iter().zip(right.iter()) {
-                            let left = left / scale;
-                            let right = right / scale;
-                            app = app + left * left;
-                            aqq = aqq + right * right;
-                            apq = apq + left * right;
-                        }
-                        (app, aqq, apq)
                     };
                     if !app.is_finite() || !aqq.is_finite() || !apq.is_finite() {
                         return Err(DecompositionError::NonFinite);
@@ -292,6 +286,42 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
         }
 
         output.threshold = tolerance;
+        Ok(())
+    }
+
+    fn try_factorize_tall(output: &mut Self) -> Result<(), DecompositionError> {
+        if !output.u.as_slice().iter().all(|value| value.is_finite()) {
+            return Err(DecompositionError::NonFinite);
+        }
+        let qr = HouseholderQr::<M, N, T>::decompose(&output.u);
+        let mut reduced = Matrix::<N, N, T>::zeros();
+        for column in 0..N {
+            for row in 0..=column {
+                reduced[(row, column)] = qr.factors()[(row, column)];
+            }
+        }
+
+        let mut reduced_svd = Svd::<N, N, T> {
+            u: reduced,
+            singular_values: Vector::<N, T>::zeros(),
+            v: Matrix::<N, N, T>::eye(),
+            threshold: T::zero(),
+        };
+        Svd::<N, N, T>::try_factorize_storage(&mut reduced_svd)?;
+
+        let mut embedded_u = Matrix::<M, N, T>::zeros();
+        for column in 0..N {
+            for row in 0..N {
+                embedded_u[(row, column)] = reduced_svd.u[(row, column)];
+            }
+        }
+        output.u = qr.apply_q(&embedded_u);
+        output.v = reduced_svd.v;
+        output.singular_values = reduced_svd.singular_values;
+        output.threshold = T::epsilon() * T::from(core::cmp::max(M, N)).unwrap_or(T::one());
+        if !output.u.as_slice().iter().all(|value| value.is_finite()) {
+            return Err(DecompositionError::NonFinite);
+        }
         Ok(())
     }
 

@@ -38,10 +38,10 @@ Eigen reference:
 
 | Shape | Scalar | Stack-algebra | Eigen | Stack/Eigen |
 | --- | --- | ---: | ---: | ---: |
-| 6×3 | `f32` | 778 | 986 | 0.79× |
-| 6×3 | `f64` | 962 | 1,214 | 0.79× |
-| 15×6 | `f32` | 5,796 | 4,189 | 1.38× |
-| 15×6 | `f64` | 8,654 | 6,843 | 1.26× |
+| 6×3 | `f32` | 740 | 930 | 0.80× |
+| 6×3 | `f64` | 984 | 1,180 | 0.83× |
+| 15×6 | `f32` | 4,400 | 4,449 | 0.99× |
+| 15×6 | `f64` | 5,400 | 6,861 | 0.79× |
 
 The fast profile is for triage. Use longer measurement windows before making
 release decisions, especially for sub-microsecond operations. The LU values
@@ -60,6 +60,10 @@ After the initial native baseline, three targeted changes were made:
 - Pivoted QR column norms use the SIMD dot kernel while retaining the existing
   scaled overflow fallback; the max-absolute scan is now fallback-only for
   finite norms.
+- Tall SVDs use a fixed-size Householder QR preconditioner before the reduced
+  Jacobi iteration; the pairwise Jacobi statistics use one fused packet pass.
+- The Jacobi fast path now uses raw finite dot products directly and retains
+  scaled accumulation only for overflow, underflow, or zero-norm cases.
 
 The comparison benchmark now calls `Matrix::matvec_into` for stack-algebra;
 the previous version called the generic `mul_into` matrix-multiply path while
@@ -75,7 +79,8 @@ measurements.
 
 1. Keep f64 matvec under regression monitoring; the focused native gap is now
    approximately 1.1× Eigen and does not justify a bespoke kernel.
-2. Improve the larger tall SVD path; its one-sided Jacobi implementation
-   remains about 1.3× slower than Eigen at 15×6.
+2. Keep the larger tall SVD path under regression monitoring; the focused
+   native measurements are now at or below the Eigen reference for both
+   scalars at 15×6.
 3. Validate the native kernels on non-x86 targets before adding more x86-only
    specialization.
