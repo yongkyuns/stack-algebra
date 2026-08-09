@@ -180,9 +180,8 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
             }
         }
 
-        // Jacobi's intermediate products are quadratic in the working values.
         // Normalize first so finite inputs near the scalar limit do not overflow
-        // during the rotations, then restore the eigenvalue scale at the end.
+        // during tridiagonalization, then restore the eigenvalue scale at the end.
         let matrix_scale = work
             .iter()
             .copied()
@@ -198,73 +197,204 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
 
         output.eigenvectors = Matrix::<D, D, T>::eye();
         let eigenvectors = &mut output.eigenvectors;
-        const MAX_SWEEPS: usize = 64;
-        let mut converged = false;
+        let mut diagonal = Vector::<D, T>::zeros();
+        let mut off_diagonal = Vector::<D, T>::zeros();
+        let mut reflector = Vector::<D, T>::zeros();
+        let mut update = Vector::<D, T>::zeros();
 
-        for _ in 0..MAX_SWEEPS {
-            let mut changed = false;
-            for p in 0..D {
-                for q in (p + 1)..D {
-                    let diagonal_p = work[(p, p)];
-                    let diagonal_q = work[(q, q)];
-                    let off_diagonal = work[(p, q)];
-                    let scale = T::one()
-                        .max(diagonal_p.abs())
-                        .max(diagonal_q.abs())
-                        .max(off_diagonal.abs());
-                    if off_diagonal.abs() <= tolerance * scale {
-                        continue;
-                    }
+        for column in 0..D.saturating_sub(2) {
+            let start = column + 1;
+            let mut scale = T::zero();
+            for row in start..D {
+                scale = scale.max(work[(row, column)].abs());
+            }
+            if scale == T::zero() {
+                off_diagonal[start] = T::zero();
+                continue;
+            }
 
-                    let tau = (diagonal_q - diagonal_p) / (off_diagonal + off_diagonal);
-                    let root = (T::one() + tau * tau).sqrt();
-                    let denominator = tau.abs() + root;
-                    if !denominator.is_finite() || denominator == T::zero() {
-                        return Err(DecompositionError::NonFinite);
-                    }
-                    let tangent = if tau >= T::zero() {
-                        T::one() / denominator
-                    } else {
-                        -T::one() / denominator
-                    };
-                    let cosine = T::one() / (T::one() + tangent * tangent).sqrt();
-                    let sine = tangent * cosine;
-                    let cosine_squared = cosine * cosine;
-                    let sine_squared = sine * sine;
-                    let cross = (sine * cosine) * off_diagonal;
+            let mut norm_squared = T::zero();
+            for row in start..D {
+                let value = work[(row, column)] / scale;
+                reflector[row] = value;
+                norm_squared = norm_squared + value * value;
+            }
+            let norm = norm_squared.sqrt();
+            let first = reflector[start];
+            let alpha = if first >= T::zero() { -norm } else { norm };
+            reflector[start] = first - alpha;
+            let mut reflector_squared = T::zero();
+            for row in start..D {
+                reflector_squared = reflector_squared + reflector[row] * reflector[row];
+            }
+            if reflector_squared == T::zero() || !reflector_squared.is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
+            let beta = (T::one() + T::one()) / reflector_squared;
+            let subdiagonal = scale * alpha;
+            if !beta.is_finite() || !subdiagonal.is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
+            off_diagonal[start - 1] = subdiagonal;
 
-                    Self::rotate_columns(work, p, q, cosine, sine);
-                    work[(p, p)] = cosine_squared * diagonal_p - (T::one() + T::one()) * cross
-                        + sine_squared * diagonal_q;
-                    work[(q, q)] = sine_squared * diagonal_p
-                        + (T::one() + T::one()) * cross
-                        + cosine_squared * diagonal_q;
-                    work[(p, q)] = T::zero();
-                    work[(q, p)] = T::zero();
-                    for index in 0..D {
-                        if index != p && index != q {
-                            work[(p, index)] = work[(index, p)];
-                            work[(q, index)] = work[(index, q)];
-                        }
-                    }
-
-                    Self::rotate_columns(eigenvectors, p, q, cosine, sine);
-                    changed = true;
+            for row in start..D {
+                update[row] = T::zero();
+            }
+            for column_index in start..D {
+                let coefficient = reflector[column_index];
+                let column_start = column_index * D + start;
+                let column = &work.as_slice()[column_start..column_start + (D - start)];
+                for (row_offset, value) in column.iter().copied().enumerate() {
+                    update[start + row_offset] = update[start + row_offset] + value * coefficient;
                 }
             }
-            if !changed {
-                converged = true;
-                break;
+            for row in start..D {
+                update[row] = beta * update[row];
+            }
+            let mut correction = T::zero();
+            for row in start..D {
+                correction = correction + reflector[row] * update[row];
+            }
+            correction = correction * beta / (T::one() + T::one());
+            for row in start..D {
+                update[row] = update[row] - correction * reflector[row];
+            }
+            let reflector_tail = &reflector.as_slice()[start..D];
+            let update_tail = &update.as_slice()[start..D];
+            for column_index in start..D {
+                let column_start = column_index * D + start;
+                T::rank_update_two_sub(
+                    &mut work.as_mut_slice()[column_start..column_start + (D - start)],
+                    reflector_tail,
+                    update[column_index],
+                    update_tail,
+                    reflector[column_index],
+                );
+            }
+
+            for row in start..D {
+                work[(row, column)] = T::zero();
+                work[(column, row)] = T::zero();
+            }
+            work[(start, column)] = subdiagonal;
+            work[(column, start)] = subdiagonal;
+
+            for row in 0..D {
+                update[row] = T::zero();
+            }
+            for column_index in start..D {
+                let coefficient = reflector[column_index];
+                let column_start = column_index * D;
+                let column = &eigenvectors.as_slice()[column_start..column_start + D];
+                for (row, value) in column.iter().copied().enumerate() {
+                    update[row] = update[row] + value * coefficient;
+                }
+            }
+            for column_index in start..D {
+                let column_start = column_index * D;
+                T::rank_update_sub(
+                    &mut eigenvectors.as_mut_slice()[column_start..column_start + D],
+                    update.as_slice(),
+                    beta * reflector[column_index],
+                );
             }
         }
 
-        if !converged {
-            return Err(DecompositionError::NoConvergence);
+        for index in 0..D {
+            diagonal[index] = work[(index, index)];
+            if !diagonal[index].is_finite() {
+                return Err(DecompositionError::NonFinite);
+            }
+            if index + 1 < D {
+                off_diagonal[index] = work[(index + 1, index)];
+                if !off_diagonal[index].is_finite() {
+                    return Err(DecompositionError::NonFinite);
+                }
+            }
+        }
+
+        let mut iterations = 0;
+        if D > 1 {
+            let mut end = D - 1;
+            while end > 0 {
+                for index in 0..end {
+                    let scale = T::one()
+                        .max(diagonal[index].abs())
+                        .max(diagonal[index + 1].abs());
+                    if off_diagonal[index].abs() <= tolerance * scale {
+                        off_diagonal[index] = T::zero();
+                    }
+                }
+                while end > 0 && off_diagonal[end - 1] == T::zero() {
+                    end -= 1;
+                }
+                if end == 0 {
+                    break;
+                }
+                let mut start = end - 1;
+                while start > 0 && off_diagonal[start - 1] != T::zero() {
+                    start -= 1;
+                }
+                iterations += 1;
+                if iterations > 64 * D {
+                    return Err(DecompositionError::NoConvergence);
+                }
+
+                let half = T::one() / (T::one() + T::one());
+                let delta = (diagonal[end - 1] - diagonal[end]) * half;
+                let subdiagonal = off_diagonal[end - 1];
+                let mut shift = diagonal[end];
+                if delta == T::zero() {
+                    shift = shift - subdiagonal.abs();
+                } else if subdiagonal != T::zero() {
+                    let root = delta.hypot(subdiagonal);
+                    let denominator = delta + if delta >= T::zero() { root } else { -root };
+                    if denominator == T::zero() || !denominator.is_finite() {
+                        return Err(DecompositionError::NonFinite);
+                    }
+                    shift = shift - (subdiagonal * subdiagonal) / denominator;
+                }
+
+                let mut x = diagonal[start] - shift;
+                let mut z = off_diagonal[start];
+                for index in start..end {
+                    let radius = x.hypot(z);
+                    let (cosine, sine) = if radius == T::zero() {
+                        (T::one(), T::zero())
+                    } else {
+                        (x / radius, -z / radius)
+                    };
+                    let first = diagonal[index];
+                    let second = off_diagonal[index];
+                    let next = diagonal[index + 1];
+                    let upper = sine * first + cosine * second;
+                    let lower = sine * second + cosine * next;
+                    diagonal[index] = cosine * (cosine * first - sine * second)
+                        - sine * (cosine * second - sine * next);
+                    diagonal[index + 1] = sine * upper + cosine * lower;
+                    off_diagonal[index] = cosine * upper - sine * lower;
+                    if index > start {
+                        off_diagonal[index - 1] = cosine * off_diagonal[index - 1] - sine * z;
+                    }
+                    x = off_diagonal[index];
+                    if index + 1 < end {
+                        z = -sine * off_diagonal[index + 1];
+                        off_diagonal[index + 1] = cosine * off_diagonal[index + 1];
+                    }
+                    for row in 0..D {
+                        let old = eigenvectors[(row, index + 1)];
+                        eigenvectors[(row, index + 1)] =
+                            sine * eigenvectors[(row, index)] + cosine * old;
+                        eigenvectors[(row, index)] =
+                            cosine * eigenvectors[(row, index)] - sine * old;
+                    }
+                }
+            }
         }
 
         let eigenvalues = &mut output.eigenvalues;
         for index in 0..D {
-            eigenvalues[index] = work[(index, index)] * matrix_scale;
+            eigenvalues[index] = diagonal[index] * matrix_scale;
             if !eigenvalues[index].is_finite() {
                 return Err(DecompositionError::NonFinite);
             }
@@ -283,22 +413,6 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
         }
 
         Ok(())
-    }
-
-    #[inline]
-    fn rotate_columns(
-        matrix: &mut Matrix<D, D, T>,
-        first: usize,
-        second: usize,
-        cosine: T,
-        sine: T,
-    ) {
-        let data = matrix.as_mut_slice();
-        let (_, after_first) = data.split_at_mut(first * D);
-        let (first_and_between, after_second) = after_first.split_at_mut((second - first) * D);
-        let (first_column, _) = first_and_between.split_at_mut(D);
-        let second_column = &mut after_second[..D];
-        T::rotate_columns(first_column, second_column, cosine, sine);
     }
 
     /// Returns the eigenvalues in nondecreasing order.
@@ -372,6 +486,39 @@ mod tests {
             for right in 0..3 {
                 let mut dot = 0.0;
                 for row in 0..3 {
+                    dot += eigen.eigenvectors()[(row, left)] * eigen.eigenvectors()[(row, right)];
+                }
+                let expected = if left == right { 1.0 } else { 0.0 };
+                assert_relative_eq!(dot, expected, epsilon = 1e-10, max_relative = 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn larger_tridiagonal_qr_reconstructs_and_orthogonalizes() {
+        let input = Matrix::<6, 6, f64>::from_fn(|row, column| {
+            if row == column {
+                (6 + row) as f64
+            } else {
+                (row + column + 1) as f64 / 17.0
+            }
+        });
+        let eigen = input
+            .self_adjoint_eigen()
+            .expect("symmetric input is supported");
+        assert_relative_eq!(
+            eigen.reconstruct(),
+            input,
+            epsilon = 1e-10,
+            max_relative = 1e-10
+        );
+        for index in 1..6 {
+            assert!(eigen.eigenvalues()[index - 1] <= eigen.eigenvalues()[index]);
+        }
+        for left in 0..6 {
+            for right in 0..6 {
+                let mut dot = 0.0;
+                for row in 0..6 {
                     dot += eigen.eigenvectors()[(row, left)] * eigen.eigenvectors()[(row, right)];
                 }
                 let expected = if left == right { 1.0 } else { 0.0 };
@@ -457,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn handles_large_finite_values_without_jacobi_overflow() {
+    fn handles_large_finite_values_without_tridiagonal_overflow() {
         let input = matrix![
             1.0e308_f64, 2.0e307;
             2.0e307, -1.0e308;
