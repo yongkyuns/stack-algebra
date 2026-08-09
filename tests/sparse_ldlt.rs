@@ -227,4 +227,8 @@ fn sparse_ldlt_ordering_preserves_solution() {
         rhs,
         max_relative = 1e-12
     );
+    let mut in_place = rhs;
+    let mut workspace = vector![0.0; 0.0; 0.0; 0.0];
+    reusable_factor.solve_in_place_with_workspace(&mut in_place, &mut workspace);
+    assert_relative_eq!(dense * in_place, rhs, max_relative = 1e-12);
 }
