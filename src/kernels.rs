@@ -147,6 +147,11 @@ pub(crate) trait ReductionBackend<T> {
     where
         T: crate::Real,
     {
+        let squared = Self::squared_norm(matrix);
+        if squared.is_finite() && squared != T::zero() {
+            return squared.sqrt();
+        }
+
         let mut max_abs = T::zero();
         for &value in matrix.as_slice() {
             if !value.is_finite() {
@@ -156,16 +161,6 @@ pub(crate) trait ReductionBackend<T> {
         }
         if max_abs == T::zero() || !max_abs.is_finite() {
             return max_abs;
-        }
-
-        let count = T::from(matrix.as_slice().len()).unwrap_or(T::one());
-        let safe_upper = (T::max_value() / count).sqrt();
-        let safe_lower = T::min_positive_value().sqrt();
-        if max_abs >= safe_lower && max_abs <= safe_upper {
-            let squared = Self::squared_norm(matrix);
-            if squared.is_finite() {
-                return squared.sqrt();
-            }
         }
 
         let mut scaled_sum = T::zero();
