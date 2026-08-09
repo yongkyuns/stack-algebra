@@ -86,9 +86,14 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                     .enumerate()
                     .all(|(offset, &candidate)| candidate == first_row + offset);
             }
-            for index in (start + 1)..end {
+            for (index, aggregate_row) in aggregate_factor_rows
+                .iter_mut()
+                .enumerate()
+                .take(end)
+                .skip(start + 1)
+            {
                 let row = lower.row_indices()[index];
-                aggregate_factor_rows[index] = row as u32;
+                *aggregate_row = row as u32;
                 let position = update_cursor[row];
                 update_indices[position] = index;
                 update_columns[position] = column;
