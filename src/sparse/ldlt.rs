@@ -71,6 +71,20 @@ where
         }
     }
 
+    /// Solves in place using caller-provided scratch storage for an ordered
+    /// sparse factorization. The scratch matrix must be distinct from `rhs`.
+    #[inline]
+    pub fn solve_in_place_with_workspace<const P: usize>(
+        &self,
+        rhs: &mut Matrix<N, P, T>,
+        workspace: &mut Matrix<N, P, T>,
+    ) {
+        match self {
+            Self::Sparse(factor) => factor.solve_in_place_with_workspace(rhs, workspace),
+            Self::Dense(factor) => factor.solve_in_place(rhs),
+        }
+    }
+
     /// Recomputes numeric values and switches to the dense fallback if a
     /// later sparse update requires a global 2×2 pivot.
     #[inline]
@@ -232,19 +246,30 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscLdlt<N, MAX_L_NNZ
     /// Solves `A * X = B` in place using sparse LDLᵀ substitution.
     #[inline]
     pub fn solve_in_place<const P: usize>(&self, rhs: &mut Matrix<N, P, T>) {
+        let mut workspace = Matrix::<N, P, T>::zeros();
+        self.solve_in_place_with_workspace(rhs, &mut workspace);
+    }
+
+    /// Solves in place using caller-provided scratch storage for the
+    /// ordering permutation. The scratch matrix must be distinct from `rhs`.
+    #[inline]
+    pub fn solve_in_place_with_workspace<const P: usize>(
+        &self,
+        rhs: &mut Matrix<N, P, T>,
+        workspace: &mut Matrix<N, P, T>,
+    ) {
         if !self.ordering.is_identity() {
-            let mut permuted = Matrix::<N, P, T>::zeros();
             for ordered in 0..N {
                 let original = self.ordering.permutation()[ordered];
                 for column in 0..P {
-                    permuted[(ordered, column)] = rhs[(original, column)];
+                    workspace[(ordered, column)] = rhs[(original, column)];
                 }
             }
-            self.solve_natural_in_place(&mut permuted);
+            self.solve_natural_in_place(workspace);
             for ordered in 0..N {
                 let original = self.ordering.permutation()[ordered];
                 for column in 0..P {
-                    rhs[(original, column)] = permuted[(ordered, column)];
+                    rhs[(original, column)] = workspace[(ordered, column)];
                 }
             }
             return;
