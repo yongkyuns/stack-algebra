@@ -10,7 +10,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use faer::linalg::solvers::{Solve, SolveLstsq};
 use faer::{Accum, Mat, Par, Side};
 use nalgebra::{DMatrix, SMatrix};
-use stack_algebra::Matrix;
+use stack_algebra::{Matrix, SelfAdjointEigenWorkspace};
 
 const BATCH: usize = 8;
 
@@ -674,6 +674,7 @@ macro_rules! scalar_benchmarks {
                 let na = nalgebra_spd::<D>();
                 let fa = faer_spd::<D>();
                 let mut se = a.self_adjoint_eigen().unwrap();
+                let mut workspace = SelfAdjointEigenWorkspace::<D, $t>::new();
                 let mut ne = na.clone().symmetric_eigen();
                 let mut fe = fa.self_adjoint_eigen(Side::Lower).unwrap();
                 let shape = D.to_string();
@@ -682,6 +683,13 @@ macro_rules! scalar_benchmarks {
                     b.iter(|| {
                         for _ in 0..BATCH {
                             se = a.self_adjoint_eigen().unwrap();
+                        }
+                    })
+                });
+                g.bench_function(BenchmarkId::new("stack-algebra-workspace", &shape), |b| {
+                    b.iter(|| {
+                        for _ in 0..BATCH {
+                            se.try_compute_with_workspace(&a, &mut workspace).unwrap();
                         }
                     })
                 });
@@ -700,7 +708,7 @@ macro_rules! scalar_benchmarks {
                     })
                 });
                 g.finish();
-                black_box((&mut se, &mut ne, &mut fe));
+                black_box((&mut se, &mut workspace, &mut ne, &mut fe));
             }
 
             pub fn run(c: &mut Criterion) {

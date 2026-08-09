@@ -233,6 +233,7 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
                     let sine_squared = sine * sine;
                     let cross = (sine * cosine) * off_diagonal;
 
+                    Self::rotate_columns(work, p, q, cosine, sine);
                     work[(p, p)] = cosine_squared * diagonal_p - (T::one() + T::one()) * cross
                         + sine_squared * diagonal_q;
                     work[(q, q)] = sine_squared * diagonal_p
@@ -240,35 +241,14 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
                         + cosine_squared * diagonal_q;
                     work[(p, q)] = T::zero();
                     work[(q, p)] = T::zero();
-
                     for index in 0..D {
-                        if index == p || index == q {
-                            continue;
+                        if index != p && index != q {
+                            work[(p, index)] = work[(index, p)];
+                            work[(q, index)] = work[(index, q)];
                         }
-                        let value_p = work[(index, p)];
-                        let value_q = work[(index, q)];
-                        let rotated_p = cosine * value_p - sine * value_q;
-                        let rotated_q = sine * value_p + cosine * value_q;
-                        if !rotated_p.is_finite() || !rotated_q.is_finite() {
-                            return Err(DecompositionError::NonFinite);
-                        }
-                        work[(index, p)] = rotated_p;
-                        work[(p, index)] = rotated_p;
-                        work[(index, q)] = rotated_q;
-                        work[(q, index)] = rotated_q;
                     }
 
-                    for row in 0..D {
-                        let value_p = eigenvectors[(row, p)];
-                        let value_q = eigenvectors[(row, q)];
-                        eigenvectors[(row, p)] = cosine * value_p - sine * value_q;
-                        eigenvectors[(row, q)] = sine * value_p + cosine * value_q;
-                        if !eigenvectors[(row, p)].is_finite()
-                            || !eigenvectors[(row, q)].is_finite()
-                        {
-                            return Err(DecompositionError::NonFinite);
-                        }
-                    }
+                    Self::rotate_columns(eigenvectors, p, q, cosine, sine);
                     changed = true;
                 }
             }
@@ -303,6 +283,22 @@ impl<const D: usize, T: Real + MatrixScalar> SelfAdjointEigen<D, T> {
         }
 
         Ok(())
+    }
+
+    #[inline]
+    fn rotate_columns(
+        matrix: &mut Matrix<D, D, T>,
+        first: usize,
+        second: usize,
+        cosine: T,
+        sine: T,
+    ) {
+        let data = matrix.as_mut_slice();
+        let (_, after_first) = data.split_at_mut(first * D);
+        let (first_and_between, after_second) = after_first.split_at_mut((second - first) * D);
+        let (first_column, _) = first_and_between.split_at_mut(D);
+        let second_column = &mut after_second[..D];
+        T::rotate_columns(first_column, second_column, cosine, sine);
     }
 
     /// Returns the eigenvalues in nondecreasing order.
