@@ -25,11 +25,12 @@ pub struct StaticCscCholeskyPattern<const N: usize, const MAX_L_NNZ: usize> {
     update_row_starts: [usize; MAX_L_NNZ],
     update_contiguous: [bool; MAX_L_NNZ],
     update_nnz: usize,
-    parent: [usize; N],
+    parent: [u32; N],
     aggregate_update_starts: [usize; N],
     aggregate_update_indices: [usize; MAX_L_NNZ],
+    aggregate_factor_rows: [u32; MAX_L_NNZ],
     aggregate_update_nnz: usize,
-    input_diagonal_indices: [usize; N],
+    input_diagonal_indices: [u32; N],
 }
 
 impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_NNZ> {
@@ -67,15 +68,17 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         let mut update_row_starts = [0usize; MAX_L_NNZ];
         let mut update_contiguous = [false; MAX_L_NNZ];
         let mut update_cursor = update_starts;
-        let mut parent = [usize::MAX; N];
+        let mut parent = [u32::MAX; N];
+        let mut aggregate_factor_rows = [0u32; MAX_L_NNZ];
         for column in 0..N {
             let start = lower.column_starts()[column];
             let end = lower.column_end(column).unwrap_or(lower.nnz());
             if start + 1 < end {
-                parent[column] = lower.row_indices()[start + 1];
+                parent[column] = lower.row_indices()[start + 1] as u32;
             }
             for index in (start + 1)..end {
                 let row = lower.row_indices()[index];
+                aggregate_factor_rows[index] = row as u32;
                 let position = update_cursor[row];
                 update_indices[position] = index;
                 update_columns[position] = column;
@@ -101,8 +104,9 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             parent,
             aggregate_update_starts: [0; N],
             aggregate_update_indices: [0; MAX_L_NNZ],
+            aggregate_factor_rows,
             aggregate_update_nnz: 0,
-            input_diagonal_indices: [usize::MAX; N],
+            input_diagonal_indices: [u32::MAX; N],
         }
     }
 
@@ -114,7 +118,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         for column in 0..N {
             self.input_diagonal_indices[column] = matrix_pattern
                 .entry_index(column, column)
-                .unwrap_or(usize::MAX);
+                .map(|index| index as u32)
+                .unwrap_or(u32::MAX);
         }
 
         let column_power = N.max(1).next_power_of_two();
@@ -286,6 +291,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         output.parent = natural.parent;
         output.aggregate_update_starts = natural.aggregate_update_starts;
         output.aggregate_update_indices = natural.aggregate_update_indices;
+        output.aggregate_factor_rows = natural.aggregate_factor_rows;
         output.aggregate_update_nnz = natural.aggregate_update_nnz;
         output.input_diagonal_indices = natural.input_diagonal_indices;
         Ok(output)
@@ -525,7 +531,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         copy_pattern: bool,
         output: &mut StaticCscLdlt<N, MAX_L_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
-        if N != 0 && self.input_diagonal_indices[0] != usize::MAX {
+        if N != 0 && self.input_diagonal_indices[0] != u32::MAX {
             return self.factor_ldlt_natural_into_aggregate(
                 matrix,
                 validate_pattern,
@@ -559,7 +565,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         let aggregate_update_starts = self.aggregate_update_starts.as_ptr();
         let aggregate_update_indices = self.aggregate_update_indices.as_ptr();
         let factor_column_starts = self.lower.column_starts().as_ptr();
-        let factor_rows = self.lower.row_indices().as_ptr();
+        let factor_rows = self.aggregate_factor_rows.as_ptr();
         let factor_values = output.lower.values_mut().as_mut_ptr();
         let diagonal_values = output.diagonal.as_mut_ptr();
         let parent = self.parent.as_ptr();
@@ -579,9 +585,9 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                 let mut top = N;
                 let diagonal_index = *factor_column_starts.add(column);
                 let diagonal_source = self.input_diagonal_indices[column];
-                if diagonal_source != usize::MAX {
+                if diagonal_source != u32::MAX {
                     *aggregate_ptr.add(column) =
-                        *aggregate_ptr.add(column) + *matrix_values.add(diagonal_source);
+                        *aggregate_ptr.add(column) + *matrix_values.add(diagonal_source as usize);
                 }
 
                 let update_start = *aggregate_update_starts.add(column);
@@ -600,7 +606,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                     while *visited_ptr.add(node) != column {
                         *column_pattern_ptr.add(depth) = node;
                         *visited_ptr.add(node) = column;
-                        node = *parent.add(node);
+                        node = *parent.add(node) as usize;
                         depth += 1;
                     }
                     while depth > 0 {
@@ -622,7 +628,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                     *aggregate_ptr.add(previous) = T::zero();
                     let mut index = start + 1;
                     while index < end {
-                        let row = *factor_rows.add(index);
+                        let row = *factor_rows.add(index) as usize;
                         *aggregate_ptr.add(row) =
                             *aggregate_ptr.add(row) - *factor_values.add(index) * aggregate_previous;
                         index += 1;
