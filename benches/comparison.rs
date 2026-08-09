@@ -795,10 +795,17 @@ fn run(c: &mut Criterion) {
 }
 
 fn criterion_config() -> Criterion {
-    Criterion::default()
-        .warm_up_time(Duration::from_millis(200))
-        .measurement_time(Duration::from_millis(300))
-        .sample_size(20)
+    if std::env::var_os("STACK_ALGEBRA_BENCH_FAST").is_some() {
+        Criterion::default()
+            .warm_up_time(Duration::from_millis(20))
+            .measurement_time(Duration::from_millis(20))
+            .sample_size(10)
+    } else {
+        Criterion::default()
+            .warm_up_time(Duration::from_millis(200))
+            .measurement_time(Duration::from_millis(300))
+            .sample_size(20)
+    }
 }
 
 criterion_group! {
