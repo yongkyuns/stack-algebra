@@ -108,7 +108,11 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
         output.lower = Matrix::zeros();
         for column in 0..D {
             for row in column..D {
-                output.lower[(row, column)] = input[column * D + row];
+                let value = input[column * D + row];
+                if !value.is_finite() {
+                    return Err(DecompositionError::NonFinite);
+                }
+                output.lower[(row, column)] = value;
             }
         }
 
@@ -130,15 +134,18 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
             let diagonal = diagonal.sqrt();
             output.lower.as_mut_slice()[column_offset + column] = diagonal;
             T::cholesky_update_column(&mut output.lower, column, diagonal);
-            if !output.lower.as_slice()[column_offset + column + 1..column_offset + D]
-                .iter()
-                .all(|value| value.is_finite())
-            {
-                return Err(DecompositionError::NonFinite);
-            }
         }
 
-        Ok(())
+        if output
+            .lower
+            .as_slice()
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            Ok(())
+        } else {
+            Err(DecompositionError::NonFinite)
+        }
     }
 
     fn decompose_unblocked_view<V>(matrix: &V, output: &mut Self) -> Result<(), DecompositionError>
