@@ -31,6 +31,8 @@ pub struct StaticCscCholeskyPattern<const N: usize, const MAX_L_NNZ: usize> {
     aggregate_factor_rows: [u32; MAX_L_NNZ],
     aggregate_update_nnz: usize,
     input_diagonal_indices: [u32; N],
+    factor_row_starts: [u32; N],
+    factor_contiguous: [bool; N],
 }
 
 impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_NNZ> {
@@ -70,11 +72,19 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         let mut update_cursor = update_starts;
         let mut parent = [u32::MAX; N];
         let mut aggregate_factor_rows = [0u32; MAX_L_NNZ];
+        let mut factor_row_starts = [0u32; N];
+        let mut factor_contiguous = [false; N];
         for column in 0..N {
             let start = lower.column_starts()[column];
             let end = lower.column_end(column).unwrap_or(lower.nnz());
             if start + 1 < end {
                 parent[column] = lower.row_indices()[start + 1] as u32;
+                let first_row = lower.row_indices()[start + 1];
+                factor_row_starts[column] = first_row as u32;
+                factor_contiguous[column] = lower.row_indices()[start + 1..end]
+                    .iter()
+                    .enumerate()
+                    .all(|(offset, &candidate)| candidate == first_row + offset);
             }
             for index in (start + 1)..end {
                 let row = lower.row_indices()[index];
@@ -107,6 +117,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             aggregate_factor_rows,
             aggregate_update_nnz: 0,
             input_diagonal_indices: [u32::MAX; N],
+            factor_row_starts,
+            factor_contiguous,
         }
     }
 
@@ -294,6 +306,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         output.aggregate_factor_rows = natural.aggregate_factor_rows;
         output.aggregate_update_nnz = natural.aggregate_update_nnz;
         output.input_diagonal_indices = natural.input_diagonal_indices;
+        output.factor_row_starts = natural.factor_row_starts;
+        output.factor_contiguous = natural.factor_contiguous;
         Ok(output)
     }
 
@@ -566,6 +580,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         let aggregate_update_indices = self.aggregate_update_indices.as_ptr();
         let factor_column_starts = self.lower.column_starts().as_ptr();
         let factor_rows = self.aggregate_factor_rows.as_ptr();
+        let factor_row_starts = self.factor_row_starts.as_ptr();
+        let factor_contiguous = self.factor_contiguous.as_ptr();
         let factor_values = output.lower.values_mut().as_mut_ptr();
         let diagonal_values = output.diagonal.as_mut_ptr();
         let parent = self.parent.as_ptr();
@@ -627,11 +643,21 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                     let end = start + 1 + *nonzeros_ptr.add(previous);
                     *aggregate_ptr.add(previous) = T::zero();
                     let mut index = start + 1;
-                    while index < end {
-                        let row = *factor_rows.add(index) as usize;
-                        *aggregate_ptr.add(row) =
-                            *aggregate_ptr.add(row) - *factor_values.add(index) * aggregate_previous;
-                        index += 1;
+                    if *factor_contiguous.add(previous) {
+                        let mut row = *factor_row_starts.add(previous) as usize;
+                        while index < end {
+                            *aggregate_ptr.add(row) = *aggregate_ptr.add(row)
+                                - *factor_values.add(index) * aggregate_previous;
+                            index += 1;
+                            row += 1;
+                        }
+                    } else {
+                        while index < end {
+                            let row = *factor_rows.add(index) as usize;
+                            *aggregate_ptr.add(row) = *aggregate_ptr.add(row)
+                                - *factor_values.add(index) * aggregate_previous;
+                            index += 1;
+                        }
                     }
                     *factor_values.add(end) = lower_value;
                     diagonal = diagonal - lower_value * aggregate_previous;
