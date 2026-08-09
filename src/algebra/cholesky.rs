@@ -105,7 +105,6 @@ impl<const D: usize, T: Real + MatrixScalar> Cholesky<D, T> {
         output: &mut Self,
     ) -> Result<(), DecompositionError> {
         let input = matrix.as_slice();
-        output.lower = Matrix::zeros();
         for column in 0..D {
             for row in column..D {
                 let value = input[column * D + row];
