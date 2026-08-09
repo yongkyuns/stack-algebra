@@ -82,10 +82,20 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
         matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
     ) -> StaticCscMatrix<N, N, MAX_NNZ, T> {
         let mut output = StaticCscMatrix::zero_with_pattern(self.pattern);
+        self.apply_into(matrix, &mut output);
+        output
+    }
+
+    /// Applies the precomputed coordinate map into caller-provided storage.
+    #[inline]
+    pub fn apply_into<T: Copy + Zero>(
+        &self,
+        matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
+        output: &mut StaticCscMatrix<N, N, MAX_NNZ, T>,
+    ) {
         for target_index in 0..self.nnz {
             output.values_mut()[target_index] = matrix.values()[self.source_indices[target_index]];
         }
-        output
     }
 }
 

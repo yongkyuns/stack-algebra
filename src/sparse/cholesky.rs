@@ -25,6 +25,11 @@ pub struct StaticCscCholeskyPattern<const N: usize, const MAX_L_NNZ: usize> {
     update_row_starts: [usize; MAX_L_NNZ],
     update_contiguous: [bool; MAX_L_NNZ],
     update_nnz: usize,
+    parent: [usize; N],
+    aggregate_update_starts: [usize; N],
+    aggregate_update_indices: [usize; MAX_L_NNZ],
+    aggregate_update_nnz: usize,
+    input_diagonal_indices: [usize; N],
 }
 
 impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_NNZ> {
@@ -62,9 +67,13 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         let mut update_row_starts = [0usize; MAX_L_NNZ];
         let mut update_contiguous = [false; MAX_L_NNZ];
         let mut update_cursor = update_starts;
+        let mut parent = [usize::MAX; N];
         for column in 0..N {
             let start = lower.column_starts()[column];
             let end = lower.column_end(column).unwrap_or(lower.nnz());
+            if start + 1 < end {
+                parent[column] = lower.row_indices()[start + 1];
+            }
             for index in (start + 1)..end {
                 let row = lower.row_indices()[index];
                 let position = update_cursor[row];
@@ -89,7 +98,51 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             update_row_starts,
             update_contiguous,
             update_nnz,
+            parent,
+            aggregate_update_starts: [0; N],
+            aggregate_update_indices: [0; MAX_L_NNZ],
+            aggregate_update_nnz: 0,
+            input_diagonal_indices: [usize::MAX; N],
         }
+    }
+
+    fn with_input_pattern<const MAX_A_NNZ: usize, T: Copy + Zero>(
+        mut self,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> Self {
+        let matrix_pattern = matrix.pattern();
+        for column in 0..N {
+            self.input_diagonal_indices[column] = matrix_pattern
+                .entry_index(column, column)
+                .unwrap_or(usize::MAX);
+        }
+
+        let column_power = N.max(1).next_power_of_two();
+        let column_bits = column_power.trailing_zeros();
+        let column_mask = column_power - 1;
+        let mut aggregate_update_nnz = 0;
+        for row in 0..N {
+            let start = self.update_starts[row];
+            let end = if row + 1 < N {
+                self.update_starts[row + 1]
+            } else {
+                self.update_nnz
+            };
+            self.aggregate_update_starts[row] = aggregate_update_nnz;
+            for update in start..end {
+                let factor_index = self.update_indices[update];
+                let column = self.update_columns[update];
+                let factor_row = self.lower.row_indices()[factor_index];
+                if let Some(source_index) = matrix_pattern.entry_index(factor_row, column) {
+                    self.aggregate_update_indices[aggregate_update_nnz] =
+                        (source_index << column_bits) | column;
+                    aggregate_update_nnz += 1;
+                }
+            }
+        }
+        debug_assert!(column_mask >= N.saturating_sub(1));
+        self.aggregate_update_nnz = aggregate_update_nnz;
+        self
     }
 
     /// Analyzes the lower-triangular structure of a symmetric CSC matrix.
@@ -205,7 +258,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
 
         let lower =
             StaticCscPattern::from_parts(&row_indices[..total_nnz], &column_starts, total_nnz)?;
-        Ok(Self::from_lower(lower))
+        Ok(Self::from_lower(lower).with_input_pattern(matrix))
     }
 
     /// Analyzes the matrix using the deterministic fixed-workspace
@@ -229,7 +282,13 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         }
         let permuted = ordering.permute(matrix)?;
         let natural = Self::analyze(&permuted)?;
-        Ok(Self::from_lower_with_ordering(natural.lower, ordering))
+        let mut output = Self::from_lower_with_ordering(natural.lower, ordering);
+        output.parent = natural.parent;
+        output.aggregate_update_starts = natural.aggregate_update_starts;
+        output.aggregate_update_indices = natural.aggregate_update_indices;
+        output.aggregate_update_nnz = natural.aggregate_update_nnz;
+        output.input_diagonal_indices = natural.input_diagonal_indices;
+        Ok(output)
     }
 
     /// Analyzes a matrix using fixed-workspace diagonal pivot selection.
@@ -318,11 +377,11 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         validate_symmetric_structure(matrix)?;
         if !self.ordering.is_identity() {
             let permuted = self.ordering.permute(matrix)?;
-            self.factor_natural_into(&permuted, true, output)?;
+            self.factor_natural_into(&permuted, true, false, output)?;
             output.ordering = self.ordering;
             return Ok(());
         }
-        self.factor_natural_into(matrix, true, output)
+        self.factor_natural_into(matrix, true, false, output)
     }
 
     /// Refactors an analyzed matrix into reusable storage without repeating
@@ -337,11 +396,11 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
     ) -> Result<(), SparseCholeskyError> {
         if !self.ordering.is_identity() {
             let permuted = self.ordering.permute(matrix)?;
-            self.factor_natural_into(&permuted, false, output)?;
+            self.factor_natural_into(&permuted, false, true, output)?;
             output.ordering = self.ordering;
             return Ok(());
         }
-        self.factor_natural_into(matrix, false, output)
+        self.factor_natural_into(matrix, false, true, output)
     }
 
     /// Factors a matrix that has already been transformed into this pattern's
@@ -372,7 +431,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
         output: &mut StaticCscCholesky<N, MAX_L_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
-        self.factor_natural_into(matrix, false, output)?;
+        self.factor_natural_into(matrix, false, false, output)?;
         output.ordering = self.ordering;
         Ok(())
     }
@@ -405,11 +464,11 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         validate_symmetric_structure(matrix)?;
         if !self.ordering.is_identity() {
             let permuted = self.ordering.permute(matrix)?;
-            self.factor_ldlt_natural_into(&permuted, true, output)?;
+            self.factor_ldlt_natural_into(&permuted, true, false, output)?;
             output.ordering = self.ordering;
             return Ok(());
         }
-        self.factor_ldlt_natural_into(matrix, true, output)
+        self.factor_ldlt_natural_into(matrix, true, false, output)
     }
 
     /// Refactors sparse LDLᵀ values without repeating symmetry or pattern
@@ -422,11 +481,11 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
     ) -> Result<(), SparseCholeskyError> {
         if !self.ordering.is_identity() {
             let permuted = self.ordering.permute(matrix)?;
-            self.factor_ldlt_natural_into(&permuted, false, output)?;
+            self.factor_ldlt_natural_into(&permuted, false, true, output)?;
             output.ordering = self.ordering;
             return Ok(());
         }
-        self.factor_ldlt_natural_into(matrix, false, output)
+        self.factor_ldlt_natural_into(matrix, false, true, output)
     }
 
     /// Factors already ordered lower-triangular coordinates with LDLᵀ.
@@ -454,7 +513,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
         output: &mut StaticCscLdlt<N, MAX_L_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
-        self.factor_ldlt_natural_into(matrix, false, output)?;
+        self.factor_ldlt_natural_into(matrix, false, false, output)?;
         output.ordering = self.ordering;
         Ok(())
     }
@@ -463,12 +522,143 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         &self,
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
         validate_pattern: bool,
+        copy_pattern: bool,
+        output: &mut StaticCscLdlt<N, MAX_L_NNZ, T>,
+    ) -> Result<(), SparseCholeskyError> {
+        if N != 0 && self.input_diagonal_indices[0] != usize::MAX {
+            return self.factor_ldlt_natural_into_aggregate(
+                matrix,
+                validate_pattern,
+                copy_pattern,
+                output,
+            );
+        }
+        self.factor_ldlt_natural_into_left_looking(matrix, validate_pattern, copy_pattern, output)
+    }
+
+    fn factor_ldlt_natural_into_aggregate<const MAX_A_NNZ: usize, T: Real + Zero>(
+        &self,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+        validate_pattern: bool,
+        copy_pattern: bool,
         output: &mut StaticCscLdlt<N, MAX_L_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
         if validate_pattern {
             self.validate_factor_pattern(matrix)?;
         }
-        output.lower.pattern = self.lower;
+        if copy_pattern {
+            output.lower.pattern = self.lower;
+        }
+        output.ordering = StaticCscOrdering::identity();
+
+        let mut visited = [usize::MAX; N];
+        let mut nonzeros_per_column = [0usize; N];
+        let mut aggregate = [T::zero(); N];
+        let mut column_pattern = [0usize; N];
+        let matrix_values = matrix.values().as_ptr();
+        let aggregate_update_starts = self.aggregate_update_starts.as_ptr();
+        let aggregate_update_indices = self.aggregate_update_indices.as_ptr();
+        let factor_column_starts = self.lower.column_starts().as_ptr();
+        let factor_rows = self.lower.row_indices().as_ptr();
+        let factor_values = output.lower.values_mut().as_mut_ptr();
+        let diagonal_values = output.diagonal.as_mut_ptr();
+        let parent = self.parent.as_ptr();
+        let visited_ptr = visited.as_mut_ptr();
+        let aggregate_ptr = aggregate.as_mut_ptr();
+        let column_pattern_ptr = column_pattern.as_mut_ptr();
+        let nonzeros_ptr = nonzeros_per_column.as_mut_ptr();
+        let column_power = N.max(1).next_power_of_two();
+        let column_bits = column_power.trailing_zeros();
+        let column_mask = column_power - 1;
+
+        // SAFETY: symbolic analysis validates every fixed-capacity schedule,
+        // row index, and source index used below before numeric factorization.
+        unsafe {
+            for column in 0..N {
+                *visited_ptr.add(column) = column;
+                let mut top = N;
+                let diagonal_index = *factor_column_starts.add(column);
+                let diagonal_source = self.input_diagonal_indices[column];
+                if diagonal_source != usize::MAX {
+                    *aggregate_ptr.add(column) =
+                        *aggregate_ptr.add(column) + *matrix_values.add(diagonal_source);
+                }
+
+                let update_start = *aggregate_update_starts.add(column);
+                let update_end = if column + 1 < N {
+                    *aggregate_update_starts.add(column + 1)
+                } else {
+                    self.aggregate_update_nnz
+                };
+                for update in update_start..update_end {
+                    let packed = *aggregate_update_indices.add(update);
+                    let source_index = packed >> column_bits;
+                    let mut node = packed & column_mask;
+                    *aggregate_ptr.add(node) =
+                        *aggregate_ptr.add(node) + *matrix_values.add(source_index);
+                    let mut depth = 0;
+                    while *visited_ptr.add(node) != column {
+                        *column_pattern_ptr.add(depth) = node;
+                        *visited_ptr.add(node) = column;
+                        node = *parent.add(node);
+                        depth += 1;
+                    }
+                    while depth > 0 {
+                        top -= 1;
+                        depth -= 1;
+                        *column_pattern_ptr.add(top) = *column_pattern_ptr.add(depth);
+                    }
+                }
+
+                let mut diagonal = *aggregate_ptr.add(column);
+                *aggregate_ptr.add(column) = T::zero();
+                let mut pattern_index = top;
+                while pattern_index < N {
+                    let previous = *column_pattern_ptr.add(pattern_index);
+                    let aggregate_previous = *aggregate_ptr.add(previous);
+                    let lower_value = aggregate_previous / *diagonal_values.add(previous);
+                    let start = *factor_column_starts.add(previous);
+                    let end = start + 1 + *nonzeros_ptr.add(previous);
+                    *aggregate_ptr.add(previous) = T::zero();
+                    let mut index = start + 1;
+                    while index < end {
+                        let row = *factor_rows.add(index);
+                        *aggregate_ptr.add(row) =
+                            *aggregate_ptr.add(row) - *factor_values.add(index) * aggregate_previous;
+                        index += 1;
+                    }
+                    *factor_values.add(end) = lower_value;
+                    diagonal = diagonal - lower_value * aggregate_previous;
+                    *nonzeros_ptr.add(previous) += 1;
+                    pattern_index += 1;
+                }
+
+                if !diagonal.is_finite() {
+                    return Err(SparseCholeskyError::NonFinite);
+                }
+                if diagonal == T::zero() {
+                    return Err(SparseCholeskyError::ZeroPivot);
+                }
+                *factor_values.add(diagonal_index) = T::one();
+                *diagonal_values.add(column) = diagonal;
+            }
+        }
+        Ok(())
+    }
+
+    fn factor_ldlt_natural_into_left_looking<const MAX_A_NNZ: usize, T: Real + Zero>(
+        &self,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+        validate_pattern: bool,
+        copy_pattern: bool,
+        output: &mut StaticCscLdlt<N, MAX_L_NNZ, T>,
+    ) -> Result<(), SparseCholeskyError> {
+        if validate_pattern {
+            self.validate_factor_pattern(matrix)?;
+        }
+        if copy_pattern {
+            output.lower.pattern = self.lower;
+        }
         output.ordering = StaticCscOrdering::identity();
 
         let mut work = [T::zero(); N];
@@ -544,12 +734,15 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         &self,
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
         validate_pattern: bool,
+        copy_pattern: bool,
         output: &mut StaticCscCholesky<N, MAX_L_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
         if validate_pattern {
             self.validate_factor_pattern(matrix)?;
         }
-        output.lower.pattern = self.lower;
+        if copy_pattern {
+            output.lower.pattern = self.lower;
+        }
         output.ordering = StaticCscOrdering::identity();
 
         let mut work = [T::zero(); N];
