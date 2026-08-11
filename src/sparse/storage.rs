@@ -1,4 +1,5 @@
 use core::ops::AddAssign;
+use core::{mem::MaybeUninit, ptr};
 
 use crate::{Matrix, MatrixScalar, Zero};
 
@@ -8,6 +9,9 @@ use super::errors::CscError;
 ///
 /// Keeping the symbolic structure separate allows generated code to reuse a
 /// validated pattern while replacing numeric values at every iteration.
+/// Stored row indices and column pointers use `u32` to reduce fixed sparse
+/// storage and improve cache locality; construction and lookup APIs continue
+/// to accept `usize` coordinates.
 ///
 /// The arrays use canonical CSC ordering. For a `2 x 2` diagonal pattern,
 /// `row_indices = [0, 1]` and `column_pointers = [0, 1, 2]`:
@@ -22,8 +26,8 @@ use super::errors::CscError;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaticCscPattern<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize> {
-    pub(crate) row_indices: [usize; MAX_NNZ],
-    pub(crate) column_starts: [usize; COLS],
+    pub(crate) row_indices: [u32; MAX_NNZ],
+    pub(crate) column_starts: [u32; COLS],
     pub(crate) nnz: usize,
 }
 
@@ -49,6 +53,18 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
     /// Creates a pattern from canonical CSC row and column-pointer arrays.
     #[inline]
     pub fn from_arrays(row_indices: &[usize], column_pointers: &[usize]) -> Result<Self, CscError> {
+        let mut output = MaybeUninit::uninit();
+        Self::from_arrays_into(row_indices, column_pointers, &mut output)?;
+        // SAFETY: `from_arrays_into` initializes every field before returning `Ok`.
+        Ok(unsafe { output.assume_init() })
+    }
+
+    /// Creates a pattern directly in caller-owned uninitialized storage.
+    pub fn from_arrays_into(
+        row_indices: &[usize],
+        column_pointers: &[usize],
+        output: &mut MaybeUninit<Self>,
+    ) -> Result<(), CscError> {
         if row_indices.len() > MAX_NNZ || column_pointers.len() != COLS + 1 {
             return Err(CscError::LengthMismatch);
         }
@@ -77,20 +93,44 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
                 previous_row = Some(row);
             }
         }
+        let output_ptr = output.as_mut_ptr();
+        // SAFETY: all fields are initialized exactly once before the output is exposed.
+        unsafe {
+            for (index, &row) in row_indices.iter().enumerate() {
+                (*output_ptr).row_indices[index] =
+                    u32::try_from(row).map_err(|_| CscError::InvalidRowIndices)?;
+            }
+            for (index, &pointer) in column_pointers[..COLS].iter().enumerate() {
+                (*output_ptr).column_starts[index] =
+                    u32::try_from(pointer).map_err(|_| CscError::InvalidColumnPointers)?;
+            }
+            (*output_ptr).nnz = nnz;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn from_parts(
+        row_indices: &[u32],
+        column_starts: &[usize; COLS],
+        nnz: usize,
+    ) -> Result<Self, CscError> {
+        Self::validate_parts(row_indices, column_starts, nnz)?;
         let mut pattern = Self::new();
-        pattern.row_indices[..nnz].copy_from_slice(row_indices);
-        pattern
-            .column_starts
-            .copy_from_slice(&column_pointers[..COLS]);
+        for (destination, &row) in pattern.row_indices[..nnz].iter_mut().zip(row_indices) {
+            *destination = row;
+        }
+        for (destination, &pointer) in pattern.column_starts.iter_mut().zip(column_starts) {
+            *destination = u32::try_from(pointer).map_err(|_| CscError::InvalidColumnPointers)?;
+        }
         pattern.nnz = nnz;
         Ok(pattern)
     }
 
-    pub(crate) fn from_parts(
-        row_indices: &[usize],
+    pub(crate) fn validate_parts(
+        row_indices: &[u32],
         column_starts: &[usize; COLS],
         nnz: usize,
-    ) -> Result<Self, CscError> {
+    ) -> Result<(), CscError> {
         if nnz != row_indices.len() || nnz > MAX_NNZ {
             return Err(CscError::LengthMismatch);
         }
@@ -102,6 +142,7 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
             if pointer < previous || pointer > nnz {
                 return Err(CscError::InvalidColumnPointers);
             }
+            u32::try_from(pointer).map_err(|_| CscError::InvalidColumnPointers)?;
             previous = pointer;
         }
         for column in 0..COLS {
@@ -113,17 +154,13 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
             };
             let mut previous_row = None;
             for &row in &row_indices[start..end] {
-                if row >= ROWS || previous_row.is_some_and(|previous| row <= previous) {
+                if row as usize >= ROWS || previous_row.is_some_and(|previous| row <= previous) {
                     return Err(CscError::InvalidRowIndices);
                 }
                 previous_row = Some(row);
             }
         }
-        let mut pattern = Self::new();
-        pattern.row_indices[..nnz].copy_from_slice(row_indices);
-        pattern.column_starts = *column_starts;
-        pattern.nnz = nnz;
-        Ok(pattern)
+        Ok(())
     }
 
     /// Returns the number of stored entries.
@@ -134,13 +171,13 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
 
     /// Returns the active row indices.
     #[inline]
-    pub fn row_indices(&self) -> &[usize] {
+    pub fn row_indices(&self) -> &[u32] {
         &self.row_indices[..self.nnz]
     }
 
     /// Returns the start pointer for each column.
     #[inline]
-    pub fn column_starts(&self) -> &[usize; COLS] {
+    pub fn column_starts(&self) -> &[u32; COLS] {
         &self.column_starts
     }
 
@@ -151,7 +188,7 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
             return None;
         }
         Some(if column + 1 < COLS {
-            self.column_starts[column + 1]
+            self.column_starts[column + 1] as usize
         } else {
             self.nnz
         })
@@ -163,10 +200,11 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
         if row >= ROWS || column >= COLS {
             return None;
         }
-        let start = self.column_starts[column];
+        let start = self.column_starts[column] as usize;
         let end = self.column_end(column).unwrap_or(self.nnz);
+        let row_u32 = u32::try_from(row).ok()?;
         self.row_indices[start..end]
-            .binary_search(&row)
+            .binary_search(&row_u32)
             .ok()
             .map(|offset| start + offset)
     }
@@ -273,6 +311,36 @@ where
         }
     }
 
+    /// Initializes a zero-valued matrix directly in caller-owned memory.
+    ///
+    /// This avoids constructing the full fixed-capacity matrix as an intermediate return value
+    /// when the destination is a heap-allocated workspace.
+    pub fn zero_with_pattern_into(
+        pattern: StaticCscPattern<ROWS, COLS, MAX_NNZ>,
+        output: &mut MaybeUninit<Self>,
+    ) {
+        Self::zero_with_pattern_ref_into(&pattern, output);
+    }
+
+    /// Initializes a zero-valued matrix directly from a borrowed pattern.
+    ///
+    /// The borrowed form avoids copying the fixed-capacity pattern into an intermediate argument
+    /// when a matrix is being initialized inside heap-owned workspace.
+    pub fn zero_with_pattern_ref_into(
+        pattern: &StaticCscPattern<ROWS, COLS, MAX_NNZ>,
+        output: &mut MaybeUninit<Self>,
+    ) {
+        let output = output.as_mut_ptr();
+        // SAFETY: both matrix fields are initialized exactly once before the output is exposed.
+        unsafe {
+            let values = ptr::addr_of_mut!((*output).values).cast::<T>();
+            for index in 0..MAX_NNZ {
+                values.add(index).write(T::zero());
+            }
+            ptr::addr_of_mut!((*output).pattern).write(*pattern);
+        }
+    }
+
     /// Returns the validated symbolic sparsity pattern.
     #[inline]
     pub fn pattern(&self) -> &StaticCscPattern<ROWS, COLS, MAX_NNZ> {
@@ -311,13 +379,13 @@ where
 
     /// Returns the active row indices in column-major CSC order.
     #[inline]
-    pub fn row_indices(&self) -> &[usize] {
+    pub fn row_indices(&self) -> &[u32] {
         self.pattern.row_indices()
     }
 
     /// Returns the start pointer for each column.
     #[inline]
-    pub fn column_starts(&self) -> &[usize; COLS] {
+    pub fn column_starts(&self) -> &[u32; COLS] {
         self.pattern.column_starts()
     }
 
@@ -329,13 +397,13 @@ where
 
     /// Alias for [`Self::row_indices`] using Eigen's inner-index terminology.
     #[inline]
-    pub fn inner_indices(&self) -> &[usize] {
+    pub fn inner_indices(&self) -> &[u32] {
         self.row_indices()
     }
 
     /// Alias for [`Self::column_starts`] using Eigen's outer-index terminology.
     #[inline]
-    pub fn outer_starts(&self) -> &[usize; COLS] {
+    pub fn outer_starts(&self) -> &[u32; COLS] {
         self.column_starts()
     }
 
@@ -401,9 +469,10 @@ where
         if row >= ROWS || column >= COLS {
             return Err(CscError::IndexOutOfBounds);
         }
-        let start = self.pattern.column_starts()[column];
+        let start = self.pattern.column_starts()[column] as usize;
         let end = self.column_end(column).unwrap_or(self.nnz());
-        let position = match self.pattern.row_indices[start..end].binary_search(&row) {
+        let row_u32 = u32::try_from(row).map_err(|_| CscError::IndexOutOfBounds)?;
+        let position = match self.pattern.row_indices[start..end].binary_search(&row_u32) {
             Ok(offset) => {
                 self.values[start + offset] = value;
                 return Ok(());
@@ -413,13 +482,16 @@ where
         if self.nnz() == MAX_NNZ {
             return Err(CscError::CapacityExceeded);
         }
+        if self.nnz() >= u32::MAX as usize {
+            return Err(CscError::CapacityExceeded);
+        }
 
         for index in (position..self.nnz()).rev() {
             self.values[index + 1] = self.values[index];
             self.pattern.row_indices[index + 1] = self.pattern.row_indices[index];
         }
         self.values[position] = value;
-        self.pattern.row_indices[position] = row;
+        self.pattern.row_indices[position] = row_u32;
         self.pattern.nnz += 1;
         for pointer in &mut self.pattern.column_starts[(column + 1)..] {
             *pointer += 1;
@@ -441,10 +513,10 @@ where
             *value = T::zero();
         }
         for (column, &value) in vector_values.iter().enumerate() {
-            let start = self.pattern.column_starts[column];
+            let start = self.pattern.column_starts[column] as usize;
             let end = self.column_end(column).unwrap_or(self.nnz());
             for index in start..end {
-                let row = row_indices[index];
+                let row = row_indices[index] as usize;
                 output_values[row] = T::mul_add(matrix_values[index], value, output_values[row]);
             }
         }
@@ -465,10 +537,11 @@ where
         if row >= ROWS || column >= COLS {
             return Err(CscError::IndexOutOfBounds);
         }
-        let start = self.pattern.column_starts()[column];
+        let start = self.pattern.column_starts()[column] as usize;
         let end = self.column_end(column).unwrap_or(self.nnz());
+        let row_u32 = u32::try_from(row).map_err(|_| CscError::IndexOutOfBounds)?;
         Ok(self.pattern.row_indices[start..end]
-            .binary_search(&row)
+            .binary_search(&row_u32)
             .ok()
             .map(|offset| start + offset))
     }

@@ -88,6 +88,20 @@ where
     pub fn zeros() -> Self {
         Self::from_columns([[T::zero(); M]; N])
     }
+
+    /// Initializes zero-valued matrix storage directly in caller-owned memory.
+    ///
+    /// This is useful for heap-allocated fixed-capacity workspaces because it avoids constructing
+    /// the full matrix as an intermediate return value.
+    pub fn zeros_into(output: &mut MaybeUninit<Self>) {
+        // SAFETY: the matrix data is the only field and is initialized exactly once.
+        unsafe {
+            let data = ptr::addr_of_mut!((*output.as_mut_ptr()).data).cast::<T>();
+            for index in 0..(M * N) {
+                data.add(index).write(T::zero());
+            }
+        }
+    }
 }
 
 impl<const M: usize, const N: usize, T> Matrix<M, N, T>

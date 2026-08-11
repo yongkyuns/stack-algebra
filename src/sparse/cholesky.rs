@@ -1,9 +1,17 @@
+use core::{mem::MaybeUninit, ptr};
+
 use crate::{Matrix, Real, Zero};
 
 use super::ldlt::StaticCscLdlt;
 use super::{
     SparseCholeskyError, StaticCscMatrix, StaticCscOrdering, StaticCscPattern, StaticCscPermutation,
 };
+
+#[inline]
+unsafe fn zero_storage<T>(output: *mut T) {
+    // SAFETY: callers use this only for integer, boolean, or byte-zero-initializable storage.
+    unsafe { ptr::write_bytes(output.cast::<u8>(), 0, core::mem::size_of::<T>()) };
+}
 
 /// Symbolic pattern for a fixed-capacity simplicial sparse Cholesky factor.
 ///
@@ -20,16 +28,19 @@ pub struct StaticCscCholeskyPattern<const N: usize, const MAX_L_NNZ: usize> {
     lower: StaticCscPattern<N, N, MAX_L_NNZ>,
     ordering: StaticCscOrdering<N>,
     update_starts: [usize; N],
-    update_indices: [usize; MAX_L_NNZ],
-    update_columns: [usize; MAX_L_NNZ],
-    update_row_starts: [usize; MAX_L_NNZ],
+    update_indices: [u32; MAX_L_NNZ],
+    update_columns: [u32; MAX_L_NNZ],
+    update_row_starts: [u32; MAX_L_NNZ],
     update_contiguous: [bool; MAX_L_NNZ],
     update_nnz: usize,
     parent: [u32; N],
-    aggregate_update_starts: [usize; N],
-    aggregate_update_indices: [usize; MAX_L_NNZ],
-    aggregate_factor_rows: [u32; MAX_L_NNZ],
+    aggregate_update_starts: [u32; N],
+    aggregate_update_indices: [u32; MAX_L_NNZ],
+    aggregate_update_columns: [u32; MAX_L_NNZ],
     aggregate_update_nnz: usize,
+    numeric_pattern_starts: [u32; N],
+    numeric_pattern_columns: [u32; MAX_L_NNZ],
+    numeric_pattern_nnz: usize,
     input_diagonal_indices: [u32; N],
     factor_row_starts: [u32; N],
     factor_contiguous: [bool; N],
@@ -42,20 +53,49 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         core::mem::size_of::<Self>()
     }
 
-    fn from_lower(lower: StaticCscPattern<N, N, MAX_L_NNZ>) -> Self {
-        Self::from_lower_with_ordering(lower, StaticCscOrdering::identity())
-    }
-
     pub(crate) fn from_lower_with_ordering(
         lower: StaticCscPattern<N, N, MAX_L_NNZ>,
         ordering: StaticCscOrdering<N>,
     ) -> Self {
+        let mut output = MaybeUninit::uninit();
+        // SAFETY: `from_lower_with_ordering_into` initializes every field before returning.
+        unsafe {
+            Self::from_lower_with_ordering_into(&lower, ordering, &mut output);
+            output.assume_init()
+        }
+    }
+
+    fn from_lower_with_ordering_into(
+        lower: &StaticCscPattern<N, N, MAX_L_NNZ>,
+        ordering: StaticCscOrdering<N>,
+        output: &mut MaybeUninit<Self>,
+    ) {
+        let output = output.as_mut_ptr();
+        // Initialize the capacity-sized output arrays before using them as the symbolic scratch
+        // buffers. This keeps the analysis from creating duplicate arrays on the caller's stack.
+        unsafe {
+            ptr::addr_of_mut!((*output).lower).write(*lower);
+            ptr::addr_of_mut!((*output).ordering).write(ordering);
+            zero_storage(ptr::addr_of_mut!((*output).update_indices));
+            zero_storage(ptr::addr_of_mut!((*output).update_columns));
+            zero_storage(ptr::addr_of_mut!((*output).update_row_starts));
+            zero_storage(ptr::addr_of_mut!((*output).update_contiguous));
+            zero_storage(ptr::addr_of_mut!((*output).aggregate_update_starts));
+            zero_storage(ptr::addr_of_mut!((*output).aggregate_update_indices));
+            zero_storage(ptr::addr_of_mut!((*output).aggregate_update_columns));
+            zero_storage(ptr::addr_of_mut!((*output).numeric_pattern_starts));
+            zero_storage(ptr::addr_of_mut!((*output).numeric_pattern_columns));
+            for value in &mut (*output).input_diagonal_indices {
+                *value = u32::MAX;
+            }
+        }
         let mut update_counts = [0usize; N];
         for column in 0..N {
-            let start = lower.column_starts()[column];
-            let end = lower.column_end(column).unwrap_or(lower.nnz());
+            let start = unsafe { (*output).lower.column_starts()[column] as usize };
+            let end = unsafe { (*output).lower.column_end(column).unwrap_or(lower.nnz()) };
             for index in (start + 1)..end {
-                update_counts[lower.row_indices()[index]] += 1;
+                let row = unsafe { (*output).lower.row_indices()[index] as usize };
+                update_counts[row] += 1;
             }
         }
 
@@ -65,72 +105,60 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             update_starts[row] = update_nnz;
             update_nnz += update_counts[row];
         }
-        let mut update_indices = [0usize; MAX_L_NNZ];
-        let mut update_columns = [0usize; MAX_L_NNZ];
-        let mut update_row_starts = [0usize; MAX_L_NNZ];
-        let mut update_contiguous = [false; MAX_L_NNZ];
         let mut update_cursor = update_starts;
         let mut parent = [u32::MAX; N];
-        let mut aggregate_factor_rows = [0u32; MAX_L_NNZ];
         let mut factor_row_starts = [0u32; N];
         let mut factor_contiguous = [false; N];
         for column in 0..N {
-            let start = lower.column_starts()[column];
-            let end = lower.column_end(column).unwrap_or(lower.nnz());
+            let start = unsafe { (*output).lower.column_starts()[column] as usize };
+            let end = unsafe { (*output).lower.column_end(column).unwrap_or(lower.nnz()) };
             if start + 1 < end {
-                parent[column] = lower.row_indices()[start + 1] as u32;
-                let first_row = lower.row_indices()[start + 1];
+                parent[column] = unsafe { (*output).lower.row_indices()[start + 1] };
+                let first_row = unsafe { (*output).lower.row_indices()[start + 1] as usize };
                 factor_row_starts[column] = first_row as u32;
-                factor_contiguous[column] = lower.row_indices()[start + 1..end]
-                    .iter()
-                    .enumerate()
-                    .all(|(offset, &candidate)| candidate == first_row + offset);
+                factor_contiguous[column] =
+                    unsafe { &(*output).lower.row_indices()[start + 1..end] }
+                        .iter()
+                        .enumerate()
+                        .all(|(offset, &candidate)| candidate == (first_row + offset) as u32);
             }
-            for (index, aggregate_row) in aggregate_factor_rows
-                .iter_mut()
-                .enumerate()
-                .take(end)
-                .skip(start + 1)
-            {
-                let row = lower.row_indices()[index];
-                *aggregate_row = row as u32;
+            for index in (start + 1)..end {
+                let row = unsafe { (*output).lower.row_indices()[index] as usize };
                 let position = update_cursor[row];
-                update_indices[position] = index;
-                update_columns[position] = column;
-                let first_row = lower.row_indices()[index];
-                update_row_starts[position] = first_row;
-                update_contiguous[position] = lower.row_indices()[index..end]
+                unsafe {
+                    (*output).update_indices[position] = index as u32;
+                    (*output).update_columns[position] = column as u32;
+                }
+                let first_row = unsafe { (*output).lower.row_indices()[index] as usize };
+                let contiguous = unsafe { &(*output).lower.row_indices()[index..end] }
                     .iter()
                     .enumerate()
-                    .all(|(offset, &candidate)| candidate == first_row + offset);
+                    .all(|(offset, &candidate)| candidate == (first_row + offset) as u32);
+                unsafe {
+                    (*output).update_row_starts[position] = first_row as u32;
+                    (*output).update_contiguous[position] = contiguous;
+                }
                 update_cursor[row] += 1;
             }
         }
 
-        Self {
-            lower,
-            ordering,
-            update_starts,
-            update_indices,
-            update_columns,
-            update_row_starts,
-            update_contiguous,
-            update_nnz,
-            parent,
-            aggregate_update_starts: [0; N],
-            aggregate_update_indices: [0; MAX_L_NNZ],
-            aggregate_factor_rows,
-            aggregate_update_nnz: 0,
-            input_diagonal_indices: [u32::MAX; N],
-            factor_row_starts,
-            factor_contiguous,
+        // SAFETY: the capacity-sized arrays were initialized above and the remaining scalar/size-N
+        // fields are initialized exactly once before the output is exposed as `Self`.
+        unsafe {
+            ptr::addr_of_mut!((*output).update_starts).write(update_starts);
+            ptr::addr_of_mut!((*output).update_nnz).write(update_nnz);
+            ptr::addr_of_mut!((*output).parent).write(parent);
+            ptr::addr_of_mut!((*output).aggregate_update_nnz).write(0);
+            ptr::addr_of_mut!((*output).numeric_pattern_nnz).write(0);
+            ptr::addr_of_mut!((*output).factor_row_starts).write(factor_row_starts);
+            ptr::addr_of_mut!((*output).factor_contiguous).write(factor_contiguous);
         }
     }
 
-    fn with_input_pattern<const MAX_A_NNZ: usize, T: Copy + Zero>(
-        mut self,
+    fn with_input_pattern_mut<const MAX_A_NNZ: usize, T: Copy + Zero>(
+        &mut self,
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
-    ) -> Self {
+    ) {
         let matrix_pattern = matrix.pattern();
         for column in 0..N {
             self.input_diagonal_indices[column] = matrix_pattern
@@ -139,9 +167,6 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                 .unwrap_or(u32::MAX);
         }
 
-        let column_power = N.max(1).next_power_of_two();
-        let column_bits = column_power.trailing_zeros();
-        let column_mask = column_power - 1;
         let mut aggregate_update_nnz = 0;
         for row in 0..N {
             let start = self.update_starts[row];
@@ -150,21 +175,57 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             } else {
                 self.update_nnz
             };
-            self.aggregate_update_starts[row] = aggregate_update_nnz;
+            self.aggregate_update_starts[row] = aggregate_update_nnz as u32;
             for update in start..end {
-                let factor_index = self.update_indices[update];
-                let column = self.update_columns[update];
-                let factor_row = self.lower.row_indices()[factor_index];
+                let factor_index = self.update_indices[update] as usize;
+                let column = self.update_columns[update] as usize;
+                let factor_row = self.lower.row_indices()[factor_index] as usize;
                 if let Some(source_index) = matrix_pattern.entry_index(factor_row, column) {
-                    self.aggregate_update_indices[aggregate_update_nnz] =
-                        (source_index << column_bits) | column;
+                    self.aggregate_update_indices[aggregate_update_nnz] = source_index as u32;
+                    self.aggregate_update_columns[aggregate_update_nnz] = column as u32;
                     aggregate_update_nnz += 1;
                 }
             }
         }
-        debug_assert!(column_mask >= N.saturating_sub(1));
         self.aggregate_update_nnz = aggregate_update_nnz;
-        self
+
+        let mut numeric_pattern_nnz = 0;
+        if N != 0 && self.input_diagonal_indices[0] != u32::MAX {
+            let mut visited = [usize::MAX; N];
+            let mut column_pattern = [0usize; N];
+            for column in 0..N {
+                self.numeric_pattern_starts[column] = numeric_pattern_nnz as u32;
+                visited[column] = column;
+                let mut top = N;
+                let update_start = self.aggregate_update_starts[column] as usize;
+                let update_end = if column + 1 < N {
+                    self.aggregate_update_starts[column + 1] as usize
+                } else {
+                    self.aggregate_update_nnz
+                };
+                for update in update_start..update_end {
+                    let mut node = self.aggregate_update_columns[update] as usize;
+                    let mut depth = 0;
+                    while visited[node] != column {
+                        column_pattern[depth] = node;
+                        visited[node] = column;
+                        node = self.parent[node] as usize;
+                        depth += 1;
+                    }
+                    while depth > 0 {
+                        top -= 1;
+                        depth -= 1;
+                        column_pattern[top] = column_pattern[depth];
+                    }
+                }
+                for &previous in &column_pattern[top..N] {
+                    debug_assert!(numeric_pattern_nnz < MAX_L_NNZ);
+                    self.numeric_pattern_columns[numeric_pattern_nnz] = previous as u32;
+                    numeric_pattern_nnz += 1;
+                }
+            }
+        }
+        self.numeric_pattern_nnz = numeric_pattern_nnz;
     }
 
     /// Analyzes the lower-triangular structure of a symmetric CSC matrix.
@@ -176,16 +237,36 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
     pub fn analyze<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
     ) -> Result<Self, SparseCholeskyError> {
+        let mut output = MaybeUninit::uninit();
+        Self::analyze_natural_into(matrix, &mut output)?;
+        // SAFETY: `analyze_natural_into` initializes every field before returning `Ok`.
+        return Ok(unsafe { output.assume_init() });
+    }
+
+    fn analyze_natural_into<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+        output: &mut MaybeUninit<Self>,
+    ) -> Result<(), SparseCholeskyError> {
         validate_symmetric_structure(matrix)?;
+        if MAX_A_NNZ > MAX_L_NNZ {
+            return Self::analyze_natural_with_local_scratch(matrix, output);
+        }
+        let output_ptr = output.as_mut_ptr();
+        // Reuse the destination's capacity-sized arrays for symbolic adjacency and factor row
+        // construction. The factor capacity must cover the input capacity for this path.
+        unsafe {
+            zero_storage(ptr::addr_of_mut!((*output_ptr).lower));
+            zero_storage(ptr::addr_of_mut!((*output_ptr).update_indices));
+        }
         // Build the upper-column adjacency implied by the stored lower
         // triangle.  For a lower entry (row, column), the corresponding
         // upper entry is visited from column `row` with predecessor `column`.
         let mut row_counts = [0usize; N];
         for column in 0..N {
-            let start = matrix.column_starts()[column];
+            let start = matrix.column_starts()[column] as usize;
             let end = matrix.column_end(column).unwrap_or(matrix.nnz());
             for index in start..end {
-                let row = matrix.row_indices()[index];
+                let row = matrix.row_indices()[index] as usize;
                 if row > column {
                     row_counts[row] += 1;
                 }
@@ -196,14 +277,13 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             row_starts[row] = row_starts[row - 1] + row_counts[row - 1];
         }
         let mut row_cursor = row_starts;
-        let mut upper_columns = [0usize; MAX_A_NNZ];
         for column in 0..N {
-            let start = matrix.column_starts()[column];
+            let start = matrix.column_starts()[column] as usize;
             let end = matrix.column_end(column).unwrap_or(matrix.nnz());
             for index in start..end {
-                let row = matrix.row_indices()[index];
+                let row = matrix.row_indices()[index] as usize;
                 if row > column {
-                    upper_columns[row_cursor[row]] = column;
+                    unsafe { (*output_ptr).update_indices[row_cursor[row]] = column as u32 };
                     row_cursor[row] += 1;
                 }
             }
@@ -224,8 +304,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             } else {
                 row_starts[column] + row_counts[column]
             };
-            for &upper_column in &upper_columns[start..end] {
-                let mut node = upper_column;
+            for &upper_column in unsafe { &(&(*output_ptr).update_indices)[start..end] } {
+                let mut node = upper_column as usize;
                 while visited[node] != column {
                     if parent[node] == usize::MAX {
                         parent[node] = column;
@@ -250,9 +330,128 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             return Err(SparseCholeskyError::CapacityExceeded);
         }
 
-        let mut row_indices = [0usize; MAX_L_NNZ];
         for column in 0..N {
-            row_indices[column_starts[column]] = column;
+            unsafe { (*output_ptr).lower.row_indices[column_starts[column]] = column as u32 };
+        }
+        let mut cursors = column_starts;
+        for cursor in &mut cursors {
+            *cursor += 1;
+        }
+        visited = [usize::MAX; N];
+        for column in 0..N {
+            visited[column] = column;
+            let start = row_starts[column];
+            let end = if column + 1 < N {
+                row_starts[column + 1]
+            } else {
+                row_starts[column] + row_counts[column]
+            };
+            for &upper_column in unsafe { &(&(*output_ptr).update_indices)[start..end] } {
+                let mut node = upper_column as usize;
+                while visited[node] != column {
+                    unsafe { (*output_ptr).lower.row_indices[cursors[node]] = column as u32 };
+                    cursors[node] += 1;
+                    visited[node] = column;
+                    node = parent[node];
+                }
+            }
+        }
+
+        StaticCscPattern::<N, N, MAX_L_NNZ>::validate_parts(
+            unsafe { &(&(*output_ptr).lower.row_indices)[..total_nnz] },
+            &column_starts,
+            total_nnz,
+        )?;
+        unsafe {
+            for column in 0..N {
+                (*output_ptr).lower.column_starts[column] = column_starts[column] as u32;
+            }
+            (*output_ptr).lower.nnz = total_nnz;
+            Self::from_lower_with_ordering_into(
+                &(*output_ptr).lower,
+                StaticCscOrdering::identity(),
+                output,
+            );
+        }
+        // SAFETY: `from_lower_with_ordering_into` initialized the output above.
+        unsafe { (*output.as_mut_ptr()).with_input_pattern_mut(matrix) };
+        Ok(())
+    }
+
+    // The usual factor capacity is at least the input capacity, so the main path can reuse the
+    // destination arrays. Retain a generic fallback for callers that choose a smaller factor
+    // capacity; this path is rejected later if the actual fill does not fit.
+    #[inline(never)]
+    fn analyze_natural_with_local_scratch<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+        output: &mut MaybeUninit<Self>,
+    ) -> Result<(), SparseCholeskyError> {
+        let mut row_counts = [0usize; N];
+        for column in 0..N {
+            let start = matrix.column_starts()[column] as usize;
+            let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+            for index in start..end {
+                let row = matrix.row_indices()[index] as usize;
+                if row > column {
+                    row_counts[row] += 1;
+                }
+            }
+        }
+        let mut row_starts = [0usize; N];
+        for row in 1..N {
+            row_starts[row] = row_starts[row - 1] + row_counts[row - 1];
+        }
+        let mut row_cursor = row_starts;
+        let mut upper_columns = [0usize; MAX_A_NNZ];
+        for column in 0..N {
+            let start = matrix.column_starts()[column] as usize;
+            let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+            for index in start..end {
+                let row = matrix.row_indices()[index] as usize;
+                if row > column {
+                    upper_columns[row_cursor[row]] = column;
+                    row_cursor[row] += 1;
+                }
+            }
+        }
+        let mut visited = [usize::MAX; N];
+        let mut parent = [usize::MAX; N];
+        let mut column_counts = [1usize; N];
+        for column in 0..N {
+            visited[column] = column;
+            let start = row_starts[column];
+            let end = if column + 1 < N {
+                row_starts[column + 1]
+            } else {
+                row_starts[column] + row_counts[column]
+            };
+            for &upper_column in &upper_columns[start..end] {
+                let mut node = upper_column;
+                while visited[node] != column {
+                    if parent[node] == usize::MAX {
+                        parent[node] = column;
+                    }
+                    column_counts[node] += 1;
+                    visited[node] = column;
+                    node = parent[node];
+                }
+            }
+        }
+        let mut column_starts = [0usize; N];
+        for column in 1..N {
+            column_starts[column] = column_starts[column - 1] + column_counts[column - 1];
+        }
+        let total_nnz = if N == 0 {
+            0
+        } else {
+            column_starts[N - 1] + column_counts[N - 1]
+        };
+        if total_nnz > MAX_L_NNZ {
+            return Err(SparseCholeskyError::CapacityExceeded);
+        }
+        let mut row_indices = [0u32; MAX_L_NNZ];
+        for column in 0..N {
+            row_indices[column_starts[column]] = column as u32;
         }
         let mut cursors = column_starts;
         for cursor in &mut cursors {
@@ -270,17 +469,18 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             for &upper_column in &upper_columns[start..end] {
                 let mut node = upper_column;
                 while visited[node] != column {
-                    row_indices[cursors[node]] = column;
+                    row_indices[cursors[node]] = column as u32;
                     cursors[node] += 1;
                     visited[node] = column;
                     node = parent[node];
                 }
             }
         }
-
         let lower =
             StaticCscPattern::from_parts(&row_indices[..total_nnz], &column_starts, total_nnz)?;
-        Ok(Self::from_lower(lower).with_input_pattern(matrix))
+        Self::from_lower_with_ordering_into(&lower, StaticCscOrdering::identity(), output);
+        unsafe { (*output.as_mut_ptr()).with_input_pattern_mut(matrix) };
+        Ok(())
     }
 
     /// Analyzes the matrix using the deterministic fixed-workspace
@@ -298,22 +498,49 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
         ordering: StaticCscOrdering<N>,
     ) -> Result<Self, SparseCholeskyError> {
+        let mut output = MaybeUninit::uninit();
+        Self::analyze_with_ordering_into(matrix, ordering, &mut output)?;
+        // SAFETY: `analyze_with_ordering_into` initializes every field before returning `Ok`.
+        Ok(unsafe { output.assume_init() })
+    }
+
+    /// Analyzes a matrix directly into caller-owned uninitialized storage.
+    ///
+    /// The caller may call `assume_init` on `output` only after this method returns `Ok`. Writing
+    /// directly into the destination avoids returning the large fixed-capacity symbolic pattern
+    /// by value.
+    pub fn analyze_with_ordering_into<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+        ordering: StaticCscOrdering<N>,
+        output: &mut MaybeUninit<Self>,
+    ) -> Result<(), SparseCholeskyError> {
         validate_symmetric_structure(matrix)?;
         if ordering.is_identity() {
-            return Self::analyze(matrix);
+            return Self::analyze_natural_into(matrix, output);
         }
         let permuted = ordering.permute(matrix)?;
-        let natural = Self::analyze(&permuted)?;
-        let mut output = Self::from_lower_with_ordering(natural.lower, ordering);
-        output.parent = natural.parent;
-        output.aggregate_update_starts = natural.aggregate_update_starts;
-        output.aggregate_update_indices = natural.aggregate_update_indices;
-        output.aggregate_factor_rows = natural.aggregate_factor_rows;
-        output.aggregate_update_nnz = natural.aggregate_update_nnz;
-        output.input_diagonal_indices = natural.input_diagonal_indices;
-        output.factor_row_starts = natural.factor_row_starts;
-        output.factor_contiguous = natural.factor_contiguous;
-        Ok(output)
+        Self::analyze_natural_into(&permuted, output)?;
+        // The natural analysis is in permuted coordinates. Its metadata is reusable; subsequent
+        // ordered numeric operations only need the ordering tag changed.
+        // SAFETY: `analyze_natural_into` initialized the output above.
+        unsafe { (*output.as_mut_ptr()).ordering = ordering };
+        Ok(())
+    }
+
+    /// Analyzes a matrix that is already in the coordinates of `ordering`.
+    ///
+    /// This is useful when the caller has already applied a reusable sparse permutation. It
+    /// performs the natural symbolic analysis in those coordinates without constructing another
+    /// fixed-capacity permuted matrix.
+    pub fn analyze_ordered_with_ordering_into<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+        ordering: StaticCscOrdering<N>,
+        output: &mut MaybeUninit<Self>,
+    ) -> Result<(), SparseCholeskyError> {
+        Self::analyze_natural_into(matrix, output)?;
+        // SAFETY: natural analysis initialized the output before its ordering tag is updated.
+        unsafe { (*output.as_mut_ptr()).ordering = ordering };
+        Ok(())
     }
 
     /// Analyzes a matrix using fixed-workspace diagonal pivot selection.
@@ -519,16 +746,38 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         &self,
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
     ) -> Result<StaticCscLdlt<N, MAX_L_NNZ, T>, SparseCholeskyError> {
-        let mut factor = StaticCscLdlt {
-            lower: StaticCscMatrix {
-                values: [T::zero(); MAX_L_NNZ],
-                pattern: self.lower,
-            },
-            diagonal: [T::zero(); N],
-            ordering: self.ordering,
-        };
-        self.factorize_ldlt_ordered(matrix, &mut factor)?;
-        Ok(factor)
+        let mut factor = MaybeUninit::uninit();
+        self.factor_ldlt_ordered_into(matrix, &mut factor)?;
+        // SAFETY: `factor_ldlt_ordered_into` initializes every field before returning `Ok`.
+        Ok(unsafe { factor.assume_init() })
+    }
+
+    /// Computes ordered LDLᵀ values directly into caller-owned uninitialized storage.
+    ///
+    /// The caller may call `assume_init` on `output` only after this method returns `Ok`. This
+    /// avoids returning the large fixed-capacity numeric factor by value.
+    pub fn factor_ldlt_ordered_into<const MAX_A_NNZ: usize, T: Real + Zero>(
+        &self,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+        output: &mut MaybeUninit<StaticCscLdlt<N, MAX_L_NNZ, T>>,
+    ) -> Result<(), SparseCholeskyError> {
+        let output = output.as_mut_ptr();
+        // SAFETY: every field is initialized exactly once before factorization writes numeric
+        // values into the output.
+        unsafe {
+            let values = ptr::addr_of_mut!((*output).lower.values).cast::<T>();
+            for index in 0..MAX_L_NNZ {
+                values.add(index).write(T::zero());
+            }
+            ptr::addr_of_mut!((*output).lower.pattern).write(self.lower);
+            let diagonal = ptr::addr_of_mut!((*output).diagonal).cast::<T>();
+            for index in 0..N {
+                diagonal.add(index).write(T::zero());
+            }
+            ptr::addr_of_mut!((*output).ordering).write(self.ordering);
+        }
+        // SAFETY: the factor storage was initialized immediately above.
+        unsafe { self.factorize_ldlt_ordered(matrix, &mut *output) }
     }
 
     /// Factors ordered coordinates into reusable LDLᵀ storage.
@@ -576,85 +825,82 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         }
         output.ordering = StaticCscOrdering::identity();
 
-        let mut visited = [usize::MAX; N];
         let mut nonzeros_per_column = [0usize; N];
         let mut aggregate = [T::zero(); N];
-        let mut column_pattern = [0usize; N];
         let matrix_values = matrix.values().as_ptr();
         let aggregate_update_starts = self.aggregate_update_starts.as_ptr();
         let aggregate_update_indices = self.aggregate_update_indices.as_ptr();
         let factor_column_starts = self.lower.column_starts().as_ptr();
-        let factor_rows = self.aggregate_factor_rows.as_ptr();
+        let factor_rows = self.lower.row_indices().as_ptr();
         let factor_row_starts = self.factor_row_starts.as_ptr();
         let factor_contiguous = self.factor_contiguous.as_ptr();
         let factor_values = output.lower.values_mut().as_mut_ptr();
         let diagonal_values = output.diagonal.as_mut_ptr();
-        let parent = self.parent.as_ptr();
-        let visited_ptr = visited.as_mut_ptr();
         let aggregate_ptr = aggregate.as_mut_ptr();
-        let column_pattern_ptr = column_pattern.as_mut_ptr();
         let nonzeros_ptr = nonzeros_per_column.as_mut_ptr();
-        let column_power = N.max(1).next_power_of_two();
-        let column_bits = column_power.trailing_zeros();
-        let column_mask = column_power - 1;
+        let numeric_pattern_starts = self.numeric_pattern_starts.as_ptr();
+        let numeric_pattern_columns = self.numeric_pattern_columns.as_ptr();
+        let aggregate_update_columns = self.aggregate_update_columns.as_ptr();
 
         // SAFETY: symbolic analysis validates every fixed-capacity schedule,
         // row index, and source index used below before numeric factorization.
         unsafe {
             for column in 0..N {
-                *visited_ptr.add(column) = column;
-                let mut top = N;
-                let diagonal_index = *factor_column_starts.add(column);
+                let diagonal_index = *factor_column_starts.add(column) as usize;
                 let diagonal_source = self.input_diagonal_indices[column];
                 if diagonal_source != u32::MAX {
                     *aggregate_ptr.add(column) =
                         *aggregate_ptr.add(column) + *matrix_values.add(diagonal_source as usize);
                 }
 
-                let update_start = *aggregate_update_starts.add(column);
+                let update_start = *aggregate_update_starts.add(column) as usize;
                 let update_end = if column + 1 < N {
-                    *aggregate_update_starts.add(column + 1)
+                    *aggregate_update_starts.add(column + 1) as usize
                 } else {
                     self.aggregate_update_nnz
                 };
                 for update in update_start..update_end {
-                    let packed = *aggregate_update_indices.add(update);
-                    let source_index = packed >> column_bits;
-                    let mut node = packed & column_mask;
+                    let source_index = *aggregate_update_indices.add(update) as usize;
+                    let node = *aggregate_update_columns.add(update) as usize;
                     *aggregate_ptr.add(node) =
                         *aggregate_ptr.add(node) + *matrix_values.add(source_index);
-                    let mut depth = 0;
-                    while *visited_ptr.add(node) != column {
-                        *column_pattern_ptr.add(depth) = node;
-                        *visited_ptr.add(node) = column;
-                        node = *parent.add(node) as usize;
-                        depth += 1;
-                    }
-                    while depth > 0 {
-                        top -= 1;
-                        depth -= 1;
-                        *column_pattern_ptr.add(top) = *column_pattern_ptr.add(depth);
-                    }
                 }
 
                 let mut diagonal = *aggregate_ptr.add(column);
                 *aggregate_ptr.add(column) = T::zero();
-                let mut pattern_index = top;
-                while pattern_index < N {
-                    let previous = *column_pattern_ptr.add(pattern_index);
+                let pattern_start = *numeric_pattern_starts.add(column) as usize;
+                let pattern_end = if column + 1 < N {
+                    *numeric_pattern_starts.add(column + 1) as usize
+                } else {
+                    self.numeric_pattern_nnz
+                };
+                let mut pattern_index = pattern_start;
+                while pattern_index < pattern_end {
+                    let previous = *numeric_pattern_columns.add(pattern_index) as usize;
                     let aggregate_previous = *aggregate_ptr.add(previous);
                     let lower_value = aggregate_previous / *diagonal_values.add(previous);
-                    let start = *factor_column_starts.add(previous);
+                    let start = *factor_column_starts.add(previous) as usize;
                     let end = start + 1 + *nonzeros_ptr.add(previous);
                     *aggregate_ptr.add(previous) = T::zero();
                     let mut index = start + 1;
                     if *factor_contiguous.add(previous) {
-                        let mut row = *factor_row_starts.add(previous) as usize;
-                        while index < end {
-                            *aggregate_ptr.add(row) = *aggregate_ptr.add(row)
-                                - *factor_values.add(index) * aggregate_previous;
-                            index += 1;
-                            row += 1;
+                        let row = *factor_row_starts.add(previous) as usize;
+                        let count = end - index;
+                        // SAFETY: symbolic analysis proves that the
+                        // contiguous factor rows occupy `row..row + count`
+                        // within `aggregate`, and that `index..end` is within
+                        // the factor values. These slices are disjoint
+                        // allocations, so LLVM can optimize the update loop
+                        // without changing its element order.
+                        let aggregate_values =
+                            core::slice::from_raw_parts_mut(aggregate_ptr.add(row), count);
+                        let factor_column =
+                            core::slice::from_raw_parts(factor_values.add(index), count);
+                        for (aggregate_value, factor_value) in
+                            aggregate_values.iter_mut().zip(factor_column)
+                        {
+                            *aggregate_value =
+                                *aggregate_value - *factor_value * aggregate_previous;
                         }
                     } else {
                         while index < end {
@@ -703,10 +949,10 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             for value in &mut work[column..] {
                 *value = T::zero();
             }
-            let matrix_start = matrix.column_starts()[column];
+            let matrix_start = matrix.column_starts()[column] as usize;
             let matrix_end = matrix.column_end(column).unwrap_or(matrix.nnz());
             for index in matrix_start..matrix_end {
-                let row = matrix.row_indices()[index];
+                let row = matrix.row_indices()[index] as usize;
                 if row >= column {
                     work[row] = matrix.values()[index];
                 }
@@ -719,22 +965,22 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                 self.update_nnz
             };
             for update in update_start..update_end {
-                let lower_index = self.update_indices[update];
-                let previous = self.update_columns[update];
+                let lower_index = self.update_indices[update] as usize;
+                let previous = self.update_columns[update] as usize;
                 let scale = output.lower.values()[lower_index] * output.diagonal[previous];
                 let end = output
                     .lower
                     .column_end(previous)
                     .unwrap_or(output.lower.nnz());
                 if self.update_contiguous[update] {
-                    let row_start = self.update_row_starts[update];
+                    let row_start = self.update_row_starts[update] as usize;
                     for offset in 0..(end - lower_index) {
                         let row = row_start + offset;
                         work[row] = work[row] - output.lower.values()[lower_index + offset] * scale;
                     }
                 } else {
                     for index in lower_index..end {
-                        let row = output.lower.row_indices()[index];
+                        let row = output.lower.row_indices()[index] as usize;
                         work[row] = work[row] - output.lower.values()[index] * scale;
                     }
                 }
@@ -748,14 +994,14 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                 return Err(SparseCholeskyError::ZeroPivot);
             }
             output.diagonal[column] = diagonal;
-            let start = output.lower.column_starts()[column];
+            let start = output.lower.column_starts()[column] as usize;
             let end = output
                 .lower
                 .column_end(column)
                 .unwrap_or(output.lower.nnz());
             output.lower.values_mut()[start] = T::one();
             for index in (start + 1)..end {
-                let row = output.lower.row_indices()[index];
+                let row = output.lower.row_indices()[index] as usize;
                 let value = work[row] / diagonal;
                 if !value.is_finite() {
                     return Err(SparseCholeskyError::NonFinite);
@@ -787,10 +1033,10 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             for value in &mut work[column..] {
                 *value = T::zero();
             }
-            let matrix_start = matrix.column_starts()[column];
+            let matrix_start = matrix.column_starts()[column] as usize;
             let matrix_end = matrix.column_end(column).unwrap_or(matrix.nnz());
             for index in matrix_start..matrix_end {
-                let row = matrix.row_indices()[index];
+                let row = matrix.row_indices()[index] as usize;
                 if row >= column {
                     work[row] = matrix.values()[index];
                 }
@@ -803,15 +1049,15 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                 self.update_nnz
             };
             for update in update_start..update_end {
-                let lower_index = self.update_indices[update];
-                let previous = self.update_columns[update];
+                let lower_index = self.update_indices[update] as usize;
+                let previous = self.update_columns[update] as usize;
                 let lower_column = output.lower.values()[lower_index];
                 let end = output
                     .lower
                     .column_end(previous)
                     .unwrap_or(output.lower.nnz());
                 if self.update_contiguous[update] {
-                    let row_start = self.update_row_starts[update];
+                    let row_start = self.update_row_starts[update] as usize;
                     for offset in 0..(end - lower_index) {
                         let row = row_start + offset;
                         work[row] =
@@ -819,7 +1065,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                     }
                 } else {
                     for index in lower_index..end {
-                        let row = output.lower.row_indices()[index];
+                        let row = output.lower.row_indices()[index] as usize;
                         work[row] = work[row] - output.lower.values()[index] * lower_column;
                     }
                 }
@@ -836,14 +1082,14 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             if !root.is_finite() || root <= T::zero() {
                 return Err(SparseCholeskyError::NonFinite);
             }
-            let start = output.lower.column_starts()[column];
+            let start = output.lower.column_starts()[column] as usize;
             let end = output
                 .lower
                 .column_end(column)
                 .unwrap_or(output.lower.nnz());
             output.lower.values_mut()[start] = root;
             for index in (start + 1)..end {
-                let row = output.lower.row_indices()[index];
+                let row = output.lower.row_indices()[index] as usize;
                 let value = work[row] / root;
                 if !value.is_finite() {
                     return Err(SparseCholeskyError::NonFinite);
@@ -860,21 +1106,21 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
         for column in 0..N {
-            let start = matrix.column_starts()[column];
+            let start = matrix.column_starts()[column] as usize;
             let end = matrix.column_end(column).unwrap_or(matrix.nnz());
             for index in start..end {
-                let row = matrix.row_indices()[index];
+                let row = matrix.row_indices()[index] as usize;
                 let (lower_row, lower_column) = if row >= column {
                     (row, column)
                 } else {
                     (column, row)
                 };
-                let lower_start = self.lower.column_starts()[lower_column];
+                let lower_start = self.lower.column_starts()[lower_column] as usize;
                 let lower_end = self
                     .lower
                     .column_end(lower_column)
                     .unwrap_or(self.lower.nnz());
-                if !self.lower.row_indices()[lower_start..lower_end].contains(&lower_row) {
+                if !self.lower.row_indices()[lower_start..lower_end].contains(&(lower_row as u32)) {
                     return Err(SparseCholeskyError::PatternMismatch);
                 }
             }
@@ -887,10 +1133,10 @@ fn validate_symmetric_structure<const N: usize, const MAX_NNZ: usize, T: Real + 
     matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
 ) -> Result<(), SparseCholeskyError> {
     for column in 0..N {
-        let start = matrix.column_starts()[column];
+        let start = matrix.column_starts()[column] as usize;
         let end = matrix.column_end(column).unwrap_or(matrix.nnz());
         for index in start..end {
-            let row = matrix.row_indices()[index];
+            let row = matrix.row_indices()[index] as usize;
             let value = matrix.values()[index];
             if !value.is_finite() {
                 return Err(SparseCholeskyError::NonFinite);
@@ -925,10 +1171,10 @@ fn diagonal_pivot_ordering<const N: usize, const MAX_NNZ: usize, T: Real + Copy 
     let threshold = threshold.abs();
     let mut work = [[T::zero(); N]; N];
     for column in 0..N {
-        let start = matrix.column_starts()[column];
+        let start = matrix.column_starts()[column] as usize;
         let end = matrix.column_end(column).unwrap_or(matrix.nnz());
         for index in start..end {
-            let row = matrix.row_indices()[index];
+            let row = matrix.row_indices()[index] as usize;
             if row >= column {
                 let value = matrix.values()[index];
                 work[row][column] = value;
@@ -1126,35 +1372,51 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
     }
 
     fn solve_natural_in_place<const P: usize>(&self, rhs: &mut Matrix<N, P, T>) {
-        for row in 0..N {
-            let start = self.lower.column_starts()[row];
-            let end = self.lower.column_end(row).unwrap_or(self.lower.nnz());
-            let diagonal = self.lower.values()[start];
-            for column in 0..P {
-                rhs[(row, column)] = rhs[(row, column)] / diagonal;
-            }
-            for index in (start + 1)..end {
-                let target = self.lower.row_indices()[index];
-                let value = self.lower.values()[index];
-                for column in 0..P {
-                    rhs[(target, column)] = rhs[(target, column)] - value * rhs[(row, column)];
-                }
-            }
-        }
+        let rhs_ptr = rhs.as_mut_slice().as_mut_ptr();
+        let lower_rows = self.lower.row_indices().as_ptr();
+        let lower_values = self.lower.values().as_ptr();
 
-        for row in (0..N).rev() {
-            let start = self.lower.column_starts()[row];
-            let end = self.lower.column_end(row).unwrap_or(self.lower.nnz());
-            let diagonal = self.lower.values()[start];
-            for index in (start + 1)..end {
-                let source = self.lower.row_indices()[index];
-                let value = self.lower.values()[index];
+        // SAFETY: the sparse pattern is validated at construction, so every
+        // stored row index is below N and every CSC range is within the
+        // corresponding value array. Matrix storage is column-major with a
+        // stride of N for each RHS column.
+        unsafe {
+            for row in 0..N {
+                let start = self.lower.column_starts()[row] as usize;
+                let end = self.lower.column_end(row).unwrap_or(self.lower.nnz());
+                let diagonal = *lower_values.add(start);
                 for column in 0..P {
-                    rhs[(row, column)] = rhs[(row, column)] - value * rhs[(source, column)];
+                    let entry = rhs_ptr.add(row + column * N);
+                    *entry = *entry / diagonal;
+                }
+                for index in (start + 1)..end {
+                    let target = *lower_rows.add(index) as usize;
+                    let value = *lower_values.add(index);
+                    for column in 0..P {
+                        let target_ptr = rhs_ptr.add(target + column * N);
+                        let row_ptr = rhs_ptr.add(row + column * N);
+                        *target_ptr = *target_ptr - value * *row_ptr;
+                    }
                 }
             }
-            for column in 0..P {
-                rhs[(row, column)] = rhs[(row, column)] / diagonal;
+
+            for row in (0..N).rev() {
+                let start = self.lower.column_starts()[row] as usize;
+                let end = self.lower.column_end(row).unwrap_or(self.lower.nnz());
+                let diagonal = *lower_values.add(start);
+                for index in (start + 1)..end {
+                    let source = *lower_rows.add(index) as usize;
+                    let value = *lower_values.add(index);
+                    for column in 0..P {
+                        let row_ptr = rhs_ptr.add(row + column * N);
+                        let source_ptr = rhs_ptr.add(source + column * N);
+                        *row_ptr = *row_ptr - value * *source_ptr;
+                    }
+                }
+                for column in 0..P {
+                    let entry = rhs_ptr.add(row + column * N);
+                    *entry = *entry / diagonal;
+                }
             }
         }
     }
