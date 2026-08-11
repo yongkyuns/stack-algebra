@@ -240,7 +240,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         let mut output = MaybeUninit::uninit();
         Self::analyze_natural_into(matrix, &mut output)?;
         // SAFETY: `analyze_natural_into` initializes every field before returning `Ok`.
-        return Ok(unsafe { output.assume_init() });
+        Ok(unsafe { output.assume_init() })
     }
 
     fn analyze_natural_into<const MAX_A_NNZ: usize, T: Real + Copy + Zero>(
@@ -330,8 +330,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             return Err(SparseCholeskyError::CapacityExceeded);
         }
 
-        for column in 0..N {
-            unsafe { (*output_ptr).lower.row_indices[column_starts[column]] = column as u32 };
+        for (column, &start) in column_starts.iter().enumerate() {
+            unsafe { (*output_ptr).lower.row_indices[start] = column as u32 };
         }
         let mut cursors = column_starts;
         for cursor in &mut cursors {
@@ -363,8 +363,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             total_nnz,
         )?;
         unsafe {
-            for column in 0..N {
-                (*output_ptr).lower.column_starts[column] = column_starts[column] as u32;
+            for (column, &start) in column_starts.iter().enumerate() {
+                (*output_ptr).lower.column_starts[column] = start as u32;
             }
             (*output_ptr).lower.nnz = total_nnz;
             Self::from_lower_with_ordering_into(

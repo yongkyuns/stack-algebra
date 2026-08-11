@@ -204,8 +204,8 @@ unsafe extern "C" {
         output: *mut f64,
     ) -> i32;
     fn sa_eigen_sparse_llt_create_f64(
-        row_indices: *const usize,
-        column_starts: *const usize,
+        row_indices: *const u32,
+        column_starts: *const u32,
         values: *const f64,
         dimension: usize,
         nonzeros: usize,
@@ -220,8 +220,8 @@ unsafe extern "C" {
     ) -> i32;
     fn sa_eigen_sparse_llt_destroy_f64(context: *mut c_void);
     fn sa_eigen_sparse_ldlt_create_f64(
-        row_indices: *const usize,
-        column_starts: *const usize,
+        row_indices: *const u32,
+        column_starts: *const u32,
         values: *const f64,
         dimension: usize,
         nonzeros: usize,
@@ -236,8 +236,8 @@ unsafe extern "C" {
     ) -> i32;
     fn sa_eigen_sparse_ldlt_destroy_f64(context: *mut c_void);
     fn sa_eigen_sparse_ldlt_create_f32(
-        row_indices: *const usize,
-        column_starts: *const usize,
+        row_indices: *const u32,
+        column_starts: *const u32,
         values: *const f32,
         dimension: usize,
         nonzeros: usize,

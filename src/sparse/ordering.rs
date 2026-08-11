@@ -215,6 +215,12 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
     }
 }
 
+impl<const N: usize, const MAX_NNZ: usize> Default for StaticCscPermutation<N, MAX_NNZ> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A fixed-capacity symmetric permutation for sparse factorization.
 ///
 /// The permutation is represented as an ordered-to-original map. Use
