@@ -28,8 +28,8 @@ const BATCH_SIZE: usize = 64;
 #[cfg(feature = "eigen-compare")]
 trait EigenSparseScalar: Real {
     unsafe fn create(
-        row_indices: *const usize,
-        column_starts: *const usize,
+        row_indices: *const u32,
+        column_starts: *const u32,
         values: *const Self,
         dimension: usize,
         nonzeros: usize,
@@ -51,8 +51,8 @@ macro_rules! impl_eigen_sparse_scalar {
     ($scalar:ty, $create:ident, $analyze:ident, $factorize:ident, $solve:ident, $matvec:ident, $destroy:ident) => {
         unsafe extern "C" {
             fn $create(
-                row_indices: *const usize,
-                column_starts: *const usize,
+                row_indices: *const u32,
+                column_starts: *const u32,
                 values: *const $scalar,
                 dimension: usize,
                 nonzeros: usize,
@@ -71,8 +71,8 @@ macro_rules! impl_eigen_sparse_scalar {
 
         impl EigenSparseScalar for $scalar {
             unsafe fn create(
-                row_indices: *const usize,
-                column_starts: *const usize,
+                row_indices: *const u32,
+                column_starts: *const u32,
                 values: *const Self,
                 dimension: usize,
                 nonzeros: usize,
@@ -209,8 +209,8 @@ impl<T: EigenSparseScalar> Drop for EigenSparseLlt<T> {
 #[cfg(feature = "eigen-compare")]
 trait EigenSparseLdltScalar: Real {
     unsafe fn create(
-        row_indices: *const usize,
-        column_starts: *const usize,
+        row_indices: *const u32,
+        column_starts: *const u32,
         values: *const Self,
         dimension: usize,
         nonzeros: usize,
@@ -231,8 +231,8 @@ macro_rules! impl_eigen_sparse_ldlt_scalar {
     ($scalar:ty, $create:ident, $analyze:ident, $factorize:ident, $solve:ident, $destroy:ident) => {
         unsafe extern "C" {
             fn $create(
-                row_indices: *const usize,
-                column_starts: *const usize,
+                row_indices: *const u32,
+                column_starts: *const u32,
                 values: *const $scalar,
                 dimension: usize,
                 nonzeros: usize,
@@ -250,8 +250,8 @@ macro_rules! impl_eigen_sparse_ldlt_scalar {
 
         impl EigenSparseLdltScalar for $scalar {
             unsafe fn create(
-                row_indices: *const usize,
-                column_starts: *const usize,
+                row_indices: *const u32,
+                column_starts: *const u32,
                 values: *const Self,
                 dimension: usize,
                 nonzeros: usize,
@@ -515,12 +515,12 @@ fn bench_stack_matrix<
     let mut entry_indices = [0usize; CAPACITY];
     let mut entry_count = 0;
     for column in 0..N {
-        let start = matrix.column_starts()[column];
+        let start = matrix.column_starts()[column] as usize;
         let end = matrix.column_end(column).unwrap_or(matrix.nnz());
         for index in start..end {
             entry_indices[entry_count] = matrix
                 .pattern()
-                .entry_index(matrix.row_indices()[index], column)
+                .entry_index(matrix.row_indices()[index] as usize, column)
                 .unwrap();
             entry_count += 1;
         }
@@ -564,12 +564,12 @@ fn bench_stack_matrix<
             for _ in 0..BATCH_SIZE {
                 let mut assembled = StaticCscMatrix::zero_with_pattern(*matrix.pattern());
                 for column in 0..N {
-                    let start = matrix.column_starts()[column];
+                    let start = matrix.column_starts()[column] as usize;
                     let end = matrix.column_end(column).unwrap_or(matrix.nnz());
                     for index in start..end {
                         assembled
                             .add_to_value(
-                                matrix.row_indices()[index],
+                                matrix.row_indices()[index] as usize,
                                 column,
                                 matrix.values()[index],
                             )

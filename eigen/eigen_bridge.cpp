@@ -3,6 +3,7 @@
 #include <Eigen/SparseCholesky>
 
 #include <cstddef>
+#include <cstdint>
 #include <new>
 
 template <typename Scalar>
@@ -21,8 +22,8 @@ struct SparseLltContext {
 };
 
 template <typename Scalar>
-SparseLltContext<Scalar>* sparse_llt_create(const std::size_t* row_indices,
-                                            const std::size_t* column_starts,
+SparseLltContext<Scalar>* sparse_llt_create(const std::uint32_t* row_indices,
+                                            const std::uint32_t* column_starts,
                                             const Scalar* values, std::size_t dimension,
                                             std::size_t nonzeros) {
   try {
@@ -85,8 +86,8 @@ struct SparseLdltContext {
 };
 
 template <typename Scalar>
-SparseLdltContext<Scalar>* sparse_ldlt_create(const std::size_t* row_indices,
-                                              const std::size_t* column_starts,
+SparseLdltContext<Scalar>* sparse_ldlt_create(const std::uint32_t* row_indices,
+                                              const std::uint32_t* column_starts,
                                               const Scalar* values, std::size_t dimension,
                                               std::size_t nonzeros) {
   try {
@@ -528,7 +529,7 @@ DEFINE_DENSE_LDLT_WRAPPERS(f64, double)
 
 #define DEFINE_SPARSE_LLT_WRAPPERS(SUFFIX, SCALAR)                                               \
   extern "C" void* sa_eigen_sparse_llt_create_##SUFFIX(                                         \
-      const std::size_t* row_indices, const std::size_t* column_starts, const SCALAR* values,     \
+      const std::uint32_t* row_indices, const std::uint32_t* column_starts, const SCALAR* values, \
       std::size_t dimension, std::size_t nonzeros) {                                               \
     return sparse_llt_create(row_indices, column_starts, values, dimension, nonzeros);             \
   }                                                                                                 \
@@ -555,7 +556,7 @@ DEFINE_SPARSE_LLT_WRAPPERS(f64, double)
 
 #define DEFINE_SPARSE_LDLT_WRAPPERS(SUFFIX, SCALAR)                                               \
   extern "C" void* sa_eigen_sparse_ldlt_create_##SUFFIX(                                        \
-      const std::size_t* row_indices, const std::size_t* column_starts, const SCALAR* values,     \
+      const std::uint32_t* row_indices, const std::uint32_t* column_starts, const SCALAR* values, \
       std::size_t dimension, std::size_t nonzeros) {                                               \
     return sparse_ldlt_create(row_indices, column_starts, values, dimension, nonzeros);            \
   }                                                                                                 \
