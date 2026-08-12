@@ -84,10 +84,10 @@ impl<
             StaticCscMatrix::<BLOCK_GRID_ROWS, BLOCK_GRID_COLS, MAX_L_BLOCK_NNZ, u8>::new();
         for column in 0..BLOCK_GRID_COLS {
             let mut reachable = [false; BLOCK_GRID_ROWS];
-            let start = matrix.pattern.column_starts()[column];
+            let start = matrix.pattern.column_starts()[column] as usize;
             let end = matrix.pattern.column_end(column).unwrap_or(matrix.nnz());
             for index in start..end {
-                let row = matrix.pattern.row_indices()[index];
+                let row = matrix.pattern.row_indices()[index] as usize;
                 if row >= column {
                     reachable[row] = true;
                 }
@@ -96,10 +96,10 @@ impl<
 
             for previous in 0..column {
                 if structure.get(column, previous).is_some() {
-                    let previous_start = structure.column_starts()[previous];
+                    let previous_start = structure.column_starts()[previous] as usize;
                     let previous_end = structure.column_end(previous).unwrap_or(structure.nnz());
                     for index in previous_start..previous_end {
-                        let row = structure.row_indices()[index];
+                        let row = structure.row_indices()[index] as usize;
                         if row >= column {
                             reachable[row] = true;
                         }
@@ -141,10 +141,10 @@ impl<
         }
         let mut adjacency = [[false; BLOCK_GRID_ROWS]; BLOCK_GRID_ROWS];
         for column in 0..BLOCK_GRID_COLS {
-            let start = matrix.block_column_starts()[column];
+            let start = matrix.block_column_starts()[column] as usize;
             let end = matrix.block_column_end(column).unwrap_or(matrix.nnz());
             for index in start..end {
-                let row = matrix.block_row_indices()[index];
+                let row = matrix.block_row_indices()[index] as usize;
                 if row != column {
                     adjacency[row][column] = true;
                     adjacency[column][row] = true;
@@ -254,10 +254,10 @@ pub(super) fn permute_block_matrix<
     let mut mapped =
         [[Matrix::<BLOCK_ROWS, BLOCK_COLS, T>::zeros(); BLOCK_GRID_ROWS]; BLOCK_GRID_COLS];
     for column in 0..BLOCK_GRID_COLS {
-        let start = matrix.pattern.column_starts()[column];
+        let start = matrix.pattern.column_starts()[column] as usize;
         let end = matrix.pattern.column_end(column).unwrap_or(matrix.nnz());
         for index in start..end {
-            let row = matrix.pattern.row_indices()[index];
+            let row = matrix.pattern.row_indices()[index] as usize;
             if row < column {
                 continue;
             }
@@ -276,17 +276,17 @@ pub(super) fn permute_block_matrix<
     }
 
     let mut values = [Matrix::<BLOCK_ROWS, BLOCK_COLS, T>::zeros(); MAX_BLOCK_NNZ];
-    let mut row_indices = [0usize; MAX_BLOCK_NNZ];
-    let mut column_starts = [0usize; BLOCK_GRID_COLS];
+    let mut row_indices = [0u32; MAX_BLOCK_NNZ];
+    let mut column_starts = [0u32; BLOCK_GRID_COLS];
     let mut position = 0;
     for column in 0..BLOCK_GRID_COLS {
-        column_starts[column] = position;
+        column_starts[column] = position as u32;
         for row in column..BLOCK_GRID_ROWS {
             if present[column][row] {
                 if position == MAX_BLOCK_NNZ {
                     return Err(SparseCholeskyError::CapacityExceeded);
                 }
-                row_indices[position] = row;
+                row_indices[position] = row as u32;
                 values[position] = mapped[column][row];
                 position += 1;
             }
@@ -328,10 +328,10 @@ fn block_diagonal_pivot_ordering<
     let mut work =
         [[Matrix::<BLOCK_ROWS, BLOCK_COLS, T>::zeros(); BLOCK_GRID_ROWS]; BLOCK_GRID_COLS];
     for column in 0..BLOCK_GRID_COLS {
-        let start = matrix.pattern.column_starts()[column];
+        let start = matrix.pattern.column_starts()[column] as usize;
         let end = matrix.pattern.column_end(column).unwrap_or(matrix.nnz());
         for index in start..end {
-            let row = matrix.pattern.row_indices()[index];
+            let row = matrix.pattern.row_indices()[index] as usize;
             if row < column {
                 continue;
             }

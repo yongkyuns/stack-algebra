@@ -8,10 +8,10 @@ pub(super) fn find_block_index<const ROWS: usize, const COLS: usize, const MAX_N
     row: usize,
     column: usize,
 ) -> Option<usize> {
-    let start = *pattern.column_starts().get(column)?;
+    let start = *pattern.column_starts().get(column)? as usize;
     let end = pattern.column_end(column)?;
     pattern.row_indices()[start..end]
         .iter()
-        .position(|&candidate| candidate == row)
+        .position(|&candidate| candidate as usize == row)
         .map(|offset| start + offset)
 }

@@ -278,33 +278,49 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscLdlt<N, MAX_L_NNZ
     }
 
     fn solve_natural_in_place<const P: usize>(&self, rhs: &mut Matrix<N, P, T>) {
-        for row in 0..N {
-            let start = self.lower.column_starts()[row];
-            let end = self.lower.column_end(row).unwrap_or(self.lower.nnz());
-            for index in (start + 1)..end {
-                let target = self.lower.row_indices()[index];
-                let value = self.lower.values()[index];
-                for column in 0..P {
-                    rhs[(target, column)] = rhs[(target, column)] - value * rhs[(row, column)];
+        let rhs_ptr = rhs.as_mut_slice().as_mut_ptr();
+        let lower_rows = self.lower.row_indices().as_ptr();
+        let lower_values = self.lower.values().as_ptr();
+        let diagonal = self.diagonal.as_ptr();
+
+        // SAFETY: the sparse pattern is validated at construction, so every
+        // stored row index is below N and every CSC range is within the
+        // corresponding value array. Matrix storage is column-major with a
+        // stride of N for each RHS column.
+        unsafe {
+            for row in 0..N {
+                let start = self.lower.column_starts()[row] as usize;
+                let end = self.lower.column_end(row).unwrap_or(self.lower.nnz());
+                for index in (start + 1)..end {
+                    let target = *lower_rows.add(index) as usize;
+                    let value = *lower_values.add(index);
+                    for column in 0..P {
+                        let target_ptr = rhs_ptr.add(target + column * N);
+                        let row_ptr = rhs_ptr.add(row + column * N);
+                        *target_ptr = *target_ptr - value * *row_ptr;
+                    }
                 }
             }
-        }
 
-        for row in 0..N {
-            let diagonal = self.diagonal[row];
-            for column in 0..P {
-                rhs[(row, column)] = rhs[(row, column)] / diagonal;
-            }
-        }
-
-        for row in (0..N).rev() {
-            let start = self.lower.column_starts()[row];
-            let end = self.lower.column_end(row).unwrap_or(self.lower.nnz());
-            for index in (start + 1)..end {
-                let source = self.lower.row_indices()[index];
-                let value = self.lower.values()[index];
+            for row in 0..N {
+                let value = *diagonal.add(row);
                 for column in 0..P {
-                    rhs[(row, column)] = rhs[(row, column)] - value * rhs[(source, column)];
+                    let entry = rhs_ptr.add(row + column * N);
+                    *entry = *entry / value;
+                }
+            }
+
+            for row in (0..N).rev() {
+                let start = self.lower.column_starts()[row] as usize;
+                let end = self.lower.column_end(row).unwrap_or(self.lower.nnz());
+                for index in (start + 1)..end {
+                    let source = *lower_rows.add(index) as usize;
+                    let value = *lower_values.add(index);
+                    for column in 0..P {
+                        let row_ptr = rhs_ptr.add(row + column * N);
+                        let source_ptr = rhs_ptr.add(source + column * N);
+                        *row_ptr = *row_ptr - value * *source_ptr;
+                    }
                 }
             }
         }

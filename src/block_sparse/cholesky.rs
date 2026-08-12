@@ -141,10 +141,10 @@ impl<
     ) -> Result<(), SparseCholeskyError> {
         output.lower.pattern = self.lower;
         for column in 0..BLOCK_GRID_COLS {
-            let start = matrix.pattern.column_starts()[column];
+            let start = matrix.pattern.column_starts()[column] as usize;
             let end = matrix.pattern.column_end(column).unwrap_or(matrix.nnz());
             for index in start..end {
-                let row = matrix.pattern.row_indices()[index];
+                let row = matrix.pattern.row_indices()[index] as usize;
                 if row >= column && find_block_index(&self.lower, row, column).is_none() {
                     return Err(SparseCholeskyError::PatternMismatch);
                 }
@@ -154,10 +154,10 @@ impl<
         output.lower.pattern = self.lower;
         for column in 0..BLOCK_GRID_COLS {
             let mut work = [Matrix::<BLOCK_ROWS, BLOCK_COLS, T>::zeros(); BLOCK_GRID_ROWS];
-            let matrix_start = matrix.pattern.column_starts()[column];
+            let matrix_start = matrix.pattern.column_starts()[column] as usize;
             let matrix_end = matrix.pattern.column_end(column).unwrap_or(matrix.nnz());
             for index in matrix_start..matrix_end {
-                let row = matrix.pattern.row_indices()[index];
+                let row = matrix.pattern.row_indices()[index] as usize;
                 if row >= column {
                     work[row] = matrix.values()[index];
                 }
@@ -166,10 +166,10 @@ impl<
             for previous in 0..column {
                 if let Some(column_index) = find_block_index(&self.lower, column, previous) {
                     let column_block = output.lower.values()[column_index];
-                    let lower_start = self.lower.column_starts()[previous];
+                    let lower_start = self.lower.column_starts()[previous] as usize;
                     let lower_end = self.lower.column_end(previous).unwrap_or(self.lower.nnz());
                     for index in lower_start..lower_end {
-                        let row = self.lower.row_indices()[index];
+                        let row = self.lower.row_indices()[index] as usize;
                         if row >= column {
                             block_rank_update_sub(
                                 &mut work[row],
@@ -186,11 +186,11 @@ impl<
                 .ok_or(SparseCholeskyError::PatternMismatch)?;
             output.lower.values_mut()[diagonal_index] = work[column];
 
-            let lower_start = self.lower.column_starts()[column];
+            let lower_start = self.lower.column_starts()[column] as usize;
             let lower_end = self.lower.column_end(column).unwrap_or(self.lower.nnz());
             let diagonal = work[column];
             for index in (lower_start + 1)..lower_end {
-                let row = self.lower.row_indices()[index];
+                let row = self.lower.row_indices()[index] as usize;
                 block_solve_right_transpose(&mut work[row], &diagonal)?;
                 output.lower.values_mut()[index] = work[row];
             }

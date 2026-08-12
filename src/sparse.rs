@@ -62,10 +62,10 @@ pub(crate) fn default_ldlt_threshold<const N: usize, const MAX_NNZ: usize, T: Re
 ) -> T {
     let mut scale = T::zero();
     for column in 0..N {
-        let start = matrix.column_starts()[column];
+        let start = matrix.column_starts()[column] as usize;
         let end = matrix.column_end(column).unwrap_or(matrix.nnz());
         for index in start..end {
-            if matrix.row_indices()[index] >= column {
+            if matrix.row_indices()[index] as usize >= column {
                 scale = scale.max(matrix.values()[index].abs());
             }
         }
@@ -125,10 +125,10 @@ impl<const N: usize, const MAX_NNZ: usize, T> StaticCscMatrix<N, N, MAX_NNZ, T> 
     {
         let mut dense = Matrix::<N, N, T>::zeros();
         for column in 0..N {
-            let start = self.column_starts()[column];
+            let start = self.column_starts()[column] as usize;
             let end = self.column_end(column).unwrap_or(self.nnz());
             for index in start..end {
-                let row = self.row_indices()[index];
+                let row = self.row_indices()[index] as usize;
                 if row >= column {
                     dense[(row, column)] = self.values()[index];
                 }

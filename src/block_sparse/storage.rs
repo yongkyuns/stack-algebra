@@ -130,13 +130,13 @@ where
 
     /// Returns block row indices in block CSC order.
     #[inline]
-    pub fn block_row_indices(&self) -> &[usize] {
+    pub fn block_row_indices(&self) -> &[u32] {
         self.pattern.row_indices()
     }
 
     /// Returns the start pointer for every block column.
     #[inline]
-    pub fn block_column_starts(&self) -> &[usize; BLOCK_GRID_COLS] {
+    pub fn block_column_starts(&self) -> &[u32; BLOCK_GRID_COLS] {
         self.pattern.column_starts()
     }
 
@@ -149,10 +149,10 @@ where
     /// Returns a stored block, or `None` when the block is absent or out of bounds.
     #[inline]
     pub fn block(&self, row: usize, column: usize) -> Option<&Matrix<BLOCK_ROWS, BLOCK_COLS, T>> {
-        let start = *self.pattern.column_starts().get(column)?;
+        let start = *self.pattern.column_starts().get(column)? as usize;
         let end = self.pattern.column_end(column)?;
         for index in start..end {
-            match self.pattern.row_indices()[index].cmp(&row) {
+            match (self.pattern.row_indices()[index] as usize).cmp(&row) {
                 core::cmp::Ordering::Equal => return Some(&self.values[index]),
                 core::cmp::Ordering::Greater => return None,
                 core::cmp::Ordering::Less => {}
@@ -191,10 +191,10 @@ where
             *value = T::zero();
         }
         for block_column in 0..BLOCK_GRID_COLS {
-            let column_start = self.pattern.column_starts()[block_column];
+            let column_start = self.pattern.column_starts()[block_column] as usize;
             let column_end = self.pattern.column_end(block_column).unwrap_or(self.nnz());
             for index in column_start..column_end {
-                let block_row = self.pattern.row_indices()[index];
+                let block_row = self.pattern.row_indices()[index] as usize;
                 let block = &self.values[index];
                 for local_column in 0..BLOCK_COLS {
                     let rhs_value = rhs[block_column * BLOCK_COLS + local_column];
@@ -231,23 +231,23 @@ where
         }
 
         let mut values = [T::zero(); MAX_SCALAR_NNZ];
-        let mut row_indices = [0usize; MAX_SCALAR_NNZ];
-        let mut column_starts = [0usize; SCALAR_COLS];
+        let mut row_indices = [0u32; MAX_SCALAR_NNZ];
+        let mut column_starts = [0u32; SCALAR_COLS];
         let mut nnz = 0;
         for block_column in 0..BLOCK_GRID_COLS {
-            let block_start = self.pattern.column_starts()[block_column];
+            let block_start = self.pattern.column_starts()[block_column] as usize;
             let block_end = self.pattern.column_end(block_column).unwrap_or(self.nnz());
             for local_column in 0..BLOCK_COLS {
                 let scalar_column = block_column * BLOCK_COLS + local_column;
-                column_starts[scalar_column] = nnz;
+                column_starts[scalar_column] = nnz as u32;
                 for index in block_start..block_end {
-                    let block_row = self.pattern.row_indices()[index];
+                    let block_row = self.pattern.row_indices()[index] as usize;
                     let block = &self.values[index];
                     for local_row in 0..BLOCK_ROWS {
                         if nnz == MAX_SCALAR_NNZ {
                             return Err(CscError::CapacityExceeded);
                         }
-                        row_indices[nnz] = block_row * BLOCK_ROWS + local_row;
+                        row_indices[nnz] = (block_row * BLOCK_ROWS + local_row) as u32;
                         values[nnz] = block[(local_row, local_column)];
                         nnz += 1;
                     }
@@ -305,10 +305,10 @@ where
 
         let mut dense = Matrix::<SCALAR_DIM, SCALAR_DIM, T>::zeros();
         for block_column in 0..BLOCK_GRID_COLS {
-            let start = self.pattern.column_starts()[block_column];
+            let start = self.pattern.column_starts()[block_column] as usize;
             let end = self.pattern.column_end(block_column).unwrap_or(self.nnz());
             for index in start..end {
-                let block_row = self.pattern.row_indices()[index];
+                let block_row = self.pattern.row_indices()[index] as usize;
                 if block_row < block_column {
                     continue;
                 }

@@ -15,6 +15,7 @@ keywords = ["robotics", "math", "matrix", "vector", "linear-algebra"]
 
 [features]
 default = []
+std = ["num-traits/std"]
 eigen-compare = []
 
 [dependencies]

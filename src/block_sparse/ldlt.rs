@@ -146,10 +146,10 @@ impl<
         >,
     ) -> Result<(), SparseCholeskyError> {
         for column in 0..BLOCK_GRID_COLS {
-            let start = matrix.pattern.column_starts()[column];
+            let start = matrix.pattern.column_starts()[column] as usize;
             let end = matrix.pattern.column_end(column).unwrap_or(matrix.nnz());
             for index in start..end {
-                let row = matrix.pattern.row_indices()[index];
+                let row = matrix.pattern.row_indices()[index] as usize;
                 if row >= column && find_block_index(&self.lower, row, column).is_none() {
                     return Err(SparseCholeskyError::PatternMismatch);
                 }
@@ -161,10 +161,10 @@ impl<
         output.local_pivots = [[1; BLOCK_ROWS]; BLOCK_GRID_ROWS];
         for column in 0..BLOCK_GRID_COLS {
             let mut work = [Matrix::<BLOCK_ROWS, BLOCK_COLS, T>::zeros(); BLOCK_GRID_ROWS];
-            let matrix_start = matrix.pattern.column_starts()[column];
+            let matrix_start = matrix.pattern.column_starts()[column] as usize;
             let matrix_end = matrix.pattern.column_end(column).unwrap_or(matrix.nnz());
             for index in matrix_start..matrix_end {
-                let row = matrix.pattern.row_indices()[index];
+                let row = matrix.pattern.row_indices()[index] as usize;
                 if row >= column {
                     work[row] = matrix.values()[index];
                 }
@@ -176,10 +176,10 @@ impl<
                     let diagonal_index = find_block_index(&self.lower, previous, previous)
                         .ok_or(SparseCholeskyError::PatternMismatch)?;
                     let diagonal = output.lower.values()[diagonal_index];
-                    let lower_start = self.lower.column_starts()[previous];
+                    let lower_start = self.lower.column_starts()[previous] as usize;
                     let lower_end = self.lower.column_end(previous).unwrap_or(self.lower.nnz());
                     for index in lower_start..lower_end {
-                        let row = self.lower.row_indices()[index];
+                        let row = self.lower.row_indices()[index] as usize;
                         if row >= column {
                             block_rank_update_ldlt_sub(
                                 &mut work[row],
@@ -220,12 +220,12 @@ impl<
             output.lower.values_mut()[diagonal_index] =
                 store_ldlt_block::<BLOCK_ROWS, BLOCK_COLS, T>(&diagonal_factor);
 
-            let lower_start = self.lower.column_starts()[column];
+            let lower_start = self.lower.column_starts()[column] as usize;
             let lower_end = self.lower.column_end(column).unwrap_or(self.lower.nnz());
             let diagonal = output.lower.values()[diagonal_index];
             let pivots = diagonal_factor.pivot_blocks();
             for index in (lower_start + 1)..lower_end {
-                let row = self.lower.row_indices()[index];
+                let row = self.lower.row_indices()[index] as usize;
                 block_solve_right_ldlt_transpose(&mut work[row], &diagonal, pivots)?;
                 output.lower.values_mut()[index] = work[row];
             }
