@@ -210,7 +210,7 @@ let reconstructed = eig.reconstruct();
 specialized solves and products when the unused half of a matrix is not part
 of the input contract.
 
-## 6. Reuse factors and workspaces
+## 7. Reuse factors and workspaces
 
 Construct a factor once, then recompute it in a control or estimation loop:
 
@@ -238,7 +238,7 @@ eigen
 Use `solve_into` or `solve_least_squares_into` when output is reused. Use
 `solve_in_place` when the right-hand side may be overwritten.
 
-## 7. Bounded runtime dimensions
+## 8. Bounded runtime dimensions
 
 `MatrixBuf` reserves a compile-time maximum while tracking active dimensions:
 
@@ -263,7 +263,7 @@ details when they cannot satisfy the request.
 read-only and mutable view types. Use `row` and `column` when an algorithm
 needs a one-dimensional `Row` or `Column` view instead of an owned matrix.
 
-## 8. Scalar sparse CSC
+## 9. Scalar sparse CSC
 
 Build a canonical pattern once, update values repeatedly, and reuse the factor:
 
@@ -342,7 +342,7 @@ values; it preserves the sparse factor when possible and transitions to dense
 storage only when required. Use `solve_in_place` when the right-hand side can
 be overwritten to avoid an additional fixed-size output copy.
 
-## 9. Block sparse storage
+## 10. Block sparse storage
 
 Use block CSC/CSR for explicit block matvec. Native block Cholesky is available
 for square blocks and grids; the scalar-expansion method remains a useful
@@ -390,7 +390,7 @@ let solution = factor.solve(&rhs);
 This path uses stack storage sized by `SCALAR_DIM`; native block LDLT remains
 the performance path when pivots stay within blocks.
 
-## 10. Build and validate
+## 11. Build and validate
 
 ```sh
 cargo test --all-features

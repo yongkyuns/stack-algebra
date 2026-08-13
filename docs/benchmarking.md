@@ -1,8 +1,7 @@
-# Nightly benchmark comparison
+# Benchmarking and comparison evidence
 
 The nightly workflow compares stack-algebra with Eigen, faer, and nalgebra
-through a shared set of deterministic dense operations. It runs on a
-GitHub-hosted Linux runner
+through a related set of deterministic operations. It runs on a GitHub-hosted Linux runner
 with a native CPU target and publishes the raw measurements plus a
 self-contained HTML report as the `nightly-benchmark-report` artifact. The
 four Rust benchmark groups and the native Eigen runner execute as parallel
@@ -13,12 +12,41 @@ runner OS/architecture, CPU model, kernel, Rust compiler, Cargo version, UTC
 generation time, and measurement count. These fields are shown in the report
 metadata line and written to `metadata.json` beside the HTML and CSV files.
 
-Nightly uses short Criterion windows (0.1 seconds of warmup, 0.1 seconds of
-measurement, and 10 samples) and five 5-millisecond Eigen samples so the full
-comparison normally completes within a few minutes. Use longer windows and the
-default 15 Eigen samples for release-quality measurements. CI caches the
+Nightly uses short Criterion windows (20 ms of warmup, 20 ms of measurement,
+and 10 samples) and five Eigen samples of at least 5 ms so the full comparison
+normally completes within a few minutes. These are regression-triage settings,
+not release-quality measurements. CI caches the
 Rust release artifacts and the source-keyed Eigen executable; the first run
 after changing the benchmark sources still pays their compilation costs.
+
+## Evidence status and limitations
+
+The latest reviewed artifact is the
+[2026-08-14 nightly run](https://github.com/yongkyuns/stack-algebra/actions/runs/31669444178)
+for commit `cb242f9`. It contains 1,344 measurements from an AMD EPYC 9V74
+runner. The [technical review](DESIGN_REVIEW.md#what-the-latest-benchmark-actually-shows)
+summarizes its matched comparisons and representative wins and losses.
+
+The current suite must not be described as an apples-to-apples proof of broad
+performance parity:
+
+- Rust and native Eigen use different input formulas in several dense and
+  general-system cases, despite older wording that said the values were the
+  same.
+- The Rust groups and Eigen executable run as separate parallel CI jobs, so
+  runner placement, frequency, and noise are not controlled across libraries.
+- The report does not record the exact Eigen version, C++ compiler, linker,
+  dependency lock, or effective CPU frequency policy.
+- The timing windows are very short, and timed cases do not consistently
+  assert residuals or output hashes immediately before measurement.
+- The faer comparison uses its dynamic API for many cases. That is useful for
+  application-level overhead, but it is not a storage-model-matched kernel
+  comparison.
+
+Until those issues are fixed, use the nightly report to find regressions and
+interesting cases. Report conclusions per operation, shape, scalar, phase,
+commit, and machine; do not turn an aggregate into a blanket “faster than”
+claim.
 
 ## Run locally
 
@@ -87,7 +115,7 @@ fixed directory layout.
 
 - Times are median steady-state nanoseconds per operation. Lower is better;
   confidence intervals are retained in `results.csv` for Criterion rows.
-- The dense comparison executes eight identical operations per Criterion
+- The dense comparison executes eight operations per Criterion
   iteration and normalizes the reported median back to one operation; the
   native Eigen runner similarly normalizes its 64-operation batches.
 - Fixed-capacity stack-algebra matrices are compared with the corresponding
@@ -123,9 +151,11 @@ fixed directory layout.
 - Sparse LDLT includes a separate auto-pivot group for zero-leading-diagonal
   inputs, so sparse diagonal pivoting is not conflated with the no-pivot path;
   its factor and reusable-refactorization phases are measured separately.
-- Inputs, dimensions, scalar type, and benchmark setup are owned by the bench
-  sources. Correctness checks should run before timing and failed checks must
-  fail the benchmark rather than produce a result.
+- Inputs, dimensions, scalar type, and benchmark setup are owned separately by
+  the Rust and C++ bench sources today. Correctness checks should run before
+  timing and failed checks must fail the benchmark rather than produce a
+  result. A future shared generator should emit inputs plus a hash consumed by
+  both runners.
 - Results are machine-specific. The report records the commit and runner, but
   comparisons across different CPU models should be treated as directional.
 
