@@ -5,6 +5,11 @@ host build does not prove that a firmware image executes, and QEMU execution
 does not prove peripheral behavior, cycle timing, floating-point throughput, or
 stack usage on a particular board.
 
+The target build and QEMU jobs passed at reviewed commit `cb242f9`, but the
+overall build is not green: the same commit has a
+[Miri undefined-behavior failure](https://github.com/yongkyuns/stack-algebra/actions/runs/31647917174).
+Target portability evidence does not override that release blocker.
+
 ## Evidence levels
 
 | Level | What it demonstrates | What it does not demonstrate |

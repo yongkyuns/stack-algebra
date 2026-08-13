@@ -5,11 +5,16 @@ native and embedded robotics workloads. It does not depend on SymForce, Eigen,
 or faer at runtime. Eigen and faer are used only as external comparison
 references in optional tests and benchmarks.
 
+This inventory describes the unreleased `0.2.0` development tree, not the
+published `0.1.0` crate. The current tree has a confirmed Miri failure in a
+safe sparse constructor. Treat it as a release blocker and read the
+[technical review and claim audit](DESIGN_REVIEW.md) before adoption.
+
 ## Design contract
 
 | Property | Current behavior |
 | --- | --- |
-| Allocation | Core operations use fixed-size inline storage and are allocation-free. Placement follows the owner (local, static, embedded field, arena, or caller-managed buffer). |
+| Allocation | The default core does not require `alloc`; fixed-capacity operations use inline or caller-owned storage. Placement follows the owner (local, static, embedded field, arena, or caller-managed buffer). |
 | Dimensions | `Matrix<M, N, T>` dimensions are compile-time constants. `MatrixBuf` adds bounded runtime-active dimensions. |
 | Layout | Matrices and vectors use column-major storage. |
 | Scalar types | `f32` and `f64` are the primary numerical types; integer scalar matrices support basic algebra. |
@@ -83,7 +88,7 @@ snapshot is explicitly desired.
 | --- | --- | --- | --- | --- | --- |
 | `PartialPivLu<D, T>` | `D x D` | `decompose` / `matrix.partial_piv_lu()`; checked: `try_decompose` / `matrix.try_partial_piv_lu()` | `compute`; checked: `try_compute` | `solve`, `solve_into`, `inverse`, `determinant` | Partial row pivoting; checked path rejects non-finite input/intermediates. |
 | `Cholesky<D, T>` | SPD `D x D` | `try_decompose` / `matrix.cholesky()` | `try_compute` | `solve`, `solve_into`, `solve_in_place`, `inverse` | Reads the lower triangle; rejects non-SPD input. |
-| `Ldlt<D, T>` | Symmetric `D x D` | `try_decompose` / `matrix.ldlt()` | `try_compute` | `solve`, `solve_into`, `solve_in_place`, `inverse` | Eigen-compatible Bunch–Kaufman 1x1/2x2 scalar pivoting; `pivot_blocks` exposes the compact block layout. |
+| `Ldlt<D, T>` | Symmetric `D x D` | `try_decompose` / `matrix.ldlt()` | `try_compute` | `solve`, `solve_into`, `solve_in_place`, `inverse` | Bunch–Kaufman-style 1x1/2x2 scalar pivoting; `pivot_blocks` exposes the compact block layout. Exact Eigen pivot/layout compatibility is not established. |
 | `HouseholderQr<M, N, T>` | `M x N` | `decompose` / `matrix.householder_qr()`; checked: `try_decompose` / `matrix.try_householder_qr()` | `compute`; checked: `try_compute` | Full-rank least squares, `apply_q`, `apply_q_transpose` | Best for full-rank square/tall systems. |
 | `ColPivHouseholderQr<M, N, T>` | `M x N` | `decompose` / `matrix.col_piv_householder_qr()`; checked: `try_decompose` / `matrix.try_col_piv_householder_qr()` | `compute`; checked: `try_compute` | Rank, basic/rank-aware least squares, Q application | Column pivoting improves rank detection. |
 | `Svd<M, N, T>` | Any fixed shape | `try_decompose` / `matrix.svd()` | `try_compute` | `solve`, rank, `pseudo_inverse`, `u`, `v`, singular values | Thin SVD; wide matrices use zero padding. |

@@ -5,6 +5,11 @@ uses compile-time matrix dimensions and explicit scalar types, with bounded,
 mapped, and sparse storage APIs for cases that need runtime-active data or
 caller-owned buffers.
 
+> **Development documentation:** these pages describe the unreleased `0.2.0`
+> tree on `main`. The newest crates.io release is `0.1.0` and has an older API.
+> The current tree also has a known Miri release blocker; see the
+> [technical review](DESIGN_REVIEW.md) before adopting it.
+
 ## Start here
 
 - [Getting started](getting-started.md) — construct matrices and choose scalar
@@ -13,6 +18,8 @@ caller-owned buffers.
   assumptions.
 - [API usage](API_USAGE.md) — select storage, views, products, and solvers.
 - [Feature set](FEATURES.md) — review supported operations and boundaries.
+- [Technical review](DESIGN_REVIEW.md) — read the claim audit, comparison with
+  faer and Eigen, current safety findings, and prioritized improvements.
 - [Use cases](USE_CASES.md) — map common estimation, optimization, geometry,
   and sparse workflows to the API.
 - [Benchmarking](benchmarking.md) — run and interpret numerical comparisons.

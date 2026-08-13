@@ -2,15 +2,19 @@
 
 ## Install
 
-Add the crate to a Cargo project:
+These guides describe the unreleased `0.2.0` API on `main`. Until it is
+published, use a Git dependency for evaluation:
 
 ```toml
 [dependencies]
-stack-algebra = "0.2"
+stack-algebra = { git = "https://github.com/yongkyuns/stack-algebra.git" }
 ```
 
-The crate is `no_std` and the fixed-size core does not allocate. See the
-[feature set](FEATURES.md) for storage and solver boundaries.
+For a reproducible build, replace the moving branch with a reviewed `rev`.
+The newest crates.io release is `0.1.0`; it predates most APIs documented here.
+The development tree is `no_std` and its fixed-capacity core does not require
+`alloc`, but it currently has a [Miri release blocker](DESIGN_REVIEW.md#confirmed-release-blocker).
+See the [feature set](FEATURES.md) for storage and solver boundaries.
 
 ## Construct a matrix
 

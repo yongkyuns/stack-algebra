@@ -1,1028 +1,330 @@
-# Design Review and Improvement Plan
+# Technical review: scope, merit, and comparison
 
-Status: design review for the `0.3` development cycle
-Review date: 2026-08-07
-Scope: architecture, numerical behavior, safety, performance, API design,
-documentation, and suitability for robotics workloads on OS-hosted and MCU
-targets.
+Review date: 2026-08-14
 
-This document reviews the current implementation rather than defining
-compatibility with another library. Comparisons are used to identify useful
-design choices and workload boundaries. They are not a requirement to copy
-another API or implementation.
+Repository revision: [`cb242f9`](https://github.com/yongkyuns/stack-algebra/commit/cb242f98055886260a8148f38511ac231426c890)
 
-## 1. Executive assessment
+Compared with: faer 0.24.4 and Eigen 5.0 documentation; the repository's
+Eigen benchmark currently uses the distribution-provided Eigen headers rather
+than recording an exact version.
 
-The repository has a coherent fixed-size foundation:
+## Executive verdict
 
-- `Matrix<M, N, T>` has inline, column-major storage and compile-time shape.
-- The crate is `no_std` by default and has a small runtime dependency graph.
-- Dense factors, external-buffer views, bounded storage, fixed-capacity sparse
-  storage, block-sparse storage, and 3D geometry use the same scalar and matrix
-  model.
-- Dense and sparse factors support reuse, which is important when a matrix
-  pattern is fixed while values change.
-- Portable scalar kernels, x86 packet kernels, AArch64 NEON kernels, Eigen
-  differential tests, Miri jobs, cross-target builds, and QEMU smoke tests are
-  already present.
+`stack-algebra` has real merit, but it is narrower and less mature than its
+surface area initially suggests.
 
-The main issue is not a missing list of algorithms. It is that several design
-goals are currently treated as universally beneficial when they are only
-beneficial for a particular workload range.
+Its strongest proposition is this combination:
 
-The library is presently a reasonable fit for:
+- compile-time shapes and inline storage in safe Rust;
+- a default `no_std`, no-`alloc` core;
+- reusable dense factors and caller-owned outputs;
+- mapped, strided, and bounded storage;
+- fixed-capacity scalar and block-sparse storage; and
+- a useful set of decompositions for small robotics, control, and estimation
+  problems.
 
-- small dense matrices whose dimensions are known at compile time;
-- fixed-capacity systems whose active dimensions or sparsity remain within a
-  known bound;
-- reusable factorizations in deterministic control or estimation loops;
-- generated numerical kernels that operate on caller-owned buffers; and
-- `no_std` firmware where heap allocation is unavailable or intentionally not
-  used.
+That is a credible niche. Neither faer's primary dynamic API nor Eigen's C++
+API has the same Rust, heap-free, const-shaped contract.
 
-It is not presently a general substitute for Eigen, nalgebra, faer, or a
-production sparse solver across their full domains. In particular:
+The project is **not** currently a general alternative to faer or Eigen. It
+lacks their dynamic-size breadth, scalar breadth, mature sparse solvers,
+ecosystem, and validation history. More importantly, the current `main` branch
+has a confirmed undefined-behavior failure in a safe sparse constructor. The
+latest CI run passes normal tests, Eigen differential tests, docs, Clippy,
+cross-compilation, QEMU, and native Arm64 tests, but fails Miri in
+`StaticCscPattern::from_arrays`. This is a release blocker.
 
-- fixed-size-only storage is a poor default for large matrices on an OS;
-- fixed-capacity sparse types become difficult to size when graph topology and
-  fill-in are not bounded tightly;
-- large fixed factors can consume substantial task stack, static RAM, flash,
-  and compile time;
-- compile-time ISA selection is appropriate for firmware and locally tuned
-  binaries, but not sufficient for one portable OS binary distributed across
-  different CPUs; and
-- the current performance report is broad but does not yet constitute a
-  reproducible performance contract.
+The right positioning is:
 
-The recommended direction is therefore:
+> A focused, allocation-free Rust algebra core for small fixed or tightly
+> bounded systems—not “Eigen in Rust” and not a medium/large replacement for
+> faer.
 
-> Keep a small, fixed-size, inline-storage `no_std` core. Define its supported
-> workload range precisely. Make safety invariants and numerical contracts
-> explicit. Treat runtime-sized allocation, runtime CPU dispatch, and large
-> sparse systems as optional layers or separate future work justified by real
-> workloads, not as requirements for the core.
+## Evidence and review limits
 
-“Eigen parity” should not be used as a release criterion. Eigen itself uses
-fixed and dynamic storage, expression templates, multiple allocation modes,
-packetization, and a large sparse subsystem. The useful criterion is parity of
-specified operations within a declared shape, scalar, target, and numerical
-contract.
+This review inspected the public API, implementation, tests, benchmarks,
+workflows, documentation, repository history, and the latest CI and nightly
+benchmark artifacts.
 
-## 2. Evidence reviewed
+The strongest available evidence is:
 
-The review is based on the current repository at commit `5cdd0c5`, including
-the uncommitted nightly benchmark workflow changes present during the review.
+- 223 Rust tests across unit and integration suites;
+- Eigen differential tests for selected dense and sparse operations;
+- portable, SSE2, AVX2/FMA, and AArch64 NEON implementations;
+- compile checks for the documented embedded targets;
+- QEMU smoke runs for Cortex-M4, RISC-V32, and AArch64;
+- a native Arm64 test job; and
+- nightly comparisons with faer, Eigen, and nalgebra.
 
-Repository evidence:
+Important limits:
 
-- approximately 17,400 lines of Rust under `src/`;
-- the largest implementation files are `block_sparse.rs` (about 2,300 lines),
-  `algebra/qr.rs` (about 1,350), `kernels/x86/avx2_fma.rs` (about 1,080),
-  `view.rs` (about 1,030), and `algebra/ldlt.rs` (about 940);
-- six Criterion benchmark binaries plus a native Eigen runner;
-- more than 1,800 lines of Eigen differential tests;
-- cross-builds for Cortex-M, RISC-V, AArch64, and WASM;
-- QEMU execution for Cortex-M4, RISC-V32, and AArch64; and
-- targeted Miri execution for view and sparse integration tests.
+- the current published crate is still `0.1.0`; `main` declares `0.2.0` but is
+  unreleased;
+- repository development and validation are effectively single-maintainer;
+- there are no maintained real-board latency, peak-stack, flash, or RAM
+  results;
+- there is no independent numerical audit or fuzzing record;
+- the Miri gate is currently red; and
+- benchmark reports do not record the exact Eigen version, C++ compiler
+  version, dependency lock, generated assembly, frequency policy, or runner
+  isolation.
 
-External comparisons use official documentation:
+Those limits do not negate the implementation. They constrain what can be
+claimed from it.
 
-- [Eigen matrix types and fixed/dynamic storage](https://eigen.tuxfamily.org/dox/group__TutorialMatrixClass.html)
-- [Eigen external-buffer maps and strides](https://eigen.tuxfamily.org/dox/group__TutorialMapClass.html)
-- [Eigen sparse storage](https://eigen.tuxfamily.org/dox/group__TutorialSparse.html)
-- [nalgebra matrix storage and dimensions](https://www.nalgebra.rs/docs/user_guide/vectors_and_matrices/)
-- [nalgebra embedded and `no_std` behavior](https://www.nalgebra.rs/docs/user_guide/wasm_and_embedded_targets/)
-- [faer crate design and intended matrix sizes](https://docs.rs/faer/latest/faer/)
-- [glam types and SIMD storage](https://docs.rs/crate/glam/latest)
-- [CMSIS-DSP matrix functions](https://arm-software.github.io/CMSIS-DSP/main/group__groupMatrix.html)
-- [sprs sparse matrix support](https://docs.rs/sprs/latest/sprs/)
-- [nalgebra-sparse scope and limitations](https://docs.rs/nalgebra-sparse/latest/nalgebra_sparse/)
-- [micromath embedded approximation tradeoffs](https://docs.rs/micromath/)
+## Claim audit
 
-The external documentation represents current releases or current online
-documentation, while this repository benchmarks specific dependency versions
-from `Cargo.toml`. Version changes must be recorded with future benchmark
-results.
-
-## 3. Workload suitability
-
-### 3.1 Current fit by workload
-
-| Workload | Current fit | Reason |
+| Claim or implication | Assessment | Required wording or action |
 | --- | --- | --- |
-| MCU attitude, calibration, small filters, and control | Good for supported algorithms | Shapes are small and usually fixed; storage and execution can be budgeted. |
-| OS-hosted small generated kernels | Good | Const dimensions, explicit output reuse, and external maps are useful. |
-| Small dense least-squares or covariance solves | Good with validation | QR, pivoted QR, Cholesky, LDLT, LU, SVD, and self-adjoint eigen are available, but numerical contracts need stronger tests. |
-| Medium or large dense matrices | Weak | Full unrolling/monomorphization and inline factors stop being clear advantages; faer or dynamic Eigen/nalgebra are more suitable. |
-| Fixed-topology sparse estimation or optimization | Promising but specialized | Symbolic/numeric separation and fixed capacity are useful if fill bounds are known. API and capacity planning are complex. |
-| Runtime pose graphs, mapping, or variable-horizon optimization | Weak | Dimensions, topology, and fill are commonly runtime values. Fixed capacities can waste memory or reject valid workloads. |
-| General 3D application geometry | Adequate but narrow | Basic quaternion, rotation, isometry, angle-axis, and affine types exist. nalgebra has a much broader geometry/type ecosystem; glam is more specialized for small SIMD geometry. |
-| Cortex-M fixed/floating-point DSP kernels | Mixed | Portable Rust is useful, but CMSIS-DSP has architecture-specific kernels and fixed-point formats that this crate does not match. |
-| One portable x86 OS binary | Incomplete | Current optimized backend selection depends on compile-time target features; no runtime multiversion dispatch exists. |
-
-### 3.2 OS-hosted robotics
-
-On Linux, Windows, macOS, or a larger RTOS with allocation, deterministic
-execution does not require every value to be an inline fixed-size type. A
-common safe pattern is to allocate or reserve storage during initialization,
-separate symbolic analysis from numeric updates, and reuse those buffers in
-the real-time loop.
-
-For these targets, the library has merit as a small-matrix kernel library and
-as an external-buffer computation layer. It does not yet have a compelling
-advantage for large dense matrices or runtime sparse graphs. A complete system
-may reasonably use this crate for small fixed blocks and another library for a
-large runtime-sized outer solve.
-
-### 3.3 MCU robotics
-
-On MCUs, inline storage and `no_std` support are directly useful, but
-“allocation-free” is only one resource constraint. The relevant budgets are:
-
-- peak stack per call and per task;
-- total static RAM;
-- flash/code size after monomorphization;
-- cycles and worst-case execution time;
-- floating-point support and instruction latency;
-- alignment and DMA/external-buffer constraints; and
-- whether `f64` is implemented efficiently in hardware.
-
-The type `Matrix<M, N, T>` is inline, not inherently stack-resident. It may be
-stored as a local, static, field, arena member, or heap allocation supplied by
-the application. Documentation and naming should use “inline storage” when
-describing the representation, and reserve “stack” for measured placement in
-a particular program.
-
-QEMU demonstrates that selected binaries execute, but it does not establish
-real-device timing, peripheral interaction, cache behavior, FPU configuration,
-or exact stack consumption for every algorithm. Hardware results should be
-required before making target-specific performance claims.
-
-## 4. Revisited design assumptions
-
-| Assumption | Assessment | Decision |
-| --- | --- | --- |
-| Fixed size should remain the core matrix model. | Sound for the intended small-matrix core. | Keep. Define an intended size range and do not imply it is best for large matrices. |
-| The crate should be allocation-free. | Sound as a core property, but not a universal robotics requirement. | Keep the core independent of `alloc`. Do not add low-value allocation policing. Permit caller placement and future opt-in layers. |
-| Every matrix is “stack allocated.” | Inaccurate. Inline values are placed wherever their owner is placed. | Change terminology to “inline storage” or “fixed-capacity storage.” |
-| Fixed capacity can replace runtime-sized matrices and sparse storage. | Only when maxima and fill are known tightly. | Keep `MatrixBuf` and static sparse types as bounded tools, not universal substitutes. |
-| Compile-time SIMD selection is always sufficient. | Sufficient for firmware and target-specific native builds, not portable distributed binaries. | Keep it in `no_std`; evaluate optional `std` runtime dispatch with measured demand. |
-| More algorithms move the library closer to stability. | Only if contracts, tests, API consistency, and maintenance scale with them. | Pause feature expansion until architecture and validation gates are complete. |
-| Matching Eigen output proves correctness. | It is valuable differential evidence, not a specification or proof. Different stable algorithms may return equivalent factors with different signs, orderings, or pivots. | Define mathematical invariants and residual/error bounds first; use Eigen as one oracle. |
-| Matching Eigen speed is the correct performance goal. | Too broad. Relative performance changes by operation, size, scalar, compiler, ISA, allocation model, and output semantics. | Define benchmark envelopes per workload and target. |
-| A single matrix/view trait should be open to external implementations and fast in inner loops. | The current safe `Option` contract supports openness but adds checks and invalid-view branches to hot loops. | Split safe extensibility from trusted internal access. |
-| Custom scalar support and architecture specialization should use the same public trait. | This leaks backend mechanics into the public API and makes custom scalar implementation unusually difficult. | Rework or seal scalar/backend traits in the next breaking release. |
-| Fixed-capacity sparse LDLT should cover general sparse indefinite systems. | General pivoting may change structure and fill unpredictably. The existing dense fallback is explicit evidence of this boundary. | Document the supported pivot model; do not claim general sparse indefinite coverage. |
-
-## 5. Architecture review
-
-### 5.1 Current module structure
-
-The major conceptual layers are:
-
-1. `Matrix` storage, constructors, indexing, iteration, formatting, and dense
-   arithmetic.
-2. Borrowed views and bounded runtime-active storage.
-3. Dense decompositions and structured dense views.
-4. Scalar sparse and block-sparse storage, symbolic analysis, factorization,
-   and solves.
-5. Geometry types built on the dense core.
-6. Portable and architecture-specific numerical kernels.
-7. Differential tests, benchmarks, and target harnesses.
-
-This layering is reasonable, but file boundaries do not consistently reflect
-it. `block_sparse.rs` contains storage, symbolic analysis, numerical factors,
-fallbacks, and tests in one large module. `lib.rs`, `view.rs`, `qr.rs`, and the
-x86 FMA backend also carry several distinct responsibilities. `iter.rs`
-contains a large amount of commented-out implementation, which obscures the
-supported surface.
-
-### 5.2 Recommended module boundaries
-
-Keep one crate until there is a concrete reason to split packages, but organize
-the implementation by invariant:
-
-```text
-src/
-  matrix/
-    mod.rs            owning inline matrix and aliases
-    constructors.rs
-    indexing.rs
-    iter.rs
-    ops.rs
-    views.rs
-    bounded.rs
-  linalg/
-    mod.rs
-    error.rs
-    triangular.rs
-    self_adjoint.rs
-    cholesky.rs
-    ldlt.rs
-    lu.rs
-    qr.rs
-    svd.rs
-    eigen.rs
-  sparse/
-    mod.rs
-    error.rs
-    pattern.rs
-    ordering.rs
-    scalar/
-      storage.rs
-      cholesky.rs
-      ldlt.rs
-    block/
-      storage.rs
-      symbolic.rs
-      cholesky.rs
-      ldlt.rs
-      fallback.rs
-  geometry/
-    mod.rs
-    quaternion.rs
-    rotation.rs
-    transform.rs
-  kernel/
-    mod.rs
-    scalar.rs
-    x86/
-    aarch64/
-```
-
-This is a refactor, not an API expansion. Move code only after tests identify
-the invariant protected by each module. Avoid a single large move that makes
-history and review difficult.
-
-### 5.3 Public surface and kernel leakage
-
-`MatrixScalar` and `ReductionScalar` are the public scalar bounds. Their
-portable default methods allow a custom scalar implementation without naming a
-kernel or ISA type. The concrete matrix and reduction backends are crate
-private. Built-in `f32` and `f64` implementations override the hidden hooks to
-select the target-specific kernels at monomorphization time.
-
-Recommended direction for `0.3`:
-
-1. Decide which scalar types are part of the supported public contract. At
-   minimum this is `f32` and `f64`; integer matrix arithmetic may remain if its
-   semantics are tested and documented.
-2. Split generic matrix product kernels from factorization update kernels.
-3. Keep portable generic arithmetic separate from optimized floating-point
-   dispatch.
-4. Add compile tests for supported external scalar implementations.
-
-The goal is not one generic `KernelBackend`. It is a private dispatch layer
-with cohesive kernel families and a public scalar API that does not expose ISA
-selection.
-
-### 5.4 Views and trusted access
-
-`MatrixRead<M, N, T>` provides checked `get` for arbitrary coordinates and a
-default `get_in_bounds` accessor for algorithms whose const-generic loop bounds
-have already established a valid coordinate. Built-in views override the latter
-with their direct layout calculation. Dense view arithmetic therefore has no
-`Option` result or repeated optional access in its inner loops.
-
-The default accessor keeps the trait safe and open: an external implementation
-can use `get`, while an implementation with a direct layout can override the
-in-bounds method. Safe `Map` and `StridedMap` constructors establish length,
-stride, aliasing, and borrow-lifetime invariants before the view exists. This
-avoids a public or crate-private unsafe extension trait solely for dense-view
-performance.
-
-Dense decompositions retain their typed `InvalidView` result path, because
-their public checked constructors accept arbitrary `MatrixRead` implementations.
-Property tests should continue to cover view construction, strided indexing,
-and mutable aliasing cases.
-
-### 5.5 Bounded storage
-
-`MatrixBuf<MAX_ROWS, MAX_COLS, T>` is useful when active dimensions vary under
-a known bound. It reserves the full rectangular capacity inline. That cost is
-appropriate only when the capacity is reasonably dense and small.
-
-Current `resize` does not clear newly exposed values. This is memory-safe but
-easy to misuse numerically. Choose one explicit contract:
-
-- `resize_zeroed`, which initializes newly active coordinates;
-- `resize_with`, which takes an initializer; and
-- optionally `set_shape_preserving_storage`, with a deliberately explicit name
-  for the current stale-value behavior.
-
-Returning `Option<()>` also loses the requested and maximum dimensions. A
-small `ShapeError` should be shared by map and bounded constructors.
-
-### 5.6 Sparse architecture
-
-The scalar sparse layer has a good high-level separation between pattern,
-ordering, symbolic factor pattern, numeric factor, recomputation, and solve.
-That separation should become the model for the block-sparse module.
-
-The fixed-capacity design requires the user to choose:
-
-- input nonzero capacity;
-- factor fill capacity;
-- block nonzero capacity;
-- scalar expansion capacity in fallback paths; and sometimes
-- scalar dense dimensions for global pivot fallback.
-
-This is unavoidable at some layer, but it should not dominate the ordinary
-API. Add builders or analyzed capacity reports that produce actionable errors:
-
-- required nonzeros versus provided capacity;
-- required factor fill versus provided capacity;
-- unsupported cross-block pivot versus capacity exhaustion; and
-- recommended fallback options.
-
-Do not hide a dense fallback behind an API that appears sparse. The current
-explicit fallback naming is preferable. Document worst-case storage for every
-factor type and measure it in examples.
-
-## 6. Safety and soundness review
-
-### 6.1 Current unsafe boundaries
-
-The library's direct unsafe code is concentrated in four areas:
-
-1. flattening `[[T; M]; N]` into contiguous slices;
-2. uninitialized matrix construction with `MaybeUninit`;
-3. converting slices into `Row`, `Column`, and `Stride`-based unsized views;
-4. architecture intrinsics and target-feature functions; and
-5. sealed unchecked indexing used by safe and unsafe matrix accessors.
-
-The basic representations are defensible:
-
-- nested arrays are contiguous and the matrix uses a stable C representation;
-- `MaybeUninit<T>` has the required element layout;
-- the `stride` crate's `Stride<T, S>` is explicitly `repr(transparent)` over
-  `[T]`; and
-- target-feature modules are selected by compile-time configuration.
-
-However, soundness is distributed across files and external representation
-assumptions. A future refactor could break an invariant without making the
-unsafe boundary obvious.
-
-### 6.2 Required safety work
-
-Create a private `raw` or `representation` module containing the minimum
-unsafe primitives:
-
-- array flattening;
-- initialized/uninitialized matrix conversion;
-- slice-to-view casts; and
-- target-specific load/store helpers.
-
-Each primitive should state:
-
-- layout assumptions;
-- initialization requirements;
-- aliasing requirements;
-- target-feature requirements;
-- valid length/stride formulas; and
-- which safe constructor establishes them.
-
-Then add the following gates:
-
-- Miri tests for constructors, `from_fn`, iterator collection including panic
-  cleanup, row/column views, maps, strided maps, mutable blocks, and unchecked
-  indexing wrappers;
-- property tests for every accepted and rejected stride/length combination;
-- compile-time size/alignment assertions for matrix and view representations;
-- sanitizer execution for host integration tests and C++ Eigen FFI tests; and
-- scalar-reference differential tests for every SIMD kernel and tail length.
-
-SIMD intrinsics cannot be validated by Miri. Their memory accesses still need
-host sanitizer tests, while instruction selection needs separate compile and
-execution jobs for SSE2, AVX2, AVX2+FMA, and NEON.
-
-### 6.3 Unsafe code that should be removed
-
-`Matrix<3, 1, T>::cross` uses uninitialized construction for only three output
-elements. A safe `from_columns` or `from_fn` construction is clearer and should
-compile equivalently.
-
-Large commented-out unsafe iterator and cloning implementations should be
-deleted or restored as tested code. Dead unsafe examples make the actual
-safety surface harder to audit.
-
-### 6.4 Semantic invariants
-
-Memory safety is only one part of a numerical type's soundness. Types described
-as validated must preserve their mathematical invariant.
-
-Review in particular:
-
-- `Quaternion::from_rotation_matrix` accepts a raw matrix and returns a
-  normalized quaternion, while `RotationMatrix::from_matrix` performs a
-  stronger round-trip validation. Prefer accepting `&RotationMatrix<T>` in the
-  infallible conversion and give raw-matrix projection/validation a distinct,
-  explicit API.
-- `Matrix::normalize` divides by the norm without reporting zero or non-finite
-  input. Add `try_normalize`/`normalized` semantics and decide whether the
-  panicking or IEEE-propagating convenience method should remain.
-- geometry and decomposition thresholds should be scale-aware and documented
-  in terms of the invariant they check, not only machine epsilon constants.
-
-## 7. Numerical design review
-
-### 7.1 Positive aspects
-
-- Stable scaling is already used in several norms and Householder paths.
-- Dense LDLT includes Bunch-Kaufman-style 1x1/2x2 pivots.
-- Pivoted and unpivoted algorithms are distinct rather than silently changing
-  robustness.
-- QR and SVD expose rank thresholds.
-- iterative decompositions report non-convergence.
-- sparse analysis and numeric recomputation are separable.
-
-### 7.2 Missing contracts
-
-Each solver needs a short numerical contract covering:
-
-- accepted matrix shape and structure;
-- which triangle is read;
-- whether symmetry is assumed or checked;
-- pivoting strategy and threshold interpretation;
-- rank definition;
-- convergence budget;
-- NaN/infinity handling;
-- ordering/sign ambiguity of factors and vectors;
-- expected residual measure; and
-- whether the algorithm is intended for `f32`, `f64`, or both at the tested
-  dimension range.
-
-Matching Eigen element-for-element is not always mathematically meaningful.
-For QR, SVD, and eigendecomposition, correctness tests should prioritize:
-
-- reconstruction error;
-- orthogonality error;
-- residual error;
-- singular/eigenvalue ordering contract;
-- rank under an explicit threshold; and
-- agreement of solved systems.
-
-Differential tests can then compare invariant quantities and only compare raw
-factor storage where the storage convention is part of the public contract.
-
-### 7.3 Validation matrix
-
-For every dense factor, test a generated grid of:
-
-- dimensions including zero where supported, one, packet-width boundaries,
-  rectangular tall/wide cases, and the largest declared supported size;
-- `f32` and `f64`;
-- well-conditioned, ill-conditioned, rank-deficient, singular, and non-finite
-  inputs;
-- scales near minimum normal, maximum finite, and mixed magnitudes;
-- one and multiple right-hand sides; and
-- owned, mapped, strided, block, and bounded views.
-
-Use deterministic property generation so failures are reproducible. Compare
-against more than one independent implementation where practical. Eigen
-parity alone can reproduce the same algorithmic convention or hide a shared
-assumption.
-
-## 8. Performance review
-
-### 8.1 Current kernel architecture
-
-The portable matrix product has an appropriate column-major loop order: reuse
-one right-hand-side scalar while walking contiguous left-hand-side and output
-columns. Architecture modules provide SSE2, AVX2, AVX2+FMA, and AArch64 NEON
-implementations. Scalar tails make the packet kernels applicable beyond exact
-packet multiples.
-
-This is a reasonable fixed-size design. It should not be replaced with
-per-shape hand-written kernels.
-
-The concerns are:
-
-- `MatmulBackend` also contains solver rank-update and scaling primitives;
-- backend selection is one associated type per scalar/target, making
-  operation- or shape-specific policy awkward;
-- view algorithms bypass the optimized owned kernels and use checked access
-  in inner loops;
-- compile-time target features can produce a binary that fails on an older CPU
-  if built with `target-cpu=native` and redistributed; and
-- large const-generic algorithms can increase code size and compile time even
-  when runtime is fast.
-
-### 8.2 Current benchmark evidence
-
-The local ignored `benchmark-report/results.csv` contains more than 1,300 rows
-from Criterion and native Eigen. On the matched comparison rows in that local
-snapshot, the median `stack-algebra / Eigen` latency ratio is approximately
-1.00, but individual operation medians and dimensions vary widely. Examples
-include faster QR/LU cases, slower LDLT and self-adjoint eigen cases, and
-matrix-product ratios that change significantly with shape and scalar.
-
-This is useful diagnostic evidence, not a release conclusion, because:
-
-- the generated report is ignored and does not record sufficient machine,
-  compiler, dependency, governor, and thermal metadata;
-- Criterion and the native C++ runner use different harnesses and batch sizes;
-- several comparison paths use different ownership or allocation models;
-- very small nanosecond measurements are sensitive to inlining, constant
-  propagation, batching, and black-box placement;
-- the report combines many algorithm phases and fallback labels; and
-- the nightly suite previously exceeded its intended wall-clock budget.
-
-No library should be declared generally faster from the aggregate median.
-Performance must be reported per operation, phase, size, scalar, and target.
-
-### 8.3 Benchmark improvements
-
-Define four benchmark tiers:
-
-1. **Kernel microbenchmarks**: dot, norm, matvec, matmul, rank update, transpose,
-   and triangular solve. Verify assembly/codegen for representative sizes.
-2. **Factor benchmarks**: analysis, factorization, refactorization, solve, and
-   factor-and-solve measured separately.
-3. **Workload benchmarks**: representative fixed small systems, fixed block
-   sparse systems, and runtime sparse systems only where the library supports
-   them honestly.
-4. **Target resource benchmarks**: wall time/cycles, peak stack, static RAM,
-   binary text size, and compile time for selected MCU and OS profiles.
-
-Every reported row must include:
-
-- git commit and dirty state;
-- Rust/C++ compiler version and flags;
-- dependency versions;
-- CPU model, enabled ISA, core affinity, and frequency policy;
-- scalar, shape, layout, and alignment;
-- allocation and setup included/excluded;
-- algorithm and pivoting/ordering mode;
-- correctness precheck status; and
-- sample duration and confidence interval.
-
-Add benchmark correctness prechecks that compare outputs before timing. Do not
-perform FFI calls in a timed Eigen inner loop. Keep native Eigen compilation,
-but generate the same deterministic inputs and validate the same residuals.
-
-### 8.4 Performance strategy
-
-Prioritize general improvements in this order:
-
-1. remove repeated checked view access after safe construction;
-2. improve data flow and output reuse in algorithms;
-3. separate cohesive kernel families;
-4. inspect generated assembly at packet boundaries;
-5. tune blocking based on cache/packet properties, not named matrix sizes;
-6. add optional runtime dispatch only for a demonstrated portable-OS need; and
-7. add new ISAs only with representative hardware and maintenance capacity.
-
-Do not keep a micro-optimization solely because it wins one benchmark size.
-Require either a structural explanation or a consistent improvement across a
-declared shape range without numerical regressions.
-
-## 9. API ergonomics review
-
-### 9.1 What currently works well
-
-- Dimensions appear directly in `Matrix<M, N, T>`.
-- `f32` and `f64` are explicit, and mixed precision requires an explicit cast.
-- Literal macros are readable for small matrices and vectors.
-- Owned, mapped, strided, block, and bounded storage share operations.
-- `*_into`, in-place solve, factor recomputation, and workspace APIs make reuse
-  possible without hidden allocation.
-- structured triangular and self-adjoint views communicate intended access.
-
-### 9.2 Main inconsistencies
-
-The API mixes:
-
-- `Option` constructors;
-- typed `Result` constructors;
-- pairs such as `decompose`/`try_decompose` where the shorter form returns
-  `Option` rather than panicking;
-- infallible-looking methods whose invalid input produces non-finite values;
-- indexing that panics and `get` that returns `Option`; and
-- sparse errors, dense errors, and shape failure encoded separately or lost.
-
-The `try_` prefix is not itself the problem. The problem is that callers
-cannot infer the failure model consistently from the name.
-
-Recommended conventions for the next breaking release:
-
-- checked construction is the default for objects with invariants;
-- use `Result` when the reason changes recovery or diagnostics;
-- use `Option` only when absence has one obvious meaning;
-- reserve `try_` for an operation whose unprefixed form is genuinely
-  infallible or intentionally panics;
-- use `_into` for caller-provided distinct output;
-- use `_in_place` when an input is overwritten;
-- use `compute`/`recompute` consistently for factor reuse; and
-- make unchecked/assumed-structure APIs explicit in the name or wrapper type.
-
-### 9.3 Constructor and macro cleanup
-
-- Replace arbitrary `diag!` arity limits with `Matrix::from_diagonal` accepting
-  a fixed vector or array; retain a macro only as syntax sugar.
-- Add typed errors for map length, stride overflow, and bounded shape.
-- Decide whether default scalar `f32` improves common code enough to justify
-  inference surprises. Keep it only if examples and compile tests show clear
-  behavior.
-- Reconsider the Eigen-style `T()` alias. `transpose()` is idiomatic Rust and
-  unambiguous; an uppercase method adds surface without new capability.
-- Prefer focused prelude examples over `use stack_algebra::*`.
-
-### 9.4 Solver selection
-
-Users should not need to infer solver choice from a feature list. Provide one
-decision table based on matrix properties:
-
-| Known property | Preferred method | Reason |
-| --- | --- | --- |
-| symmetric positive definite | Cholesky | Lower cost and clear failure condition. |
-| symmetric indefinite | pivoted LDLT | Preserves symmetry and handles 1x1/2x2 pivots. |
-| general square | partial-pivot LU | General direct solve. |
-| full-rank tall least squares | Householder QR | Avoids normal-equation conditioning loss. |
-| rank uncertainty | column-pivoted QR | Rank-revealing at lower cost than SVD in many cases. |
-| minimum-norm/rank-deficient or diagnostic decomposition | SVD | More expensive but explicit singular spectrum. |
-| repeated same-pattern sparse SPD | analyzed sparse Cholesky | Reuses symbolic structure. |
-
-The table should state when the library does not cover the workload, especially
-for general runtime sparse indefinite systems.
-
-## 10. Documentation review
-
-The repository already has a documentation site, feature summary, roadmap,
-API guide, tutorials, use cases, rustdoc examples, and benchmark guide. The
-problem is fragmentation and drift rather than absence.
-
-Current issues include:
-
-- README, feature summary, roadmap, and use-case guide repeat the same design
-  claims with slightly different wording;
-- `API_USAGE.md` has duplicate section number 6;
-- “stack allocated” is used where “inline storage” is accurate;
-- benchmark duration claims have not consistently matched observed runs;
-- numerical contracts are spread across method docs and implementation
-  thresholds;
-- target support lists compilation and QEMU smoke evidence without a single
-  table distinguishing compile, emulation, and hardware validation; and
-- generated capability claims are manually maintained.
-
-Recommended documentation structure:
-
-1. **Home**: concise scope and supported workload range.
-2. **Getting started**: construction, scalar choice, product, and one solve.
-3. **Storage and views**: inline, bounded, mapped, strided, sparse, and their
-   exact memory costs.
-4. **Solver guide**: selection table and numerical contracts.
-5. **Sparse guide**: pattern/factor reuse, capacities, and limitations.
-6. **Geometry guide**: invariants and conversion behavior.
-7. **Targets**: compile/emulator/hardware matrix with resource measurements.
-8. **Validation**: correctness methodology and benchmark methodology.
-9. **API reference**: rustdoc.
-
-Generate the feature and target tables from a checked machine-readable manifest
-where practical. A documentation test should fail when a public solver lacks a
-guide entry or numerical contract.
-
-## 11. Alternatives and actual merit
-
-### 11.1 Comparison summary
-
-| Library | Storage/shape model | Main merit | Main limitation relative to this crate |
+| “Stack allocated” | Imprecise. `Matrix` owns inline storage, but a value can live on a stack, in static memory, in an arena, or inside another allocation. | Use **inline storage**. Say that placement follows the owner. |
+| “No heap allocation” | Credible for the default core API and fixed-capacity paths, but not yet backed by an allocator-instrumented regression test. | Say **does not require `alloc`**. Add a no-allocation test for representative public paths. |
+| “Bare-metal support” | Supported by `no_std` builds and QEMU smoke tests. It is not evidence of board peripherals, cycle counts, or production qualification. | Keep the evidence tiers in `targets.md`; add real-device results before naming a board as validated. |
+| “Eigen-compatible Bunch–Kaufman” | Overstated. The code implements classical Bunch–Kaufman-style 1x1/2x2 pivot selection, but differential tests compare solutions with Eigen's ordinary `LDLT`; they do not establish identical pivot choices or factor layout. | Call it **Bunch–Kaufman-style pivoting** until pivot-by-pivot compatibility is tested against the intended Eigen decomposition and version. |
+| “Eigen parity” | Too broad. Tests cover selected operations, shapes, scalars, and residual tolerances, not API or algorithm parity. | Use **Eigen differential tests for the enumerated cases**. |
+| Eigen benchmark uses the “same ... input values” | False for several current cases. Rust `dense()` and native Eigen `make_matrix()` use different formulas, and their general-system diagonals also differ. | Generate shared input files/code or use one FFI benchmark process, then assert input hashes. |
+| Competitive performance | True for parts of the intended small-matrix envelope, false as a blanket statement. The latest report contains meaningful wins and losses. | State results per operation, shape, scalar, phase, commit, and machine. Never aggregate unlike work into a marketing claim. |
+| Miri safety validation | Currently false as a passing claim. The latest Miri job reports undefined behavior from uninitialized `u32` entries in `StaticCscPattern::from_arrays`. | Fix before release and keep the Miri badge/gate red until it passes. |
+| Deterministic or predictable execution | Storage bounds are predictable; execution time has not been qualified as WCET. Pivoting, convergence iterations, cache state, and target math implementation affect timing. | Use **bounded storage** and **no hidden allocation**. Reserve “deterministic timing” for measured, target-specific evidence. |
+| “Published library” describes current docs | Misleading. `cargo add stack-algebra` installs `0.1.0`, which does not contain most of the documented `main` API. | Clearly label the site as development documentation until `0.2.0` is published. |
+
+## Feature-set comparison
+
+The table compares practical public capability, not line counts or similarly
+named methods.
+
+| Area | stack-algebra `main` | faer 0.24.4 | Eigen 5.0 |
 | --- | --- | --- | --- |
-| Eigen | Fixed, dynamic, bounded-dynamic, maps, expressions, dense and sparse | Very broad algorithms and mature optimization across sizes | C++, large surface, and dynamic paths may allocate unless controlled. |
-| nalgebra | Static/dynamic dimensions with generic storage; broad geometry | Mature Rust API, strong geometry, static `no_std` matrices and decompositions | Larger abstraction/dependency surface; performance varies by operation and size. |
-| faer | Dynamic owning matrices and lightweight views; dense/sparse high-performance algorithms | Strong medium/large dense and sparse performance, runtime CPU detection under `std` | Official docs state it is not aimed at mostly low-dimensional matrices; not an MCU fixed-inline design. |
-| glam | Specialized small vectors, matrices, quaternions, and transforms | Compact ergonomic geometry API with SIMD storage | Not a general decomposition or sparse linear-algebra library. |
-| CMSIS-DSP | Runtime dimensions over caller buffers; row-major; floating and fixed-point variants | Tuned Arm MCU kernels and fixed-point support | C API, Arm-specific, runtime shape errors, and less type-level dimension checking. |
-| sprs | Dynamic compressed sparse matrices and vectors | Established Rust sparse storage and operations | Allocation-oriented and separate solver ecosystem; not a fixed-capacity `no_std` core. |
-| nalgebra-sparse | Dynamic CSR/CSC/COO integrated with nalgebra | Clear pattern representation and ecosystem integration | Official docs describe limited solver availability and an early performance focus. |
-| micromath | Small embedded vector/quaternion and approximate `f32` math | Small code and fast approximate functions | Precision is deliberately traded for speed; not a general matrix solver. |
-
-### 11.2 Position by domain
-
-For small fixed dense algebra on an MCU, the closest practical comparison is
-nalgebra's static `no_std` matrices plus architecture-specific alternatives
-such as CMSIS-DSP. The merit of this crate must be demonstrated through smaller
-or clearer APIs, predictable storage, competitive cycles, or algorithms that
-the alternatives do not provide under the same constraints. `no_std` and
-fixed-size types alone are not differentiators because nalgebra also supports
-them.
-
-For small fixed dense algebra on an OS, Eigen and nalgebra are direct
-alternatives. This crate can be useful when callers want a narrower API,
-explicit buffer reuse, and the same code on host and firmware. It needs better
-compile-time, code-size, and API evidence to establish that benefit.
-
-For medium/large dense algebra, faer is the appropriate Rust performance
-reference and Eigen's dynamic matrices are the C++ reference. This crate should
-not expand large fixed kernels merely to compete in a domain where inline const
-storage is no longer the right primary abstraction.
-
-For large runtime sparse systems, Eigen Sparse, faer sparse, sprs, external
-sparse solvers, or application-specific solvers remain more appropriate. The
-fixed-capacity sparse implementation has merit for bounded patterns and
-deterministic reuse, but its capacity and pivot limitations must be explicit.
-
-For geometry-only use, nalgebra and glam are already strong alternatives. The
-geometry module should remain small and invariant-focused unless a concrete
-linear-algebra workflow requires more.
-
-## 12. Recommended target architecture
-
-### 12.1 Core contract
-
-The default crate should provide:
-
-- `no_std` operation without `alloc`;
-- inline `Matrix<M, N, T>` and fixed-capacity storage;
-- safe external-buffer maps and strided views;
-- portable scalar algorithms;
-- compile-time packet kernels for explicitly targeted binaries;
-- deterministic factor/workspace reuse;
-- supported `f32` and `f64` numerical contracts; and
-- fixed-capacity scalar and block sparse types with explicit capacity errors.
-
-### 12.2 Optional OS layer
-
-Do not implement this until a real OS workload requires it. If required, an
-optional `std` layer may provide:
-
-- runtime CPU feature detection and multiversioned kernels;
-- benchmark/system metadata collection; and
-- adapters to caller-owned dynamically sized buffers.
-
-A heap-owning dynamic matrix should remain out of scope until mapped buffers,
-bounded matrices, and an external dynamic library have been shown insufficient
-for a real integration. If introduced, it should use the same view and solver
-interfaces rather than duplicating the core API.
-
-### 12.3 Feature policy
-
-Use features to remove meaningful code or platform dependencies, not to expose
-arbitrary combinations that cannot be tested. Candidate features after
-measurement:
-
-- `geometry`;
-- `sparse`;
-- `advanced-decompositions` for SVD/eigen if they materially affect MCU flash;
-- `std` for runtime dispatch and host integration; and
-- test/benchmark-only Eigen comparison.
-
-Do not feature-gate every individual solver. Measure binary dead-code
-elimination first; unused generic code may already be removed by the linker.
-
-## 13. Implementation plan
-
-### Phase 0 — Freeze claims and establish baselines
-
-Goal: make current behavior measurable before changing architecture.
-
-Tasks:
-
-1. Record current public API with `cargo public-api` or an equivalent checked
-   artifact.
-2. Define supported scalar, shape, target, and algorithm matrices.
-3. Add machine-readable benchmark metadata and separate cold build time from
-   execution time.
-4. Add representative OS and MCU size/code/stack baselines.
-5. Mark benchmark reports with commit, dirty state, dependency versions, and
-   compiler flags.
-6. Replace broad parity claims in README/docs with scoped statements.
-
-Exit criteria:
-
-- every public solver appears in the capability matrix;
-- every benchmark row is reproducible from recorded metadata;
-- the documentation distinguishes compile, QEMU, and hardware evidence; and
-- no performance conclusion uses an aggregate across unlike operations.
-
-### Phase 1 — Safety and invariant isolation
-
-Goal: make every unsafe assumption local and testable.
-
-Tasks:
-
-1. Move representation unsafe code into a small private module.
-2. Replace unnecessary unsafe construction in `cross` and delete dead unsafe
-   commented code.
-3. Add Miri suites for constructors, panic cleanup, row/column views, maps,
-   strides, blocks, and mutable aliasing.
-4. Add host sanitizer jobs for view and C++ FFI tests.
-5. Add layout assertions and scalar-reference SIMD differential tests.
-6. Audit geometry invariant constructors and normalization failure behavior.
-
-Exit criteria:
-
-- all unsafe blocks are in reviewed low-level modules or ISA modules;
-- every safe API reaching unsafe code has a direct regression test;
-- Miri covers all non-SIMD unsafe paths; and
-- validated geometry types cannot be constructed through a weaker accidental
-  path.
-
-### Phase 2 — API cleanup for `0.3`
-
-Goal: make the common API predictable without compatibility shims.
-
-Tasks:
-
-1. Define and apply naming rules for checked construction, output reuse,
-   in-place mutation, and factor recomputation.
-2. Add `ShapeError`, map/stride errors, and capacity diagnostics.
-3. Replace arbitrary diagonal macro arity with a general constructor.
-4. Resolve zero/non-finite normalization semantics.
-5. Remove or deprecate redundant aliases and compatibility-style methods.
-6. Seal or redesign scalar/backend traits so concrete kernel types disappear
-   from the public root.
-7. Add compile tests for intended ergonomic examples and rejected dimension or
-   scalar combinations.
-
-Exit criteria:
-
-- a caller can predict `Option`, `Result`, panic, and in-place behavior from
-  documented conventions;
-- normal `f32`/`f64` use does not mention kernel backend types;
-- all constructor errors provide actionable context; and
-- rustdoc examples cover every matrix/view/factor type.
-
-### Phase 3 — Internal architecture cleanup
-
-Goal: align module boundaries with invariants while preserving behavior.
-
-Tasks:
-
-1. Split matrix, linalg, sparse scalar, sparse block, geometry, and kernel
-   internals incrementally.
-2. Use scalar sparse pattern/symbolic/numeric separation as the block-sparse
-   structure.
-3. Introduce private trusted read/write traits for built-in checked views.
-4. Separate matrix product, reduction, triangular, and factor-update kernel
-   families.
-5. Keep portable scalar implementations as the reference for every family.
-
-Exit criteria:
-
-- no implementation module combines public storage, symbolic analysis,
-  numeric factorization, fallback policy, and tests in one large file;
-- view algorithms do not perform fallible coordinate lookup in their innermost
-  loops after construction; and
-- optimized backends remain replaceable without changing public scalar traits.
-
-### Phase 4 — Numerical validation
-
-Goal: define correctness independently of one reference implementation.
-
-Tasks:
-
-1. Write numerical contracts for every factor and geometry conversion.
-2. Add deterministic property tests across dimensions, scales, rank, and
-   conditioning.
-3. Validate reconstruction, orthogonality, residual, and rank invariants.
-4. Add Eigen and at least one independent Rust/reference comparison where
-   meaningful.
-5. Test owned and all supported view/storage paths with identical inputs.
-6. Record convergence limits and threshold behavior in docs.
-
-Exit criteria:
-
-- every solver has invariant-based randomized tests;
-- failures report the documented class;
-- results meet scalar- and dimension-specific residual bounds; and
-- differential tests do not require arbitrary factor signs/orderings to match.
-
-### Phase 5 — Performance architecture
-
-Goal: improve general data paths without shape-specific special cases.
-
-Tasks:
-
-1. Benchmark trusted view access versus owned access.
-2. Measure packet-width boundaries and inspect generated assembly.
-3. Tune loop/block policies using declared size ranges rather than named
-   dimensions.
-4. Measure code size and compile time for each added kernel family.
-5. Test portable, SSE2, AVX2, AVX2+FMA, and NEON results against scalar
-   references.
-6. Decide whether optional `std` runtime dispatch is justified for portable OS
-   binaries.
-
-Exit criteria:
-
-- no retained optimization is justified by one size only;
-- the supported small-matrix envelope is competitive with fixed Eigen and
-  static nalgebra within documented tolerances;
-- medium/large comparisons are reported without claiming the fixed core should
-  win; and
-- MCU improvements do not exceed stack, flash, or numerical error budgets.
-
-### Phase 6 — Sparse scope and ergonomics
-
-Goal: make bounded sparse behavior understandable and diagnosable.
-
-Tasks:
-
-1. Split block storage, analysis, factor, solve, and fallback modules.
-2. Add required-capacity diagnostics from symbolic analysis.
-3. Document supported sparse symmetry and pivot models precisely.
-4. Add generated sparse pattern tests including adversarial fill.
-5. Add repeated-analysis/refactor/solve correctness and performance tests.
-6. Define when users should use dense fallback or another library.
-
-Exit criteria:
-
-- capacity failures report required and available storage;
-- cross-block/global pivot limitations are explicit;
-- symbolic and numeric reuse have independent tests and benchmarks; and
-- no sparse API silently changes to a dense allocation or hidden storage
-  model.
-
-### Phase 7 — Target qualification and stable release
-
-Goal: convert broad target claims into maintained support tiers.
-
-Tasks:
-
-1. Define Tier 1 host, Tier 1 MCU, compile-only, and experimental targets.
-2. Run real-device tests for at least one Cortex-M FPU target and one RISC-V or
-   ESP-class target used by maintainers.
-3. Record cycles, peak stack, static RAM, and binary size for representative
-   operations.
-4. Test portable OS binaries separately from `target-cpu=native` binaries.
-5. Publish API, numerical, target, and benchmark compatibility reports.
-
-Exit criteria:
-
-- stable APIs have documented behavior and resource envelopes;
-- Tier 1 targets execute on real hardware in CI or a repeatable release
-  process;
-- benchmark and correctness reports are attached to releases; and
-- unsupported workload classes are stated directly.
-
-## 14. Priority order
-
-| Priority | Work | Impact | Risk if delayed |
-| --- | --- | --- | --- |
-| P0 | Freeze claims and benchmark metadata | High | Optimization and parity conclusions remain unreliable. |
-| P0 | Isolate unsafe representation code and expand Miri | High | Refactors can invalidate distributed assumptions. |
-| P0 | Define numerical contracts and invariant tests | High | Element parity can mask incorrect or brittle behavior. |
-| P1 | Clean failure/naming conventions | High | Public API becomes harder to change as adoption grows. |
-| P1 | Remove backend types from normal public API | High | Kernel implementation becomes a permanent user-facing constraint. |
-| P1 | Trusted internal view access | Medium-high | External-buffer algorithms retain avoidable overhead. |
-| P1 | Split block-sparse responsibilities | Medium-high | Sparse changes remain difficult to review and test. |
-| P2 | Code-size/stack/compile-time benchmarks | Medium-high | MCU suitability is inferred from allocation behavior alone. |
-| P2 | Optional runtime CPU dispatch study | Medium | Portable OS binaries may leave performance unused or become incompatible. |
-| P3 | Additional ISAs or algorithms | Workload-dependent | Adds maintenance before the current surface is stable. |
-| Deferred | Heap-owning dynamic matrices | Unknown | Complexity doubles without a demonstrated unmet workload. |
-| Deferred | General expression-template system | High complexity | Large API/compiler cost; explicit reuse APIs already cover core loops. |
-
-## 15. Decisions to keep, change, and defer
-
-### Keep
-
-- fixed-size `Matrix<M, N, T>` as the core;
-- column-major default storage;
-- explicit scalar conversion and no implicit mixed precision;
-- `no_std` and no `alloc` requirement in the default core;
-- caller-provided maps, output reuse, in-place solves, and reusable factors;
-- portable scalar reference kernels;
-- fixed-capacity sparse and block-sparse storage for bounded patterns; and
-- Eigen/faer/nalgebra as external validation references.
-
-### Change
-
-- describe storage as inline rather than inherently stack allocated;
-- replace broad Eigen parity language with scoped operation contracts;
-- isolate unsafe code and trusted-view invariants;
-- remove optimized backend mechanics from the normal public API;
-- standardize constructor and solver failure semantics;
-- split large modules by storage/symbolic/numeric/kernel responsibility;
-- make sparse capacity errors actionable; and
-- measure code size, compile time, and real-device resources alongside latency.
-
-### Defer
-
-- heap-owning dynamic matrices;
+| Primary language and model | Rust; const-shaped, inline values | Rust; dynamic owning matrices plus views | Header-only C++; fixed, bounded-dynamic, and dynamic matrices plus expressions |
+| Default memory model | `no_std`, no `alloc`; caller-selected placement | Heap-backed `Mat`; `no_std` is possible but the crate uses `alloc` | Fixed matrices can avoid allocation; dynamic matrices allocate unless controlled |
+| Runtime-sized owning dense matrix | No | Yes, resizable | Yes |
+| Bounded active dimensions | `MatrixBuf<MAX_R, MAX_C>` storage; decompositions still require a const-shaped view | Dynamic views and owning capacity | Fixed maximum rows/columns are part of `Matrix`'s type |
+| External buffers/views | Contiguous, strided, mutable, and fixed blocks | Rich sliced/split `MatRef` and `MatMut` views | `Map`, `Ref`, blocks, strides, expressions |
+| Dense scalar coverage | Numerical solvers target `f32`/`f64`; basic algebra is more generic | Real, complex, and extensible entity/scalar machinery | Standard numeric types, complex, and documented custom scalar extension |
+| Dense direct solvers | Partial-pivot LU, LLT, pivoted LDLT, QR, column-pivot QR | LLT, block-pivoted LBLT, partial/full-pivot LU, QR, column-pivot QR | Broad LU, Cholesky, QR, and related decompositions |
+| SVD/eigen | Thin SVD; self-adjoint eigen only | Full/thin SVD; self-adjoint and general eigen APIs | Jacobi/BDC SVD, self-adjoint/general/generalized eigen, Schur, Hessenberg, and more |
+| Sparse storage | Fixed-capacity scalar CSC plus block CSC/CSR | Dynamic sparse matrices | Dynamic compressed sparse matrices |
+| Sparse solvers | LLT; limited LDLT with diagonal pivots or bounded dense fallback | Sparse LLT, LU, and QR | Sparse LLT/LDLT, LU, QR, iterative solvers, and support modules |
+| Geometry | Quaternion, angle-axis, rotation, isometry, affine transform | Not a primary feature | Broad geometry module and related unsupported modules |
+| Lazy expressions/fusion | Mostly eager; explicit `*_into` reuse | High- and low-level operation APIs with reusable scratch | Extensive expression templates and lazy evaluation |
+| Parallelism | None; predictable sequential core | Optional Rayon; `Par::Seq` or parallel execution | Threaded operations where enabled; external backends available |
+| SIMD selection | Compile-time scalar/SSE2/AVX2/FMA/NEON | Runtime CPU dispatch under `std` through its kernel stack | Compile-time vectorization across a much wider ISA set |
+| Current maturity evidence | Unreleased 0.2 development tree; one maintainer; current Miri failure | Published 0.24 series, broader user base and active upstream | Decades of production use and a very large test matrix |
+
+Primary comparison sources:
+
+- [faer 0.24.4 crate documentation](https://docs.rs/faer/0.24.4/faer/)
+- [faer feature manifest](https://github.com/sarah-quinones/faer-rs/blob/main/faer/Cargo.toml)
+- [Eigen overview and supported scope](https://libeigen.gitlab.io/)
+- [Eigen fixed- and dynamic-size matrix guidance](https://libeigen.gitlab.io/eigen/docs-nightly/group__TutorialMatrixClass.html)
+
+### Where stack-algebra is genuinely better
+
+For its intended domain, stack-algebra can offer advantages that are not mere
+feature-count differences:
+
+1. **The memory bound is part of the type.** A factor, sparse pattern, and
+   workspace can be budgeted with `size_of`/`storage_bytes` before deployment.
+2. **No allocator is required.** This matters on bare metal and in control
+   loops where an allocator is unavailable or prohibited.
+3. **Shape mismatches are compile-time errors** in the fixed dense API.
+4. **Factor and output reuse are explicit.** The API makes repeated estimation
+   or control-loop work visible rather than relying on expression lifetime
+   optimization.
+5. **Fixed-capacity sparse and block-sparse support is unusually ambitious for
+   a small `no_std` Rust crate.** It can suit generated normal equations whose
+   topology and fill bounds are known.
+6. **The same Rust API crosses host and firmware builds.** This can reduce the
+   translation boundary between desktop validation and embedded deployment.
+
+These are engineering merits. They should be supported with resource and
+target evidence, not converted into a claim that the library is universally
+faster or more capable.
+
+### Where faer is the better choice
+
+Choose faer when matrices are runtime-sized, medium or large; complex scalars
+matter; sparse LU/QR is needed; parallelism is useful; or high-performance
+dynamic algebra is the primary workload. Faer's own documentation says it is
+focused on medium/large matrices and is not well suited to mostly
+low-dimensional vector/matrix workloads. That makes faer an important
+complement and performance boundary, not the product that stack-algebra needs
+to imitate everywhere.
+
+### Where Eigen is the better choice
+
+Choose Eigen when C++ is acceptable and breadth, maturity, custom scalars,
+dynamic/fixed interoperability, expression templates, geometry breadth,
+specialized decompositions, or an established production history outweigh a
+narrow Rust/no-allocator core. Eigen also optimizes fixed matrices and can
+avoid dynamic allocation, so “fixed size” alone is not a differentiator.
+
+## What the latest benchmark actually shows
+
+The latest successful nightly artifact at the reviewed commit contains 1,344
+measurements on an AMD EPYC 9V74 GitHub runner using Rust 1.97.1. The nightly
+profile uses 20 ms Criterion warmup/measurement windows with 10 samples; the
+native Eigen executable uses five samples of at least 5 ms.
+
+For the `comparison/*` dense groups, matching by operation, shape, scalar, and
+phase gives:
+
+| Comparison | Matched cells | stack-algebra faster | Geometric mean of `stack / peer` time | Defensible conclusion |
+| --- | ---: | ---: | ---: | --- |
+| Eigen fixed-size native executable | 192 | 72 (38%) | 1.16x | Mixed. Competitive in selected small QR/LLT/eigen/reduction cases; slower overall in this snapshot. |
+| faer dynamic API, sequential | 216 | 181 (84%) | 0.35x | Strong fixed-size/low-overhead result, but many cells include a storage/allocation-model advantage and are outside faer's stated sweet spot. |
+| nalgebra static where used | 36 | 16 (44%) | 1.26x | Mixed; the small sample covers only reductions and multiplication. |
+
+The aggregate is included to audit broad claims, not as a product score.
+Representative results show why per-case reporting is necessary:
+
+| Case | stack-algebra | Eigen | faer dynamic | Observation |
+| --- | ---: | ---: | ---: | --- |
+| `f32` 8x8 matrix multiply | 14.7 ns | 65.0 ns | 82.9 ns | Clear win in a relevant small fixed case. |
+| `f32` 32x32 matrix multiply | 1,295 ns | 517 ns | 1,171 ns | Loses as size moves beyond the strongest fixed-kernel envelope. |
+| `f64` 8x8 LLT factor | 180 ns | 129 ns | 377 ns | Between Eigen and faer. |
+| `f64` 32x32 LLT factor | 5,652 ns | 1,900 ns | 1,882 ns | Roughly 3x slower. |
+| `f64` 32x32 self-adjoint eigen with reused workspace | 15,804 ns | 24,105 ns | 46,353 ns | Strong result for this implementation and input. |
+| `f64` 64x32 SVD factor | 283,411 ns | not measured in the native Eigen suite | 283,993 ns | Rough parity with faer, but nalgebra is substantially faster in this case. |
+
+Do not promote these exact times as durable release claims. They come from a
+short shared-cloud run, and the report's `git_dirty=true` is caused by the
+report job downloading benchmark inputs into the checkout rather than by a
+recorded source patch.
+
+### Benchmark defects to fix
+
+1. Use exactly the same input generator. At present, Rust and native Eigen
+   differ for several dense and general-system inputs.
+2. Run cross-library cases on the same runner and preferably in the same
+   process or sequentially pinned environment.
+3. Record exact Eigen, faer, nalgebra, Rust, C++, linker, CPU-feature, and
+   dependency-lock versions.
+4. Separate one-shot construction/allocation, factorization, refactorization,
+   and solve in every library.
+5. Validate residuals or output hashes immediately before timing every case.
+6. Report code size, compile time, peak stack, and static RAM alongside
+   latency; these are central to the library's stated merit.
+7. Use longer, isolated release runs. Keep the short nightly profile only for
+   regression triage.
+8. Publish a versioned artifact per release instead of a hand-maintained table
+   that drifts after each kernel change.
+
+## Safety and numerical assessment
+
+### Confirmed release blocker
+
+The [latest build run](https://github.com/yongkyuns/stack-algebra/actions/runs/31647917174)
+fails Miri because `StaticCscPattern::from_arrays_into` initializes only
+`row_indices[..nnz]` inside an otherwise uninitialized struct, then
+`assume_init()` creates a value whose remaining `u32` entries are
+uninitialized. Constructing that safe Rust value is undefined behavior even if
+the unused tail is never read.
+
+The simplest robust fix is to initialize the complete struct to
+`StaticCscPattern::new()` and then overwrite validated active entries. If the
+direct-into API is retained for stack-pressure reasons, it must initialize all
+array elements and fields before exposing `Self`. Add Miri tests for every
+partial-capacity constructor and error/panic path.
+
+### Numerical strengths
+
+- Checked dense decomposition paths reject non-finite inputs/intermediates.
+- Cholesky, QR, SVD, eigendecomposition, and LDLT have reconstruction or
+  residual tests.
+- Norm accumulation includes a scaled path for extreme finite magnitudes.
+- Factor recomputation preserves the prior factor in several checked paths.
+- Differential tests compare results rather than requiring bitwise equality
+  for decompositions with non-unique factors.
+
+### Numerical/API risks
+
+- `try_partial_piv_lu` checks finiteness but does not report singularity; a zero
+  pivot can survive construction and later produce non-finite solve results.
+  Either return `DecompositionError::Singular` or make the assumption explicit
+  in the checked method's name.
+- `normalize()` has no zero/non-finite failure contract.
+- Numerical tests cover a small deterministic set of dimensions and scales;
+  they are not a conditioning or adversarial corpus.
+- `Option` and `Result` constructors coexist inconsistently across factors,
+  making recovery behavior difficult to infer.
+- Dense Bunch–Kaufman, sparse diagonal pivoting, local block pivots, and dense
+  fallback are materially different algorithms but are easy to conflate in
+  high-level prose.
+- Sparse capacity failures usually report only that capacity was exceeded,
+  not the required symbolic/fill capacity.
+
+## Prioritized improvements
+
+### P0 — before publishing 0.2
+
+1. Fix the `StaticCscPattern` undefined behavior and require a green Miri gate.
+2. Audit every `MaybeUninit`, raw-slice, pointer, and SIMD safe-API boundary;
+   run Miri over all non-SIMD unsafe paths.
+3. Correct benchmark input equivalence and remove “same inputs”/broad parity
+   wording until automated checks prove it.
+4. Decide the release identity: publish `0.2.0` or label all `main`
+   documentation as unreleased and provide a Git dependency example.
+5. Add a release checklist that requires normal tests, Eigen differential
+   tests, docs, Clippy, formatting, Miri, target builds, QEMU, and a reviewed
+   benchmark artifact to pass on the same commit.
+
+### P1 — prove the intended niche
+
+1. Add real Cortex-M and RISC-V/ESP-class measurements for representative 3x3,
+   6x6, and 15x15 operations: cycles, peak stack, static RAM, flash, and
+   numerical residual.
+2. Add allocator-instrumented tests proving no allocation for the documented
+   fixed, mapped, sparse, and factor-reuse paths.
+3. Add deterministic randomized/property tests across scale, conditioning,
+   rank, pivot patterns, sparse fill, and malformed inputs.
+4. Define one numerical contract per solver: accepted structure, triangle
+   read, threshold, rank rule, convergence bound, failure class, and residual
+   expectation.
+5. Make sparse symbolic failures report required versus available capacity.
+6. Standardize checked construction, `_into`, `_in_place`, and recomputation
+   naming before the public API gains more users.
+
+### P2 — improve integration without diluting the core
+
+1. Add opt-in adapters to faer/nalgebra or generic slice/view conversion so an
+   application can use stack-algebra on firmware-sized kernels and faer for
+   larger host-side work.
+2. Consider optional runtime CPU dispatch only in a `std` host layer; retain
+   compile-time selection in the embedded core.
+3. Feature-gate geometry, sparse, and advanced decompositions only if measured
+   flash/compile-time savings justify the added test matrix.
+4. Add compile-time and code-size regression reports for representative public
+   API use, not just crate-wide builds.
+5. Split large sparse modules around storage, symbolic analysis, numeric
+   factorization, and solve invariants to make unsafe review tractable.
+
+### Defer unless a concrete workload demands it
+
+- a heap-owning dynamic matrix;
+- general large sparse indefinite solving;
+- GPU/accelerator backends;
 - a general expression-template system;
-- general runtime sparse indefinite solving;
-- GPU or accelerator backends;
-- per-shape hand-written kernels;
-- Arm32 NEON, RVV, or other new ISA modules without hardware ownership and
-  benchmark evidence; and
-- broad geometry expansion unrelated to the matrix/factor core.
+- additional ISAs without owned hardware and sustained benchmarks; and
+- geometry breadth unrelated to embedded estimation/control workloads.
 
-## 16. First implementation slice
+For dynamic or medium/large work, integration with faer is more credible than
+reimplementing faer inside this crate. For C++ consumers, Eigen should remain a
+reference and interoperability target rather than a promised parity level.
 
-The first change set should be deliberately narrow and should not alter
-algorithms:
+## Release-readiness scorecard
 
-1. add a generated capability/target manifest;
-2. correct “stack” terminology in public docs;
-3. add benchmark provenance metadata;
-4. create the private representation safety module;
-5. replace unsafe `cross` construction;
-6. expand Miri to constructors and dense views;
-7. add `ShapeError` and map/bounded constructor diagnostics behind the planned
-   `0.3` breaking API; and
-8. write one complete numerical contract and property suite for Cholesky as the
-   template for other solvers.
+| Area | Current state | 0.2 release gate |
+| --- | --- | --- |
+| Scope and positioning | Good niche, overstated in places | Adopt the focused positioning above. |
+| Dense API breadth | Strong for small fixed real matrices | Freeze and document numerical contracts. |
+| Sparse ambition | High and potentially differentiating | Fix UB; improve capacity and pivot-boundary diagnostics. |
+| Correctness tests | Good start | Add adversarial/property coverage and output checks in benchmarks. |
+| Memory safety | Not releasable today | Green Miri plus unsafe-boundary audit. |
+| Embedded portability | Credible compile/QEMU evidence | Add at least one real-device resource baseline. |
+| Performance | Competitive but mixed | Same-input, same-runner, versioned release artifact. |
+| Documentation | Broad but previously repetitive/stale | Keep one feature inventory, one review, one roadmap, and generated benchmark artifacts. |
+| Distribution | Main and crates.io diverge | Publish 0.2 or label development installs explicitly. |
 
-This slice produces immediate clarity and safety evidence without committing
-the repository to dynamic allocation, a new ISA, or a large API abstraction.
+The project should optimize for trust now, not additional feature count. A
+smaller set of precisely specified, memory-safe, measured operations would be
+more valuable than another decomposition or ISA backend.
