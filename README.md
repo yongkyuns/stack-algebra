@@ -13,7 +13,8 @@ dimensions and predictable storage. It supports host applications as well as
 `no_std` and embedded targets.
 
 The design provides:
-1. Compile-time matrix dimensions and scalar types (`f32` or `f64`)
+1. Compile-time matrix dimensions and generic scalar types, with optimized
+   `f32` and `f64` floating-point kernels
 2. Inline storage with no required heap allocation
 3. Fixed-capacity bounded matrices and sparse structures
 4. Dense, geometric, and sparse linear-algebra operations
