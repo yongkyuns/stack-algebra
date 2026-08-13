@@ -93,8 +93,10 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
                 previous_row = Some(row);
             }
         }
+        output.write(Self::new());
         let output_ptr = output.as_mut_ptr();
-        // SAFETY: all fields are initialized exactly once before the output is exposed.
+        // SAFETY: the complete value was initialized above; these assignments replace validated
+        // entries and metadata.
         unsafe {
             for (index, &row) in row_indices.iter().enumerate() {
                 (*output_ptr).row_indices[index] =
