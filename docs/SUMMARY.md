@@ -5,15 +5,15 @@
 
 ## Overview
 
-- [Feature set](FEATURES.md)
-- [Design review and improvement plan](DESIGN_REVIEW.md)
-- [Roadmap](ROADMAP.md)
+- [Feature set](features.md)
+- [Design review and improvement plan](design-review.md)
+- [Roadmap](roadmap.md)
 
 ## Guides
 
 - [Tutorials](tutorials.md)
-- [API usage](API_USAGE.md)
-- [Use cases](USE_CASES.md)
+- [API usage](api-usage.md)
+- [Use cases](use-cases.md)
 
 ## Validation
 

@@ -367,11 +367,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                 (*output_ptr).lower.column_starts[column] = start as u32;
             }
             (*output_ptr).lower.nnz = total_nnz;
-            Self::from_lower_with_ordering_into(
-                &(*output_ptr).lower,
-                StaticCscOrdering::identity(),
-                output,
-            );
+            let lower = ptr::read(ptr::addr_of!((*output_ptr).lower));
+            Self::from_lower_with_ordering_into(&lower, StaticCscOrdering::identity(), output);
         }
         // SAFETY: `from_lower_with_ordering_into` initialized the output above.
         unsafe { (*output.as_mut_ptr()).with_input_pattern_mut(matrix) };

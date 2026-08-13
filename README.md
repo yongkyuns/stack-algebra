@@ -17,12 +17,12 @@ applications in rust. This means several things:
 (e.g. python or matlab)
 
 The implementation roadmap and release gates are tracked in
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+[`docs/roadmap.md`](docs/roadmap.md).
 
 For a consolidated capability matrix, see
-[`docs/FEATURES.md`](docs/FEATURES.md). For copy-ready API patterns, see
-[`docs/API_USAGE.md`](docs/API_USAGE.md); robotics-oriented storage and
-algorithm recipes are in [`docs/USE_CASES.md`](docs/USE_CASES.md).
+[`docs/features.md`](docs/features.md). For copy-ready API patterns, see
+[`docs/api-usage.md`](docs/api-usage.md); storage and algorithm recipes are in
+[`docs/use-cases.md`](docs/use-cases.md).
 
 Implementing numerical algorithms in rust can be made much more productive and ergonomic
 if simple abstractions and necessary algebra routines are available. This library is

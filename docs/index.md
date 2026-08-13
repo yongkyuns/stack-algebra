@@ -11,14 +11,14 @@ caller-owned buffers.
   types.
 - [Tutorials](tutorials.md) — follow workflows by storage layout and solver
   assumptions.
-- [API usage](API_USAGE.md) — select storage, views, products, and solvers.
-- [Feature set](FEATURES.md) — review supported operations and boundaries.
-- [Use cases](USE_CASES.md) — map common estimation, optimization, geometry,
+- [API usage](api-usage.md) — select storage, views, products, and solvers.
+- [Feature set](features.md) — review supported operations and boundaries.
+- [Use cases](use-cases.md) — map common estimation, optimization, geometry,
   and sparse workflows to the API.
 - [Benchmarking](benchmarking.md) — run and interpret numerical comparisons.
 - [Target support and evidence](targets.md) — distinguish host builds, QEMU
   execution, and real-hardware validation.
-- [Roadmap](ROADMAP.md) — see planned capability and validation work.
+- [Roadmap](roadmap.md) — see planned capability and validation work.
 - [API reference](api-reference.md) — browse generated Rust documentation.
 
 ```rust

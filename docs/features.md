@@ -176,9 +176,9 @@ framework dependency.
   AArch64/NEON smoke behavior.
 
 Use `RUSTFLAGS="-C target-cpu=native"` only when deploying to a matching CPU
-feature set. See [`API_USAGE.md`](API_USAGE.md) for build commands and
+feature set. See [`api-usage.md`](api-usage.md) for build commands and
 [`targets.md`](targets.md) for the evidence matrix. See
-[`ROADMAP.md`](ROADMAP.md) for planned native block kernels and remaining
+[`roadmap.md`](roadmap.md) for planned native block kernels and remaining
 numerical extensions.
 
 ## Deliberate non-features

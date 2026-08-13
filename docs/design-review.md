@@ -656,7 +656,7 @@ Current issues include:
 
 - README, feature summary, roadmap, and use-case guide repeat the same design
   claims with slightly different wording;
-- `API_USAGE.md` has duplicate section number 6;
+- `api-usage.md` has duplicate section number 6;
 - “stack allocated” is used where “inline storage” is accurate;
 - benchmark duration claims have not consistently matched observed runs;
 - numerical contracts are spread across method docs and implementation
