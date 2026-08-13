@@ -394,110 +394,13 @@ products use the same compile-time scalar/packet dispatch.
 Custom scalar types can implement `MatrixScalar` for multiplication and add
 `ReductionScalar` when dot, norm, or matrix-vector kernels are needed.
 
-## Eigen and faer comparison
+## Validation
 
-The published library has no C++ or faer dependency. Local correctness and
-performance comparisons are opt-in and require Eigen headers discoverable via
-`pkg-config eigen3` or `EIGEN3_INCLUDE_DIR`:
-
-```sh
-cargo test --features eigen-compare
-RUSTFLAGS="-C target-cpu=native" cargo bench --bench fixed_size --bench small_fixed
-RUSTFLAGS="-C target-cpu=native" cargo bench --bench sparse
-RUSTFLAGS="-C target-cpu=native" cargo bench --bench dense_solvers
-# Focus on decomposition cases:
-RUSTFLAGS="-C target-cpu=native" cargo bench --bench small_fixed -- 'llt|ldlt'
-CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 "Sparse LLT"
-CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 QR
-CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 SVD
-CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 "Self-adjoint eigen"
-CXXFLAGS="-march=native" ./eigen/run_native_bench.sh f64 triangular
-```
-
-The parity suite compares elementary operations bit-for-bit and compares
-floating-point reductions and decompositions with documented tolerances. The
-Criterion reports include `stack-algebra` and reusable-buffer faer baselines
-for `f32` and `f64` square products from 2-by-2 through 15-by-15, small fixed
-shapes (`2x3 * 3x2`, `3x6 * 6x3`, and `6x15 * 15x6`), matrix-vector products,
-dot products, norms, and partial-pivot LU factorization and one-right-hand-side solves. The native
-Eigen runner uses the same static, column-major matrices, input values,
-dimensions, and 64-operation batch. Pass `QR`, `LLT`, or another operation
-filter as the optional second argument to run only matching native cases.
-Compare its `ns/batch` median with
-Criterion's reported time; its `ns/op` column is the batch time divided by 64.
-It uses no Rust-to-C++ calls in the timed region. Criterion also includes faer
-dynamic-matrix LLT and LDLT factor/solve baselines. Those faer cases measure
-faer's normal heap-backed `Mat` API, while stack-algebra and Eigen use fixed-size
-stack storage, so they are algorithm comparisons rather than identical memory
-allocation models. Decomposition comparisons
-include partial-pivot LU, Householder QR, Cholesky LLT on generated SPD systems, and pivoted
-LDLT plus explicit no-pivot LDLT on generated symmetric-indefinite systems, each with factorization and
-one-right-hand-side solve cases. LLT and LDLT include 3, 6, 15, and 32 square
-dimensions to expose small-matrix overhead and larger fixed-size scaling.
-QR additionally covers tall `6x3`, `15x6`, `32x8`, and `64x16` systems.
-SVD benchmarks cover tall `6x3` and `15x6` systems.
-Self-adjoint eigendecomposition benchmarks cover symmetric `3x3`, `6x6`,
-`15x15`, and `32x32` systems.
-Triangular solve benchmarks cover lower and upper `3x3`, `6x6`, and `15x15`
-systems using the same static column-major inputs as Eigen.
-Sparse LLT and no-pivot LDLT benchmarks use lower-triangular tridiagonal,
-band-2, and star patterns at representative fixed sizes in both `f32` and `f64`; analysis,
-numeric refactorization with a reused symbolic pattern, and solve are reported
-separately for stack-algebra and faer. Native Eigen comparison covers the dense
-benchmark suite plus sparse LLT/LDLT when `eigen-compare` is enabled. Fixed-capacity sparse Cholesky
-also exposes deterministic minimum-degree ordering for reducing fill-in before
-reusing a symbolic pattern. Stack-algebra factor benchmarks reuse the numeric
-factor buffer, matching Eigen's in-place `factorize` model.
-Repeated ordered refactorization can validate and prepare the ordered CSC
-matrix once with `prepare_ordered`, then use `recompute_ordered` for numeric
-updates without repeating permutation or structural checks. For natural CSC
-coordinates, call `recompute` on the existing numeric factor.
-Sparse LDLT provides a fast no-pivot path plus analysis-time 1x1 diagonal
-pivoting; matrices requiring scalar 2x2 pivot blocks are reported as zero-pivot
-failures. Dense fixed-size LDLT supports Bunch–Kaufman 1x1/2x2 blocks.
-The block-sparse benchmark also reports native local-pivot LDLT, the global
-`try_dense_ldlt` fallback, faer, and optional Eigen solve baselines for a
-cross-block indefinite 2x2 case.
-The dense-solver benchmark adds 8x8, 16x16, and 32x32 SPD LDLT factor-and-solve
-and reused-solve measurements for stack-algebra and faer, with an optional
-Eigen baseline. Matrix construction, factor setup, and faer/Eigen allocation are
-outside reused-factor and reused-solve timing.
-The same benchmark reports reusable stack LDLT with and without Bunch–Kaufman
-pivoting; this separates the robust pivot-selection/update overhead from the
-underlying no-pivot factorization before any architecture-specific tuning.
-
-## QEMU target validation
-
-The standalone Cortex-M harness builds the library for
-`thumbv7em-none-eabihf` and runs deterministic multiplication, LU-solve, and
-pivoted/no-pivot LDLT checks under QEMU's MPS2 Cortex-M4 machine. The harness
-also reports a stack watermark from `cortex-m-rt`'s painted stack. The AArch64
-and RISC-V harnesses report the same bounded 64 KiB watermark:
-
-```sh
-qemu-tests/run_cortex_m.sh
-```
-
-The RISC-V harness targets `riscv32imc-unknown-none-elf` and runs the same
-checks on QEMU's generic `virt` machine. This validates the scalar kernel path
-used by RISC-V microcontrollers such as ESP32-C-class devices:
-
-```sh
-rustup target add riscv32imc-unknown-none-elf
-qemu-tests/run_riscv32.sh
-```
-
-The AArch64 harness targets `aarch64-unknown-none` and validates the NEON
-packet kernels on QEMU's Cortex-A53 model:
-
-```sh
-rustup target add aarch64-unknown-none
-qemu-tests/run_aarch64.sh
-```
-
-The scripts enforce the linker-provided stack budget. Set
-`STACK_USAGE_LIMIT_BYTES` to apply a stricter regression threshold; CI uses an
-8 KiB limit for all three targets.
+Continuous integration covers host tests, rustdoc examples, formatting,
+Clippy, Miri, cross-target compilation, QEMU smoke tests, and native AArch64
+tests. See [target support and evidence](docs/targets.md) for the current
+validation matrix and [benchmarking](docs/benchmarking.md) for the Eigen, faer,
+and nalgebra comparison methodology and reproduction commands.
 
 ## License
 
