@@ -4,17 +4,19 @@
 [![Docs.rs Latest](https://img.shields.io/badge/docs.rs-latest-blue.svg)](https://docs.rs/stack-algebra)
 ![Build Status](https://github.com/yongkyuns/stack-algebra/actions/workflows/ci.yml/badge.svg?branch=main)
 
-A stack-allocated lightweight algebra library for bare-metal applications.
+A fixed-size, `no_std` linear algebra library with inline storage.
 
 ## Overview
-This crate provides a stack-allocated matrix type with constant size determined at 
-compile time. The primary goal for this library is to be useful in building robotics
-applications in rust. This means several things:
-1. Target platform is often bare-metal
-2. Size of the matrices can usually be defined at compile-time
-3. Problem solving does not require large matrices or heavy optimization
-4. Users are not experts in rust but often familiar with scientific tools 
-(e.g. python or matlab)
+This crate provides fixed-size matrices, vectors, views, factorizations, and
+bounded sparse structures for Rust programs that benefit from compile-time
+dimensions and predictable storage. It supports host applications as well as
+`no_std` and embedded targets.
+
+The design provides:
+1. Compile-time matrix dimensions and scalar types (`f32` or `f64`)
+2. Inline storage with no required heap allocation
+3. Fixed-capacity bounded matrices and sparse structures
+4. Dense, geometric, and sparse linear-algebra operations
 
 The implementation roadmap and release gates are tracked in
 [`docs/roadmap.md`](docs/roadmap.md).
@@ -24,9 +26,8 @@ For a consolidated capability matrix, see
 [`docs/api-usage.md`](docs/api-usage.md); storage and algorithm recipes are in
 [`docs/use-cases.md`](docs/use-cases.md).
 
-Implementing numerical algorithms in rust can be made much more productive and ergonomic
-if simple abstractions and necessary algebra routines are available. This library is
-a growing collection of addressing those needs. It is heavily based on 
+The crate provides the matrix abstractions and algebra routines needed to build
+numerical algorithms while keeping dimensions and storage explicit. It is based on
 [`vectrix`][vectrix] for core implementations.
 
 ## Install
@@ -43,8 +44,8 @@ use stack_algebra::*; // or import just the items you need
 
 ### Fixed-size types
 
-`Matrix<R, C, T>` is always stack allocated and column major. `T` defaults to
-`f32`; use explicit casts when changing precision.
+`Matrix<R, C, T>` stores its data inline in column-major order. `T` defaults to
+`f32`; use `.cast::<f64>()` or an explicitly typed matrix when changing precision.
 
 ```rust
 use stack_algebra::{Matrix3d, Vector3f};
@@ -126,7 +127,7 @@ let vector64 = vector.cast::<f64>();
   assert_eq!(m[(1,2)], 6.0);
   ```
 
-- `*`, `/`, `+`, `-` for matrix arithmatics
+- `*`, `/`, `+`, `-` for matrix arithmetic
   ```rust
   let m = matrix![
       1.0, 2.0;
@@ -189,7 +190,7 @@ let vector64 = vector.cast::<f64>();
   assert_eq!(matrix.matvec(&lhs), vector![14.0; 32.0]);
   ```
 
-- `.trace()` for sum of diagonal elements of a sqaure matrix
+- `.trace()` for the sum of diagonal elements of a square matrix
   ```rust
 	let m = matrix![
 	  9.0, 8.0, 7.0;
