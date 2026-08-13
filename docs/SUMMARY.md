@@ -20,4 +20,5 @@
 - [Benchmarking](benchmarking.md)
 - [Native benchmark baseline](benchmark-baseline.md)
 - [Target support and evidence](targets.md)
+- [References](references.md)
 - [API reference](api-reference.md)

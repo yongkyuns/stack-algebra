@@ -24,11 +24,11 @@ The implementation roadmap and release gates are tracked in
 For a consolidated capability matrix, see
 [`docs/features.md`](docs/features.md). For copy-ready API patterns, see
 [`docs/api-usage.md`](docs/api-usage.md); storage and algorithm recipes are in
-[`docs/use-cases.md`](docs/use-cases.md).
+[`docs/use-cases.md`](docs/use-cases.md). External implementation and validation
+references are listed in [`docs/references.md`](docs/references.md).
 
 The crate provides the matrix abstractions and algebra routines needed to build
-numerical algorithms while keeping dimensions and storage explicit. It is based on
-[`vectrix`][vectrix] for core implementations.
+numerical algorithms while keeping dimensions and storage explicit.
 
 ## Install
 Use cargo to add to your project (or add manually to your `Cargo.toml`)
@@ -408,5 +408,4 @@ This project is distributed under the terms of both the MIT license and the Apac
 
 See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT) for details.
 
-[vectrix]: https://docs.rs/vectrix/latest/vectrix/
 [frobenius]: https://en.wikipedia.org/wiki/Matrix_norm#Frobenius_norm
