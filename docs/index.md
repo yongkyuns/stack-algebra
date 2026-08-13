@@ -18,6 +18,7 @@ caller-owned buffers.
 - [Benchmarking](benchmarking.md) — run and interpret numerical comparisons.
 - [Target support and evidence](targets.md) — distinguish host builds, QEMU
   execution, and real-hardware validation.
+- [References](references.md) — implementation, design, and validation sources.
 - [Roadmap](roadmap.md) — see planned capability and validation work.
 - [API reference](api-reference.md) — browse generated Rust documentation.
 
