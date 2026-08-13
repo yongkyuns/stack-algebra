@@ -1,7 +1,7 @@
 # API Usage Guide
 
 This guide shows the intended call patterns. For the complete inventory and
-limitations, see [`FEATURES.md`](FEATURES.md).
+limitations, see [`features.md`](features.md).
 
 ## 1. Choose storage
 

@@ -180,11 +180,11 @@ Use existing content as the starting source instead of rewriting everything:
 | Existing file | Initial site destination |
 | --- | --- |
 | `README.md` | Home and getting-started material |
-| `docs/FEATURES.md` | Overview and reference |
-| `docs/API_USAGE.md` | Tutorials and API usage |
-| `docs/USE_CASES.md` | Use-case pages |
+| `docs/features.md` | Overview and reference |
+| `docs/api-usage.md` | Tutorials and API usage |
+| `docs/use-cases.md` | Use-case pages |
 | `docs/benchmarking.md` | Validation and benchmarks |
-| `docs/ROADMAP.md` | Project information |
+| `docs/roadmap.md` | Project information |
 
 Start with `docs/` as the mdBook source root. Add `docs/SUMMARY.md` and
 `docs/index.md`; split pages into subdirectories only when content size makes

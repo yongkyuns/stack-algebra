@@ -10,7 +10,7 @@ stack-algebra = "0.2"
 ```
 
 The crate is `no_std` and the fixed-size core does not allocate. See the
-[feature set](FEATURES.md) for storage and solver boundaries.
+[feature set](features.md) for storage and solver boundaries.
 
 ## Construct a matrix
 
@@ -33,8 +33,8 @@ the compiler. Use `cast` at an explicit precision boundary.
 
 ## Choose the next guide
 
-- Use [API usage](API_USAGE.md) for storage, views, products, and solver
+- Use [API usage](api-usage.md) for storage, views, products, and solver
   selection.
-- Use [Use cases](USE_CASES.md) for representative estimation, optimization,
+- Use [Use cases](use-cases.md) for representative estimation, optimization,
   sparse, and embedded workflows.
 - Use the [API reference](api-reference.md) for method and trait details.
