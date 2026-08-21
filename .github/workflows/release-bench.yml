@@ -1,0 +1,50 @@
+name: Release benchmark qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: Pinned self-hosted benchmark
+    runs-on: [self-hosted, linux, x64, stack-algebra-benchmark]
+    timeout-minutes: 120
+    env:
+      EIGEN3_INCLUDE_DIR: /usr/include/eigen3
+      BENCH_MACHINE_ID: ${{ runner.name }}
+      BENCH_WARMUP_TIME: 1
+      BENCH_MEASUREMENT_TIME: 3
+      BENCH_SAMPLE_SIZE: 30
+      EIGEN_BENCH_SAMPLES: 15
+      EIGEN_BENCH_MIN_SAMPLE_MS: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Verify benchmark host prerequisites
+        run: |
+          test -d "$EIGEN3_INCLUDE_DIR"
+          command -v python3
+          command -v sha256sum
+          test -z "$(git status --porcelain)"
+      - name: Run release benchmark qualification
+        run: scripts/run_release_benchmarks.sh
+      - name: Add provenance to job summary
+        run: |
+          printf '### Release benchmark provenance\n\n```text\n' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-report/release/provenance.txt >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload release benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-benchmark-${{ github.sha }}
+          path: benchmark-report/release
+          if-no-files-found: error
+          retention-days: 90
