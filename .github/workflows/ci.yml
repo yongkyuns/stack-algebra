@@ -35,7 +35,7 @@ jobs:
       - run: EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo doc --no-deps --all-features
 
   embedded:
-    name: Embedded targets and QEMU
+    name: Embedded targets, QEMU, and resources
     runs-on: ubuntu-latest
     env:
       STACK_USAGE_LIMIT_BYTES: 8192
@@ -55,6 +55,24 @@ jobs:
       - run: qemu-tests/run_cortex_m.sh
       - run: qemu-tests/run_riscv32.sh
       - run: qemu-tests/run_aarch64.sh
+      - name: Generate Cortex-M resource report
+        run: qemu-tests/qualify_cortex_m.sh
+      - name: Check real-hardware benchmark harness builds
+        run: >-
+          RUSTFLAGS="-C link-arg=-Tlink.x"
+          cargo build --manifest-path qemu-tests/Cargo.toml
+          --target thumbv7em-none-eabihf --release --features cortex-m
+          --bin cortex-m-bench
+      - name: Add resource report to job summary
+        run: cat qemu-tests/resource-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Cortex-M resource report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-m-resource-report
+          path: |
+            qemu-tests/resource-report.tsv
+            qemu-tests/resource-report.md
+          if-no-files-found: error
 
   arm64:
     name: Native ARM64 tests
