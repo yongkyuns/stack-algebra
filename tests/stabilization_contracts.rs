@@ -5,9 +5,7 @@
 //! SIMD packet widths so optimized and scalar-tail paths remain covered by the
 //! same solve contract.
 
-use stack_algebra::{
-    Cholesky, CscError, Matrix, StaticBlockCscMatrix, StaticBlockCsrMatrix,
-};
+use stack_algebra::{Cholesky, CscError, Matrix, StaticBlockCscMatrix, StaticBlockCsrMatrix};
 
 fn check_cholesky_f64<const N: usize>() {
     let seed = Matrix::<N, N, f64>::from_fn(|row, column| {
@@ -77,11 +75,8 @@ fn block_sparse_constructors_report_required_capacity() {
     let block = Matrix::from_rows([[1.0_f32]]);
     let values = [block, block];
 
-    let csc = StaticBlockCscMatrix::<1, 1, 2, 2, 1, f32>::from_pattern(
-        &values,
-        &[0, 1],
-        &[0, 1, 2],
-    );
+    let csc =
+        StaticBlockCscMatrix::<1, 1, 2, 2, 1, f32>::from_pattern(&values, &[0, 1], &[0, 1, 2]);
     assert_eq!(
         csc,
         Err(CscError::CapacityExceeded {
@@ -90,11 +85,8 @@ fn block_sparse_constructors_report_required_capacity() {
         })
     );
 
-    let csr = StaticBlockCsrMatrix::<1, 1, 2, 2, 1, f32>::from_pattern(
-        &values,
-        &[0, 1],
-        &[0, 1, 2],
-    );
+    let csr =
+        StaticBlockCsrMatrix::<1, 1, 2, 2, 1, f32>::from_pattern(&values, &[0, 1], &[0, 1, 2]);
     assert_eq!(
         csr,
         Err(CscError::CapacityExceeded {
