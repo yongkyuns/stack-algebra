@@ -22,6 +22,7 @@
 
 - [Benchmarking](benchmarking.md)
 - [Release benchmark qualification](release-benchmarking.md)
+- [Release artifact qualification](release-artifacts.md)
 - [Native benchmark baseline](benchmark-baseline.md)
 - [Target support and evidence](targets.md)
 - [Target qualification](target-qualification.md)
