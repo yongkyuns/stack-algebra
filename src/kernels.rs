@@ -403,9 +403,7 @@ macro_rules! impl_scalar_reduction_scalar {
     };
 }
 
-impl_scalar_factorization_scalar!(
-    i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize
-);
+impl_scalar_factorization_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_scalar_matrix_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_scalar_reduction_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 
@@ -455,9 +453,7 @@ pub(crate) use portable::matmul_scalar;
 #[cfg(test)]
 mod tests {
     use super::matmul_scalar;
-    use crate::{
-        FactorizationScalar, Matrix, MatrixScalar, ReductionScalar, Vector, Zero,
-    };
+    use crate::{FactorizationScalar, Matrix, MatrixScalar, ReductionScalar, Vector, Zero};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     struct CustomScalar(i32);
