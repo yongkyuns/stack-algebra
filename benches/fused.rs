@@ -17,9 +17,7 @@ fn vector<const D: usize>() -> Matrix<D, 1, f32> {
 
 fn fused_updates<const D: usize>(criterion: &mut Criterion) {
     let x = dense::<D, D>();
-    let y = Matrix::<D, D, f32>::from_fn(|row, column| {
-        (2 + 3 * row + column) as f32 / 19.0
-    });
+    let y = Matrix::<D, D, f32>::from_fn(|row, column| (2 + 3 * row + column) as f32 / 19.0);
     let alpha = 1.25_f32;
     let beta = -0.75_f32;
     let mut output = Matrix::<D, D, f32>::zeros();
@@ -46,9 +44,8 @@ fn fused_updates<const D: usize>(criterion: &mut Criterion) {
     group.bench_function(BenchmarkId::new("expression", D), |bench| {
         bench.iter(|| {
             for _ in 0..BATCH {
-                output = black_box(
-                    black_box(x) * black_box(alpha) + black_box(y) * black_box(beta),
-                );
+                output =
+                    black_box(black_box(x) * black_box(alpha) + black_box(y) * black_box(beta));
             }
             black_box(&output);
         })
@@ -70,9 +67,8 @@ fn fused_updates<const D: usize>(criterion: &mut Criterion) {
 
 fn mapped_views<const D: usize>(criterion: &mut Criterion) {
     let lhs_storage = dense::<D, D>();
-    let rhs_storage = Matrix::<D, D, f32>::from_fn(|row, column| {
-        (3 + row + 2 * column) as f32 / 23.0
-    });
+    let rhs_storage =
+        Matrix::<D, D, f32>::from_fn(|row, column| (3 + row + 2 * column) as f32 / 23.0);
     let lhs = Map::<D, D, f32>::from_slice(lhs_storage.as_slice()).unwrap();
     let rhs = Map::<D, D, f32>::from_slice(rhs_storage.as_slice()).unwrap();
     let vector = vector::<D>();
