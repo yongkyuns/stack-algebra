@@ -18,12 +18,13 @@
 - [Fused operations and mapped-view fast paths](fused-operations.md)
 - [Use cases](use-cases.md)
 
-## Validation
+## Validation and releases
 
 - [Solver invariant qualification](solver-qualification.md)
 - [Benchmarking](benchmarking.md)
 - [Release benchmark qualification](release-benchmarking.md)
 - [Release artifact qualification](release-artifacts.md)
+- [Release process](releasing.md)
 - [Native benchmark baseline](benchmark-baseline.md)
 - [Target support and evidence](targets.md)
 - [Target qualification](target-qualification.md)
