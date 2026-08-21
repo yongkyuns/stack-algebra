@@ -29,12 +29,14 @@ case "$stack_limit" in
         ;;
 esac
 
-commit=unknown
+checkout_commit=unknown
 if command -v git >/dev/null 2>&1; then
-    commit=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || printf unknown)
+    checkout_commit=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || printf unknown)
 fi
+source_commit=${QUALIFICATION_SOURCE_SHA:-$checkout_commit}
 {
-    printf 'commit=%s\n' "$commit"
+    printf 'source_commit=%s\n' "$source_commit"
+    printf 'checkout_commit=%s\n' "$checkout_commit"
     printf 'target=%s\n' "$target"
     printf 'rustc=%s\n' "$(rustc --version)"
     printf 'cargo=%s\n' "$(cargo --version)"
