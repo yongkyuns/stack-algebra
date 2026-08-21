@@ -10,11 +10,12 @@ Predictable linear algebra for embedded and robotics workloads: fixed-size and t
 
 ## Status
 
-The development branch is currently `0.3.0-alpha.1`. The published crates.io version may therefore lag the API documented on the development branch.
+The development branch is currently `0.3.0-alpha.1`. The published crates.io version may therefore lag the API documented on the development branch. The declared and CI-tested MSRV for the `0.3` line is **Rust 1.87**.
 
 - `cargo add stack-algebra` installs the current crates.io release.
 - For the current development API, use this repository/branch explicitly.
 - The [0.3 stabilization plan](docs/stabilization-plan.md) records release gates and completed work.
+- The [release process](docs/releasing.md) documents MSRV, release qualification, and guarded publication.
 - The [feature set](docs/features.md) is the capability/limitation reference.
 
 ## Core design
@@ -80,11 +81,11 @@ bounded.resize_zeroed(4, 4).unwrap();
 
 Dense factors support reusable solve/output paths, and mapped contiguous column-major inputs can reuse the optimized owned-matrix kernels without copying. Padded or arbitrary-stride views remain zero-copy and use the generic view path rather than silently materializing temporary matrices.
 
-For complete examples, see [Getting started](docs/getting-started.md), [Tutorials](docs/tutorials.md), [API usage](docs/api-usage.md), and [Use cases](docs/use-cases.md).
+The repository also keeps executable examples for a Joseph-form EKF measurement update, mapped QR least squares, and compile-time embedded storage budgeting; normal CI executes all three. For broader guidance, see [Getting started](docs/getting-started.md), [Tutorials](docs/tutorials.md), [API usage](docs/api-usage.md), and [Use cases](docs/use-cases.md).
 
 ## Validation and performance evidence
 
-CI covers host tests, rustdoc examples, formatting, Clippy, Miri, cross-target builds, native AArch64 tests, and QEMU smoke execution for representative Cortex-M, RISC-V32, and AArch64 paths. The project also records reproducible Cortex-M static-size and painted-stack measurements from isolated QEMU qualification workloads.
+CI covers Rust 1.87 MSRV builds, representative runnable examples, host tests, rustdoc examples, formatting, Clippy, Miri, cross-target builds, native AArch64 tests, and QEMU smoke execution for representative Cortex-M, RISC-V32, and AArch64 paths. The project also records reproducible Cortex-M static-size and painted-stack measurements from isolated QEMU qualification workloads and enforces deliberately generous per-workload regression budgets on a pinned Rust 1.98.0 qualification toolchain.
 
 Those checks are **not physical-device timing evidence**. No STM32/ESP/other real-device performance claim is made without a named-board measurement. Physical Cortex-M timing is a follow-up evidence tier, not a prerequisite for publishing the portable `0.3` library.
 
@@ -94,7 +95,7 @@ Performance claims are similarly evidence-scoped:
 - release comparisons require the pinned-machine qualification procedure;
 - embedded timing claims require physical-target measurements.
 
-See [Target support and evidence](docs/targets.md), [Target qualification](docs/target-qualification.md), [Benchmarking](docs/benchmarking.md), [Release benchmark qualification](docs/release-benchmarking.md), and [Solver invariant qualification](docs/solver-qualification.md).
+See [Target support and evidence](docs/targets.md), [Target qualification](docs/target-qualification.md), [Benchmarking](docs/benchmarking.md), [Release benchmark qualification](docs/release-benchmarking.md), [Release process](docs/releasing.md), and [Solver invariant qualification](docs/solver-qualification.md).
 
 ## Documentation
 
