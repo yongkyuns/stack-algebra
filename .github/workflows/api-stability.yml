@@ -11,11 +11,15 @@ jobs:
   semver:
     name: Semver against base
     runs-on: ubuntu-latest
+    env:
+      EIGEN3_INCLUDE_DIR: /usr/include/eigen3
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Install Eigen
+        run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
       - name: Check public API compatibility
         if: github.event_name == 'pull_request'
         uses: obi1kenobi/cargo-semver-checks-action@v2
