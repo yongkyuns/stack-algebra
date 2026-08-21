@@ -57,3 +57,7 @@ harness = false
 [[bench]]
 name = "comparison"
 harness = false
+
+[[bench]]
+name = "fused"
+harness = false
