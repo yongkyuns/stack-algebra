@@ -94,6 +94,7 @@ jobs:
       - run: >-
           cargo miri test --no-default-features
           --test view_ops
+          --test fused_view_paths
           --test sparse
           --test sparse_cholesky
           --test sparse_ldlt
