@@ -1,4 +1,4 @@
-//! Stack-backed matrices with runtime active dimensions.
+//! Inline-storage matrices with runtime active dimensions.
 //!
 //! [`MatrixBuf`] is useful when a device receives a matrix size at runtime but
 //! has a known upper bound. It reserves its complete capacity inline and only
@@ -63,7 +63,7 @@ pub enum MatrixBufError {
     },
 }
 
-/// A stack-allocated matrix with runtime active dimensions and compile-time
+/// An inline-storage matrix with runtime active dimensions and compile-time
 /// maximum capacity.
 ///
 /// Storage remains column-major and reserves `MAX_ROWS * MAX_COLS` scalar
@@ -172,10 +172,59 @@ where
     /// Changes the active dimensions without reallocating or clearing storage.
     ///
     /// Newly exposed elements retain whatever values were previously stored in
-    /// the inline capacity. Initialize them before reading when growing a
-    /// buffer.
+    /// the inline capacity. Use [`Self::resize_zeroed`] or [`Self::resize_with`]
+    /// when growing a buffer whose newly active values must be initialized.
     #[inline]
     pub fn resize(&mut self, rows: usize, columns: usize) -> Result<(), MatrixBufError> {
+        self.validate_shape(rows, columns)?;
+        self.rows = rows;
+        self.columns = columns;
+        Ok(())
+    }
+
+    /// Changes the active dimensions and zero-initializes newly exposed values.
+    ///
+    /// Values that remain inside both the old and new active rectangles are
+    /// preserved. Shrinking does not clear hidden storage; if that storage is
+    /// exposed by a later call to this method, it is zeroed before becoming
+    /// active. The buffer is unchanged when the requested shape exceeds the
+    /// compile-time capacity.
+    #[inline]
+    pub fn resize_zeroed(&mut self, rows: usize, columns: usize) -> Result<(), MatrixBufError> {
+        self.resize_with(rows, columns, T::zero())
+    }
+
+    /// Changes the active dimensions and fills newly exposed values.
+    ///
+    /// Values that remain inside both the old and new active rectangles are
+    /// preserved. A value is considered newly exposed when its row was outside
+    /// the previous active row count or its column was outside the previous
+    /// active column count. The buffer is unchanged when the requested shape
+    /// exceeds the compile-time capacity.
+    #[inline]
+    pub fn resize_with(
+        &mut self,
+        rows: usize,
+        columns: usize,
+        value: T,
+    ) -> Result<(), MatrixBufError> {
+        self.validate_shape(rows, columns)?;
+        let old_rows = self.rows;
+        let old_columns = self.columns;
+        for column in 0..columns {
+            for row in 0..rows {
+                if row >= old_rows || column >= old_columns {
+                    self.data[column][row] = value;
+                }
+            }
+        }
+        self.rows = rows;
+        self.columns = columns;
+        Ok(())
+    }
+
+    #[inline]
+    fn validate_shape(&self, rows: usize, columns: usize) -> Result<(), MatrixBufError> {
         if rows > MAX_ROWS || columns > MAX_COLS {
             return Err(MatrixBufError::CapacityExceeded {
                 rows,
@@ -184,8 +233,6 @@ where
                 max_columns: MAX_COLS,
             });
         }
-        self.rows = rows;
-        self.columns = columns;
         Ok(())
     }
 
@@ -503,6 +550,71 @@ mod tests {
         buffer.resize(4, 2).unwrap();
         assert_eq!(buffer.rows(), 4);
         assert_eq!(buffer.columns(), 2);
+    }
+
+    #[test]
+    fn resize_zeroed_initializes_only_newly_exposed_values() {
+        let mut buffer = MatrixBuf::<4, 4, i32>::new(3, 3).unwrap();
+        for column in 0..3 {
+            for row in 0..3 {
+                buffer[(row, column)] = 10 * column as i32 + row as i32 + 1;
+            }
+        }
+        buffer.resize(2, 2).unwrap();
+        buffer.resize_zeroed(4, 3).unwrap();
+
+        assert_eq!(buffer[(0, 0)], 1);
+        assert_eq!(buffer[(1, 0)], 2);
+        assert_eq!(buffer[(0, 1)], 11);
+        assert_eq!(buffer[(1, 1)], 12);
+        for column in 0..3 {
+            for row in 0..4 {
+                if row >= 2 || column >= 2 {
+                    assert_eq!(buffer[(row, column)], 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resize_with_fills_new_region_and_preserves_overlap() {
+        let mut buffer = MatrixBuf::<4, 4, i32>::new(2, 2).unwrap();
+        buffer[(0, 0)] = 1;
+        buffer[(1, 0)] = 2;
+        buffer[(0, 1)] = 3;
+        buffer[(1, 1)] = 4;
+
+        buffer.resize_with(3, 4, -7).unwrap();
+
+        assert_eq!(buffer[(0, 0)], 1);
+        assert_eq!(buffer[(1, 0)], 2);
+        assert_eq!(buffer[(0, 1)], 3);
+        assert_eq!(buffer[(1, 1)], 4);
+        for column in 0..4 {
+            for row in 0..3 {
+                if row >= 2 || column >= 2 {
+                    assert_eq!(buffer[(row, column)], -7);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn initialized_resize_is_transactional_on_capacity_error() {
+        let mut buffer = MatrixBuf::<3, 3, i32>::new(2, 2).unwrap();
+        buffer[(1, 1)] = 9;
+        let before = buffer;
+
+        assert_eq!(
+            buffer.resize_with(4, 2, 5),
+            Err(MatrixBufError::CapacityExceeded {
+                rows: 4,
+                columns: 2,
+                max_rows: 3,
+                max_columns: 3,
+            })
+        );
+        assert_eq!(buffer, before);
     }
 
     #[test]
