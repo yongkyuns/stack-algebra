@@ -29,12 +29,18 @@ if ! cargo public-api --version 2>/dev/null | grep -Fq "cargo-public-api $public
     exit 2
 fi
 
-rm -rf "$out_dir"
+# The library intentionally does not commit Cargo.lock. Resolve a fresh lockfile
+# from the clean source tree so every release artifact captures the exact
+# dependency graph used for that qualification run.
+rm -f Cargo.lock
+cargo generate-lockfile
+lock_sha=$(sha256sum Cargo.lock | awk '{print $1}')
+
+rm -rf "$out_dir" target/package
 mkdir -p "$out_dir"
 
 commit=$(git rev-parse HEAD)
 ref=$(git symbolic-ref --short -q HEAD || git describe --always --exact-match 2>/dev/null || printf detached)
-lock_sha=$(sha256sum Cargo.lock | awk '{print $1}')
 
 cargo +"$nightly" public-api -sss > "$out_dir/public-api.txt"
 cargo +"$nightly" rustdoc --lib -- -Z unstable-options --output-format json
