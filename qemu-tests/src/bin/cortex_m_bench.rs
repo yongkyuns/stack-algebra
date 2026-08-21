@@ -17,7 +17,10 @@ const ITERATIONS: usize = 32;
 fn main() -> ! {
     let mut peripherals = cortex_m::Peripherals::take().expect("core peripherals available once");
     peripherals.DCB.enable_trace();
-    assert!(DWT::has_cycle_counter(), "Cortex-M DWT cycle counter required");
+    assert!(
+        DWT::has_cycle_counter(),
+        "Cortex-M DWT cycle counter required"
+    );
     DWT::unlock();
     peripherals.DWT.enable_cycle_counter();
 
