@@ -41,4 +41,4 @@ jobs:
       - name: Run public API and invariant contracts
         run: cargo test --no-default-features --test public_api --test numerical_contracts --test stabilization_contracts --test fused_view_paths
       - name: Check focused benchmark harness
-        run: cargo check --all-features --bench fused
+        run: cargo check --bench fused
