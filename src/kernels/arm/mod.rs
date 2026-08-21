@@ -1,6 +1,4 @@
-use super::{
-    FactorizationScalar, MatmulBackend, MatrixScalar, ReductionBackend, ReductionScalar,
-};
+use super::{FactorizationScalar, MatmulBackend, MatrixScalar, ReductionBackend, ReductionScalar};
 use crate::{Matrix, Vector};
 
 mod neon;
