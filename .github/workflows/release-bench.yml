@@ -35,7 +35,7 @@ jobs:
           command -v sha256sum
           test -z "$(git status --porcelain)"
       - name: Run release benchmark qualification
-        run: scripts/run_release_benchmarks.sh
+        run: sh scripts/run_release_benchmarks.sh
       - name: Add provenance to job summary
         run: |
           printf '### Release benchmark provenance\n\n```text\n' >> "$GITHUB_STEP_SUMMARY"
