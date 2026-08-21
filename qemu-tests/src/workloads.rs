@@ -34,7 +34,11 @@ pub fn dense3() -> usize {
 pub fn dense6() -> usize {
     let lhs = Matrix::<6, 6, f32>::from_fn(|row, column| {
         let base = ((row * 7 + column * 3 + 1) % 11) as f32 * 0.125;
-        if row == column { base + 2.0 } else { base }
+        if row == column {
+            base + 2.0
+        } else {
+            base
+        }
     });
     let rhs = Matrix::<6, 6, f32>::from_fn(|row, column| {
         ((row * 5 + column * 11 + 2) % 13) as f32 * 0.0625 - 0.25
@@ -49,10 +53,36 @@ pub fn dense6() -> usize {
 }
 
 #[inline(never)]
+pub fn dense6_f64() -> usize {
+    let lhs = Matrix::<6, 6, f64>::from_fn(|row, column| {
+        let base = ((row * 7 + column * 3 + 1) % 11) as f64 * 0.125;
+        if row == column {
+            base + 2.0
+        } else {
+            base
+        }
+    });
+    let rhs = Matrix::<6, 6, f64>::from_fn(|row, column| {
+        ((row * 5 + column * 11 + 2) % 13) as f64 * 0.0625 - 0.25
+    });
+    let mut product = Matrix::<6, 6, f64>::zeros();
+    lhs.mul_into(&rhs, &mut product);
+    let mut fused = Matrix::<6, 6, f64>::zeros();
+    product.linear_combination_into(0.75, &lhs, 0.25, &mut fused);
+
+    black_box(&fused);
+    size_of_val(&lhs) + size_of_val(&rhs) + size_of_val(&product) + size_of_val(&fused)
+}
+
+#[inline(never)]
 pub fn dense15() -> usize {
     let lhs = Matrix::<15, 15, f32>::from_fn(|row, column| {
         let base = ((row * 17 + column * 7 + 3) % 23) as f32 * 0.03125;
-        if row == column { base + 1.5 } else { base - 0.25 }
+        if row == column {
+            base + 1.5
+        } else {
+            base - 0.25
+        }
     });
     let rhs = Matrix::<15, 15, f32>::from_fn(|row, column| {
         ((row * 13 + column * 5 + 1) % 19) as f32 * 0.03125 - 0.25
