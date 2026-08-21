@@ -112,8 +112,8 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
                     (ordered_column, ordered_row)
                 };
                 let lower_column =
-                    u32::try_from(lower_column).map_err(|_| CscError::CapacityExceeded)?;
-                u32::try_from(lower_row).map_err(|_| CscError::CapacityExceeded)?;
+                    u32::try_from(lower_column).map_err(|_| CscError::InvalidColumnPointers)?;
+                u32::try_from(lower_row).map_err(|_| CscError::InvalidRowIndices)?;
                 column_counts[lower_column as usize] += 1;
                 entry_count += 1;
             }
@@ -158,8 +158,12 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
                 let lower_row = ordered_row.max(ordered_column);
                 let target = cursors[lower_column] as usize;
                 self.pattern.row_indices[target] = lower_row as u32;
-                self.source_indices[target] =
-                    u32::try_from(source_index).map_err(|_| CscError::CapacityExceeded)?;
+                self.source_indices[target] = u32::try_from(source_index).map_err(|_| {
+                    CscError::CapacityExceeded {
+                        required: source_index.saturating_add(1),
+                        capacity: u32::MAX as usize,
+                    }
+                })?;
                 cursors[lower_column] += 1;
             }
         }
