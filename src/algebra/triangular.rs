@@ -164,12 +164,16 @@ mod tests {
     }
 
     #[test]
-    fn upper_view_solves_in_place() {
+    fn upper_view_solves_in_place_and_reconstructs_rhs() {
         let upper = matrix![2.0_f64, -1.0, 3.0; 0.0, 4.0, 2.0; 0.0, 0.0, 5.0];
         let rhs = Matrix::<3, 2, f64>::from_rows([[7.0, 4.0], [12.0, 8.0], [10.0, 15.0]]);
-        let expected = upper.upper_triangular().solve(&rhs);
-        let mut actual = rhs;
-        upper.upper_triangular().solve_in_place(&mut actual);
-        assert_relative_eq!(actual, expected, epsilon = 1e-12, max_relative = 1e-12);
+        let mut solution = rhs;
+        upper.upper_triangular().solve_in_place(&mut solution);
+
+        let mut reconstructed = Matrix::<3, 2, f64>::zeros();
+        upper
+            .upper_triangular()
+            .mul_into(&solution, &mut reconstructed);
+        assert_relative_eq!(reconstructed, rhs, epsilon = 1e-12, max_relative = 1e-12);
     }
 }
