@@ -20,6 +20,7 @@
 
 ## Validation
 
+- [Solver invariant qualification](solver-qualification.md)
 - [Benchmarking](benchmarking.md)
 - [Release benchmark qualification](release-benchmarking.md)
 - [Release artifact qualification](release-artifacts.md)
