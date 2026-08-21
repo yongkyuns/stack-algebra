@@ -56,6 +56,17 @@ fn run_selected_workload() -> (&'static str, usize) {
     not(feature = "resource-baseline"),
     not(feature = "resource-dense3"),
     not(feature = "resource-dense6"),
+    feature = "resource-dense6-f64"
+))]
+fn run_selected_workload() -> (&'static str, usize) {
+    ("dense6_f64", workloads::dense6_f64())
+}
+
+#[cfg(all(
+    not(feature = "resource-baseline"),
+    not(feature = "resource-dense3"),
+    not(feature = "resource-dense6"),
+    not(feature = "resource-dense6-f64"),
     feature = "resource-dense15"
 ))]
 fn run_selected_workload() -> (&'static str, usize) {
@@ -66,6 +77,7 @@ fn run_selected_workload() -> (&'static str, usize) {
     not(feature = "resource-baseline"),
     not(feature = "resource-dense3"),
     not(feature = "resource-dense6"),
+    not(feature = "resource-dense6-f64"),
     not(feature = "resource-dense15"),
     feature = "resource-sparse"
 ))]
@@ -77,6 +89,7 @@ fn run_selected_workload() -> (&'static str, usize) {
     not(feature = "resource-baseline"),
     not(feature = "resource-dense3"),
     not(feature = "resource-dense6"),
+    not(feature = "resource-dense6-f64"),
     not(feature = "resource-dense15"),
     not(feature = "resource-sparse"),
     feature = "resource-block-sparse"
@@ -89,6 +102,7 @@ fn run_selected_workload() -> (&'static str, usize) {
     feature = "resource-baseline",
     feature = "resource-dense3",
     feature = "resource-dense6",
+    feature = "resource-dense6-f64",
     feature = "resource-dense15",
     feature = "resource-sparse",
     feature = "resource-block-sparse"

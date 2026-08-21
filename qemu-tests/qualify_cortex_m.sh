@@ -34,7 +34,7 @@ baseline_text=
 baseline_data=
 baseline_bss=
 
-for profile in baseline dense3 dense6 dense15 sparse block-sparse; do
+for profile in baseline dense3 dense6 dense6-f64 dense15 sparse block-sparse; do
     feature="resource-$profile"
     binary="$target_dir/$target/release/cortex-m-resource"
 

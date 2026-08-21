@@ -68,19 +68,25 @@ formatting/runtime support can affect section layout.
 | `baseline` | resource-probe runtime with no linear-algebra workload |
 | `dense3` | 3x3 `f32` partial-pivot LU factor + solve + residual check |
 | `dense6` | 6x6 `f32` matrix product followed by fused linear combination |
+| `dense6_f64` | the same 6x6 product/fused path in `f64`, exposing double-precision resource cost on an M4F-class target |
 | `dense15` | 15x15 `f32` matrix product followed by fused AXPY output |
 | `sparse` | fixed-capacity 4x4 `f32` CSC Cholesky + solve + residual check |
 | `block_sparse` | fixed-capacity 2x2-block CSC matrix-vector product |
 
 The definitions live in `qemu-tests/src/workloads.rs` and are shared by the
 resource probe and the physical-cycle harness. That prevents the CI resource
-workload from drifting away from the code timed on hardware.
+workload from drifting away from the code timed on hardware. In particular,
+the paired `dense6`/`dense6_f64` cases make single- versus double-precision
+resource differences explicit without treating emulator execution time as a
+performance measurement.
 
 ## Physical Cortex-M cycle harness
 
 `qemu-tests/src/bin/cortex_m_bench.rs` measures the shared workloads with the
 Cortex-M DWT `CYCCNT`. Each workload runs 32 times and reports the minimum cycle
-count. Semihosting output happens outside the timed region.
+count. Semihosting output happens outside the timed region. The harness checks
+that the DWT cycle counter exists, enables global trace, removes the DWT
+software lock where present, and then enables `CYCCNT` before measurement.
 
 A real board must provide its own `memory.x`; the QEMU memory map is deliberately
 not reused as hardware evidence. Build and optionally run the harness with:

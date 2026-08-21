@@ -17,6 +17,8 @@ const ITERATIONS: usize = 32;
 fn main() -> ! {
     let mut peripherals = cortex_m::Peripherals::take().expect("core peripherals available once");
     peripherals.DCB.enable_trace();
+    assert!(DWT::has_cycle_counter(), "Cortex-M DWT cycle counter required");
+    DWT::unlock();
     peripherals.DWT.enable_cycle_counter();
 
     hprintln!(
@@ -26,6 +28,7 @@ fn main() -> ! {
     measure("baseline", workloads::baseline);
     measure("dense3", workloads::dense3);
     measure("dense6", workloads::dense6);
+    measure("dense6_f64", workloads::dense6_f64);
     measure("dense15", workloads::dense15);
     measure("sparse", workloads::sparse);
     measure("block_sparse", workloads::block_sparse);
@@ -35,7 +38,7 @@ fn main() -> ! {
     loop {}
 }
 
-fn measure(mut label: &'static str, mut workload: impl FnMut() -> usize) {
+fn measure(label: &'static str, mut workload: impl FnMut() -> usize) {
     let mut minimum = u32::MAX;
     let mut object_bytes = 0usize;
 
@@ -48,9 +51,6 @@ fn measure(mut label: &'static str, mut workload: impl FnMut() -> usize) {
         minimum = minimum.min(elapsed);
     }
 
-    if minimum == u32::MAX {
-        label = "invalid";
-    }
     hprintln!(
         "stack-algebra cortex-m bench: workload={} cycles_min={} iterations={} object_bytes={}",
         label,
