@@ -31,7 +31,11 @@ if [ -z "${EIGEN3_INCLUDE_DIR:-}" ] || [ ! -d "$EIGEN3_INCLUDE_DIR" ]; then
     exit 2
 fi
 
-if [ "${ALLOW_DIRTY_BENCHMARK:-0}" != 1 ] && [ -n "$(git status --porcelain)" ]; then
+source_dirty=false
+if [ -n "$(git status --porcelain)" ]; then
+    source_dirty=true
+fi
+if [ "${ALLOW_DIRTY_BENCHMARK:-0}" != 1 ] && [ "$source_dirty" = true ]; then
     echo "release benchmarks require a clean checkout (set ALLOW_DIRTY_BENCHMARK=1 only for exploratory runs)" >&2
     exit 2
 fi
@@ -88,7 +92,7 @@ lock_sha=$(sha256sum Cargo.lock | awk '{print $1}')
     printf 'machine_id=%s\n' "$machine_id"
     printf 'commit=%s\n' "$commit"
     printf 'ref=%s\n' "$ref"
-    printf 'git_dirty=%s\n' "$(if test -n "$(git status --porcelain)"; then echo true; else echo false; fi)"
+    printf 'source_dirty=%s\n' "$source_dirty"
     printf 'runner_name=%s\n' "${RUNNER_NAME:-local}"
     printf 'runner_os=%s\n' "${RUNNER_OS:-$(uname -s)}"
     printf 'runner_arch=%s\n' "${RUNNER_ARCH:-$(uname -m)}"
@@ -116,6 +120,7 @@ python3 scripts/generate_benchmark_report.py \
     --metadata-file "$report_dir/provenance.txt" \
     --require-eigen
 
+cp -R "$criterion_dir" "$raw_dir/criterion"
 cp Cargo.lock "$report_dir/Cargo.lock"
 printf '%s\n' "$commit" > "$report_dir/commit.txt"
 printf 'Release benchmark report: %s\n' "$report_dir"
