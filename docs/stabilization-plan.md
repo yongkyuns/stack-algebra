@@ -26,6 +26,8 @@ The development version is `0.3.0-alpha.1` while intentional contract changes ar
 - PR semver/API compatibility checking against the base revision.
 - Compile-time rejection tests for incompatible dimensions/scalars.
 - Public API smoke coverage across dense, bounded, view, solver, geometry, and sparse entry points.
+- Rust 1.87 is the tested/declarative MSRV for both `no_std` and `std` library configurations.
+- A guarded manual release workflow verifies the requested version, package, tests, docs, examples, and optional crates.io publication.
 - Manual release-artifact workflow with pinned tools, generated dependency lock, package verification, human-readable API snapshot, rustdoc JSON, dependency metadata, and provenance.
 
 ### Numerical qualification
@@ -49,12 +51,14 @@ The development version is `0.3.0-alpha.1` while intentional contract changes ar
 - Arbitrary/padded strides remain on the generic zero-copy path.
 - `axpy_in_place`, `axpy_into`, and `linear_combination_into` cover common estimation/control forms.
 - Focused fused-operation benchmarks are part of regression triage.
+- Representative EKF, mapped least-squares, and embedded storage-budget examples execute in normal CI and serve as workload probes for later performance/API work.
 
 ### Embedded/resource qualification
 
 - Cross-target builds and representative Cortex-M/RISC-V32/AArch64 QEMU smoke execution.
 - Reproducible Cortex-M isolated workload tables for code/static size and painted-stack high-water marks.
-- Source/tool/build provenance captured with those reports.
+- Per-workload Cortex-M text and painted-stack budgets are enforced on a pinned Rust 1.98.0 qualification toolchain to catch accidental resource explosions.
+- Source/tool/build provenance is captured with those reports.
 - A physical Cortex-M DWT timing harness shares the same workload definitions and is kept buildable in CI.
 
 Physical timing has not been measured on a named board. That absence is documented as an evidence limitation rather than represented as a failed portable-library qualification.
@@ -71,7 +75,9 @@ A pinned-machine run is required before publishing cross-library performance cla
 - [x] Every public solver family has invariant-based numerical evidence.
 - [x] Common failure semantics and bounded/sparse capacity failures are documented/tested.
 - [x] README/docs state the supported workload envelope and avoid general Eigen/faer replacement language.
-- [x] Cortex-M QEMU/static resource evidence is reproducible and provenance-carrying.
+- [x] Rust 1.87 MSRV is declared and continuously tested.
+- [x] Representative robotics/embedded examples execute in CI.
+- [x] Cortex-M QEMU/static resource evidence is reproducible, provenance-carrying, and protected by regression budgets.
 - [x] A physical Cortex-M timing harness exists and remains buildable.
 - [ ] Capture the release artifact snapshot for the **exact** `0.3.0` release commit.
 - [ ] Run pinned-host release benchmarks for the exact release commit **if** cross-library release performance claims will be published.
@@ -81,9 +87,9 @@ A named physical embedded target measurement is **not a `0.3` release blocker**.
 
 ## Follow-up work
 
-- Establish an MSRV only after testing the actual dependency/toolchain floor.
+- Use the representative workload examples to decide whether GEMM-like accumulation materially reduces temporaries/runtime.
 - Add broader leading-dimension/layout kernels only with measured benefit.
-- Add GEMM-like accumulate operations only for demonstrated workloads.
+- Add sparse symbolic/workspace preflight sizing where it materially improves fixed-capacity planning.
 - Add another ISA family only with maintainable validation.
 - Record physical Cortex-M and a second real target when hardware becomes available.
 - Continue to defer heap-owning fully dynamic matrices, general expression templates, general runtime sparse indefinite solving, GPU backends, and per-shape kernels without measured need.
