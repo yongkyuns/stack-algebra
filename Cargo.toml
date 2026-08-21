@@ -1,11 +1,11 @@
 [package]
 name = "stack-algebra"
 authors = ["Yongkyun Shin <yongkyuns@gmail.com>"]
-description = "Stack-allocated lightweight algebra for bare-metal rust"
+description = "Inline-storage linear algebra for no_std and embedded Rust"
 repository = "https://github.com/yongkyuns/stack-algebra"
 documentation = "https://docs.rs/stack-algebra"
 readme = "README.md"
-version = "0.2.0"
+version = "0.3.0-alpha.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 categories = ["mathematics", "science", "no-std"]
