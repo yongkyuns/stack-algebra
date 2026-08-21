@@ -15,6 +15,7 @@
 - [Tutorials](tutorials.md)
 - [API usage](api-usage.md)
 - [Custom scalar extensions](scalar-extension.md)
+- [Fused operations and mapped-view fast paths](fused-operations.md)
 - [Use cases](use-cases.md)
 
 ## Validation
