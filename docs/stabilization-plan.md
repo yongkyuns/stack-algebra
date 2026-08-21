@@ -36,6 +36,10 @@ The release should establish four contracts:
 4. **Scope contract** — unsupported workloads are stated directly instead of
    being implied by broad Eigen/faer parity language.
 
+The active development line is versioned as `0.3.0-alpha.1` while intentional
+breaking contract changes are being made. In particular, sparse capacity errors
+now carry `required` and `capacity` fields rather than being unit variants.
+
 ## Priority 0 — freeze and measure the current surface
 
 ### API/release gates
@@ -192,20 +196,23 @@ Until a real workload demonstrates need, continue to defer:
 - [x] Document this stabilization plan.
 - [x] Add a PR semver/API compatibility gate against the base revision.
 - [x] Add invariant coverage around small-matrix/packet-boundary dimensions.
-- [ ] Expand the curated public API smoke test to bounded, geometry, and sparse
+- [x] Expand the curated public API smoke test to bounded, geometry, and sparse
       entry points.
 - [ ] Add release benchmark metadata/version pinning beyond the nightly triage
       workflow.
 
 ### Slice B — bounded and sparse diagnostics
 
-- [ ] Add `MatrixBuf::resize_zeroed`.
-- [ ] Add `MatrixBuf::resize_with`.
-- [ ] Preserve current `resize` semantics through `0.2.x`; decide the `0.3`
-      naming/deprecation path explicitly.
-- [ ] Add detailed sparse capacity exhaustion errors.
-- [ ] Add tests that distinguish capacity exhaustion, unsupported pivot model,
-      and numerical failure.
+- [x] Add `MatrixBuf::resize_zeroed`.
+- [x] Add `MatrixBuf::resize_with`.
+- [x] Keep `resize` as the explicit storage-preserving form while initialized
+      growth uses the new APIs; revisit naming only if real migration feedback
+      shows ambiguity before `0.3.0`.
+- [x] Add detailed sparse capacity exhaustion errors with `required` and
+      `capacity` for CSC construction/insertion, scalar expansion, symbolic
+      factor fill, and block-sparse permutation/fill paths.
+- [x] Add exact capacity-contract tests for CSC storage and symbolic Cholesky
+      fill alongside existing numerical/pivot failure tests.
 
 ### Slice C — public scalar/kernel boundary
 
