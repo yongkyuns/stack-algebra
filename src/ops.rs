@@ -165,11 +165,7 @@ where
     /// Multiplies two contiguous column-major maps using the same optimized
     /// kernel path as owned matrices.
     #[inline]
-    pub fn mul_into<const P: usize>(
-        &self,
-        rhs: &Map<'_, N, P, T>,
-        output: &mut Matrix<M, P, T>,
-    ) {
+    pub fn mul_into<const P: usize>(&self, rhs: &Map<'_, N, P, T>, output: &mut Matrix<M, P, T>) {
         let lhs = column_major_matrix_ref(self.as_slice())
             .expect("Map storage always matches its compile-time matrix shape");
         let rhs = column_major_matrix_ref(rhs.as_slice())
