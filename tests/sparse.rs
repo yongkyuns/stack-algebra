@@ -102,7 +102,21 @@ fn capacity_and_index_errors_are_reported() {
     let mut matrix = StaticCscMatrix::<2, 2, 2, f64>::new();
     matrix.insert(0, 0, 1.0).unwrap();
     matrix.insert(1, 1, 2.0).unwrap();
-    assert_eq!(matrix.insert(0, 1, 3.0), Err(CscError::CapacityExceeded));
+    assert_eq!(
+        matrix.insert(0, 1, 3.0),
+        Err(CscError::CapacityExceeded {
+            required: 3,
+            capacity: 2,
+        })
+    );
+
+    assert_eq!(
+        StaticCscPattern::<2, 2, 1>::from_arrays(&[0, 1], &[0, 1, 2]),
+        Err(CscError::CapacityExceeded {
+            required: 2,
+            capacity: 1,
+        })
+    );
 
     assert_eq!(matrix.insert(2, 0, 1.0), Err(CscError::IndexOutOfBounds));
     assert_eq!(matrix.insert(0, 2, 1.0), Err(CscError::IndexOutOfBounds));
