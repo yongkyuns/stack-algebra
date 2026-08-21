@@ -39,4 +39,6 @@ jobs:
       - name: Check no_std core
         run: cargo check --no-default-features
       - name: Run public API and invariant contracts
-        run: cargo test --no-default-features --test public_api --test numerical_contracts --test stabilization_contracts
+        run: cargo test --no-default-features --test public_api --test numerical_contracts --test stabilization_contracts --test fused_view_paths
+      - name: Check focused benchmark harness
+        run: cargo check --all-features --bench fused
