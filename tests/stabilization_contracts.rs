@@ -1,11 +1,13 @@
-//! Stabilization tests for numerical behavior across representative small shapes.
+//! Stabilization tests for numerical behavior and capacity contracts.
 //!
-//! These tests intentionally focus on mathematical invariants rather than
+//! Numerical tests intentionally focus on mathematical invariants rather than
 //! factor-storage parity with another library. The dimensions straddle common
 //! SIMD packet widths so optimized and scalar-tail paths remain covered by the
 //! same solve contract.
 
-use stack_algebra::{Cholesky, Matrix};
+use stack_algebra::{
+    Cholesky, CscError, Matrix, StaticBlockCscMatrix, StaticBlockCsrMatrix,
+};
 
 fn check_cholesky_f64<const N: usize>() {
     let seed = Matrix::<N, N, f64>::from_fn(|row, column| {
@@ -68,4 +70,36 @@ fn f32_cholesky_contract_straddles_eight_lane_boundary() {
     check_cholesky_f32::<7>();
     check_cholesky_f32::<8>();
     check_cholesky_f32::<9>();
+}
+
+#[test]
+fn block_sparse_constructors_report_required_capacity() {
+    let block = Matrix::from_rows([[1.0_f32]]);
+    let values = [block, block];
+
+    let csc = StaticBlockCscMatrix::<1, 1, 2, 2, 1, f32>::from_pattern(
+        &values,
+        &[0, 1],
+        &[0, 1, 2],
+    );
+    assert_eq!(
+        csc,
+        Err(CscError::CapacityExceeded {
+            required: 2,
+            capacity: 1,
+        })
+    );
+
+    let csr = StaticBlockCsrMatrix::<1, 1, 2, 2, 1, f32>::from_pattern(
+        &values,
+        &[0, 1],
+        &[0, 1, 2],
+    );
+    assert_eq!(
+        csr,
+        Err(CscError::CapacityExceeded {
+            required: 2,
+            capacity: 1,
+        })
+    );
 }
