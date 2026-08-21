@@ -14,6 +14,7 @@
 
 - [Tutorials](tutorials.md)
 - [API usage](api-usage.md)
+- [Custom scalar extensions](scalar-extension.md)
 - [Use cases](use-cases.md)
 
 ## Validation
