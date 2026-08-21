@@ -20,7 +20,7 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 2
 fi
 
-if ! rustup toolchain list | awk '{print $1}' | grep -qx "$nightly"; then
+if ! rustc +"$nightly" --version >/dev/null 2>&1; then
     echo "Rust toolchain $nightly is required" >&2
     exit 2
 fi
