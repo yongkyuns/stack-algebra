@@ -1,0 +1,43 @@
+name: Release artifact qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts
+  cancel-in-progress: false
+
+jobs:
+  artifacts:
+    name: Package and public API snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PUBLIC_API_NIGHTLY: nightly-2026-08-20
+      PUBLIC_API_TOOL_VERSION: 0.51.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Install pinned public API toolchain
+        run: |
+          rustup toolchain install "$PUBLIC_API_NIGHTLY" --profile minimal
+          cargo install cargo-public-api --version "$PUBLIC_API_TOOL_VERSION" --locked
+      - name: Build release artifacts
+        run: sh scripts/build_release_artifacts.sh
+      - name: Add provenance to job summary
+        run: |
+          printf '### Release artifact provenance\n\n```text\n' >> "$GITHUB_STEP_SUMMARY"
+          cat release-artifacts/provenance.txt >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload qualified release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ github.sha }}
+          path: release-artifacts
+          if-no-files-found: error
+          retention-days: 90
