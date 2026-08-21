@@ -6,7 +6,7 @@ All notable changes to `stack-algebra` are documented here. The project follows 
 
 ### Added
 
-- Rust 1.85 minimum-supported-Rust-version declaration and CI gate.
+- Rust 1.87 minimum-supported-Rust-version declaration and CI gate.
 - Executable estimation, mapped least-squares, and embedded resource-budget examples.
 - Guarded manual release workflow with version verification, package validation, and optional crates.io publication.
 - Reproducible Cortex-M code-size and stack regression budgets on the pinned qualification toolchain.
