@@ -37,8 +37,11 @@ The release should establish four contracts:
    being implied by broad Eigen/faer parity language.
 
 The active development line is versioned as `0.3.0-alpha.1` while intentional
-breaking contract changes are being made. In particular, sparse capacity errors
-now carry `required` and `capacity` fields rather than being unit variants.
+breaking contract changes are being made. Sparse capacity errors now carry
+`required` and `capacity` fields rather than being unit variants. Scalar
+extensions also explicitly opt into the portable factor/update contract through
+`FactorizationScalar`; `MatrixScalar` no longer owns decomposition-specific
+update hooks.
 
 ## Priority 0 — freeze and measure the current surface
 
@@ -77,19 +80,22 @@ now carry `required` and `capacity` fields rather than being unit variants.
 
 ### Scalar/kernel separation
 
-`MatrixScalar` and `ReductionScalar` currently serve both as public scalar bounds
-and as dispatch hooks for optimized implementation details. Before `0.3` is
-considered stable:
+The scalar contract is split by operation family rather than exposing one trait
+that owns every backend hook:
 
-- define the supported external scalar contract explicitly;
-- keep floating-point ISA dispatch private;
-- separate matrix-product, reduction, triangular, and factor-update kernel
-  families internally;
-- allow custom scalars to use a portable path without requiring downstream code
-  to understand SIMD/backend mechanics.
+- `FactorizationScalar` is the portable factor/update opt-in. Downstream scalar
+  types can implement it with an empty impl and use the default scalar loops.
+- `MatrixScalar` owns matrix-product and Gram/dot accumulation behavior and has
+  `FactorizationScalar` as a supertrait.
+- `ReductionScalar` owns vector reductions and matrix-vector products.
+- x86 and NEON implementations override the relevant trait methods at compile
+  time; downstream code does not name architecture-specific backend types.
 
-This is a breaking-API candidate and should be implemented deliberately with a
-migration note rather than incrementally leaking more backend hooks.
+This keeps the external extension path usable on stable Rust without runtime
+`TypeId` dispatch or unsafe type erasure. The remaining `MatrixScalar` and
+`ReductionScalar` implementation hooks are intentionally retained for now so
+floating-point specialization stays compile-time. Further sealing should be
+driven by codegen/performance evidence rather than API aesthetics alone.
 
 ### Failure and mutation conventions
 
@@ -216,10 +222,17 @@ Until a real workload demonstrates need, continue to defer:
 
 ### Slice C — public scalar/kernel boundary
 
-- [ ] Define the supported scalar extension contract.
-- [ ] Move ISA/factor-update hooks behind private kernel families.
-- [ ] Add compile tests for one representative external scalar implementation.
-- [ ] Record the migration as an intentional `0.3` API change.
+- [x] Define the supported scalar extension contract as explicit factorization,
+      matrix-product, and reduction traits with portable defaults.
+- [x] Separate factor/update hooks from `MatrixScalar` while preserving private
+      ISA backend types and compile-time x86/NEON specialization.
+- [x] Add an integration test for a representative external scalar that uses
+      only public traits and portable defaults.
+- [x] Record the `FactorizationScalar` supertrait requirement as an intentional
+      `0.3` API migration.
+- [ ] Evaluate further sealing of matrix-product/reduction hooks only with
+      benchmark and codegen evidence; do not add runtime type dispatch merely
+      to hide implementation details.
 
 ### Slice D — views and fused operations
 
