@@ -107,7 +107,8 @@ fn external_scalar_uses_portable_contract_without_backend_types() {
         Matrix::from_rows([[ExternalScalar(17)], [ExternalScalar(39)]])
     );
 
-    let vector = Matrix::<2, 1, ExternalScalar>::from_rows([[ExternalScalar(5)], [ExternalScalar(6)]]);
+    let vector =
+        Matrix::<2, 1, ExternalScalar>::from_rows([[ExternalScalar(5)], [ExternalScalar(6)]]);
     assert_eq!(
         lhs.matvec(&vector),
         Matrix::from_rows([[ExternalScalar(17)], [ExternalScalar(39)]])
