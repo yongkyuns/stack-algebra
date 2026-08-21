@@ -43,6 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       STACK_USAGE_LIMIT_BYTES: 8192
+      QUALIFICATION_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
