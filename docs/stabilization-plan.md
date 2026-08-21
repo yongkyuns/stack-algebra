@@ -121,11 +121,19 @@ Specific cleanup targets:
 
 Do **not** build a general Eigen-style expression-template system.
 
-Instead add a small set of fused operations that map directly to estimation and
-control loops, such as:
+The first explicit fused operations are now the common estimation/control forms:
 
-- `axpy_into` / scaled accumulation;
-- linear-combination output operations;
+- `axpy_in_place` for `y += alpha * x`;
+- `axpy_into` for `alpha * x + y` into distinct caller storage;
+- `linear_combination_into` for `alpha * x + beta * y`.
+
+They use `MatrixScalar::mul_add`, preserving the built-in floating-point fused
+multiply-add path where the selected target supports it. A focused Criterion
+suite compares these methods with their expression equivalents rather than
+assuming that removing a temporary is always faster.
+
+Continue to consider only workload-driven additions such as:
+
 - GEMM-like `C = alpha * A * B + beta * C`;
 - reusable multi-RHS solve/update paths where profiling shows material benefit.
 
@@ -134,18 +142,28 @@ eliminating avoidable temporary matrices in hot loops.
 
 ## Priority 3 — make zero-copy views a performance path
 
-Maps, blocks, and compatible strided views should be able to reach optimized
-kernels without first materializing an owned matrix.
+The first mapped-view fast path is intentionally narrower than a general layout
+abstraction. `Map` is already guaranteed to be exact column-major contiguous,
+and a `StridedMap` can be recognized at runtime when its strides are exactly
+`inner_stride = 1` and `outer_stride = rows`. Direct product methods for those
+concrete mapped types reinterpret the validated storage as the same fixed-size
+layout used by `Matrix` and therefore reuse the existing compile-time-selected
+matrix/matvec kernels without copying.
 
-Introduce internal layout capabilities such as:
+Padded column-major, row-major, and arbitrary-stride views remain zero-copy but
+currently use the generic `MatrixRead` loops. The free `matmul_view_into` and
+`matvec_view_into` functions likewise remain the fully generic path. This avoids
+silently materializing an owned matrix merely to claim optimized view support.
 
-- contiguous column-major;
+A broader internal layout capability should only be introduced when it unlocks
+a measured kernel family, for example:
+
 - contiguous with a leading dimension;
-- arbitrary stride.
+- arbitrary stride with a profitable specialized traversal.
 
-Safe public construction should establish bounds/aliasing invariants once;
-inner loops should then use trusted in-bounds access. Owned and compatible mapped
-inputs should converge on the same kernel families where layout permits it.
+Safe public construction should continue to establish bounds/aliasing
+invariants once; optimized concrete paths must preserve those invariants without
+runtime type dispatch or unsafe type erasure.
 
 ## Priority 4 — sparse/block-sparse ergonomics
 
@@ -236,9 +254,16 @@ Until a real workload demonstrates need, continue to defer:
 
 ### Slice D — views and fused operations
 
-- [ ] Add internal layout classification for owned/maps/strided views.
-- [ ] Route compatible views through optimized kernels.
-- [ ] Add `axpy_into`/linear-combination primitives.
+- [x] Detect exact column-major contiguous `Map`/`StridedMap` storage for
+      zero-copy reuse of the owned matrix kernels.
+- [x] Route compatible mapped matrix products and matvecs through those existing
+      optimized kernels; keep padded/arbitrary strides on the generic zero-copy
+      fallback rather than repacking.
+- [x] Add `axpy_in_place`, `axpy_into`, and `linear_combination_into` primitives.
+- [x] Add focused 6x6, 15x15, and 32x32 Criterion coverage and include it in
+      nightly benchmark triage.
+- [ ] Add a leading-dimension or broader layout kernel only if benchmark evidence
+      shows it materially improves mapped workloads.
 - [ ] Add a GEMM-like accumulate primitive only after benchmark evidence.
 
 ### Slice E — target qualification
