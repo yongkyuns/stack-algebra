@@ -284,7 +284,10 @@ pub(super) fn permute_block_matrix<
         for row in column..BLOCK_GRID_ROWS {
             if present[column][row] {
                 if position == MAX_BLOCK_NNZ {
-                    return Err(SparseCholeskyError::CapacityExceeded);
+                    return Err(SparseCholeskyError::CapacityExceeded {
+                        required: position.saturating_add(1),
+                        capacity: MAX_BLOCK_NNZ,
+                    });
                 }
                 row_indices[position] = row as u32;
                 values[position] = mapped[column][row];
