@@ -39,7 +39,8 @@ lock_sha=$(sha256sum Cargo.lock | awk '{print $1}')
 rm -rf "$out_dir" target/package
 mkdir -p "$out_dir"
 
-commit=$(git rev-parse HEAD)
+checkout_commit=$(git rev-parse HEAD)
+source_commit=${QUALIFICATION_SOURCE_SHA:-$checkout_commit}
 ref=$(git symbolic-ref --short -q HEAD || git describe --always --exact-match 2>/dev/null || printf detached)
 
 cargo +"$nightly" public-api -sss > "$out_dir/public-api.txt"
@@ -58,7 +59,8 @@ fi
 cp "$package" "$out_dir/"
 
 {
-    printf 'commit=%s\n' "$commit"
+    printf 'source_commit=%s\n' "$source_commit"
+    printf 'checkout_commit=%s\n' "$checkout_commit"
     printf 'ref=%s\n' "$ref"
     printf 'cargo_lock_sha256=%s\n' "$lock_sha"
     printf 'rustc=%s\n' "$(rustc --version)"
@@ -73,4 +75,5 @@ cp "$package" "$out_dir/"
 } > "$out_dir/provenance.txt"
 
 cp Cargo.lock "$out_dir/Cargo.lock"
+printf '%s\n' "$source_commit" > "$out_dir/source-commit.txt"
 printf 'Release artifacts written to %s\n' "$out_dir"
