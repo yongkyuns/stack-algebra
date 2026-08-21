@@ -22,6 +22,7 @@ jobs:
     env:
       PUBLIC_API_NIGHTLY: nightly-2026-08-20
       PUBLIC_API_TOOL_VERSION: 0.51.0
+      QUALIFICATION_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +42,7 @@ jobs:
       - name: Upload qualified release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts-${{ github.sha }}
+          name: release-artifacts-${{ github.event.pull_request.head.sha || github.sha }}
           path: release-artifacts
           if-no-files-found: error
           retention-days: 90
