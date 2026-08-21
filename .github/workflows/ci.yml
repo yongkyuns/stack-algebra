@@ -68,12 +68,17 @@ jobs:
           --target thumbv7em-none-eabihf --release --features cortex-m
           --bin cortex-m-bench
       - name: Add resource report to job summary
-        run: cat qemu-tests/resource-report.md >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          printf '### Cortex-M resource provenance\n\n```text\n' >> "$GITHUB_STEP_SUMMARY"
+          cat qemu-tests/resource-provenance.txt >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n\n### Cortex-M resource report\n\n' >> "$GITHUB_STEP_SUMMARY"
+          cat qemu-tests/resource-report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Cortex-M resource report
         uses: actions/upload-artifact@v4
         with:
           name: cortex-m-resource-report
           path: |
+            qemu-tests/resource-provenance.txt
             qemu-tests/resource-report.tsv
             qemu-tests/resource-report.md
           if-no-files-found: error

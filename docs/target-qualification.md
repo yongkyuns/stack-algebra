@@ -40,9 +40,11 @@ qemu-tests/qualify_cortex_m.sh
 ```
 
 The script requires the Rust target, QEMU, `llvm-tools-preview`, and
-`cargo-binutils`/`rust-size`. CI uploads both `resource-report.tsv` and
-`resource-report.md` as the `cortex-m-resource-report` artifact and also writes
-the Markdown table into the workflow job summary.
+`cargo-binutils`/`rust-size`. CI uploads `resource-provenance.txt`,
+`resource-report.tsv`, and `resource-report.md` as the
+`cortex-m-resource-report` artifact and writes the provenance plus table into
+the workflow job summary. Provenance records the commit, target, Rust/Cargo,
+`rust-size`, QEMU, release profile, input `RUSTFLAGS`, and stack ceiling.
 
 ### Reported fields
 

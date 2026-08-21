@@ -7,9 +7,10 @@ target="thumbv7em-none-eabihf"
 target_dir="$repo_root/qemu-tests/target/qualification"
 report_tsv="$repo_root/qemu-tests/resource-report.tsv"
 report_md="$repo_root/qemu-tests/resource-report.md"
+provenance="$repo_root/qemu-tests/resource-provenance.txt"
 stack_limit=${STACK_USAGE_LIMIT_BYTES:-8192}
 
-for command in cargo qemu-system-arm rust-size rustup; do
+for command in cargo qemu-system-arm rust-size rustc rustup; do
     command -v "$command" >/dev/null 2>&1 || {
         echo "$command is required" >&2
         exit 2
@@ -27,6 +28,22 @@ case "$stack_limit" in
         exit 2
         ;;
 esac
+
+commit=unknown
+if command -v git >/dev/null 2>&1; then
+    commit=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || printf unknown)
+fi
+{
+    printf 'commit=%s\n' "$commit"
+    printf 'target=%s\n' "$target"
+    printf 'rustc=%s\n' "$(rustc --version)"
+    printf 'cargo=%s\n' "$(cargo --version)"
+    printf 'rust_size=%s\n' "$(rust-size --version 2>/dev/null || printf unknown)"
+    printf 'qemu=%s\n' "$(qemu-system-arm --version | head -n 1)"
+    printf 'profile=release opt-level=z lto=true codegen-units=1 debug=true\n'
+    printf 'rustflags=%s\n' "${RUSTFLAGS:-}"
+    printf 'stack_limit_bytes=%s\n' "$stack_limit"
+} > "$provenance"
 
 printf 'workload\ttext_bytes\ttext_delta\tdata_bytes\tdata_delta\tbss_bytes\tbss_delta\tflash_bytes\tstack_used\tstack_limit\tobject_bytes\n' > "$report_tsv"
 
@@ -103,5 +120,7 @@ NR > 1 {
 }
 ' "$report_tsv" > "$report_md"
 
+printf '\nCortex-M resource provenance:\n'
+cat "$provenance"
 printf '\nCortex-M resource report:\n'
 cat "$report_md"
