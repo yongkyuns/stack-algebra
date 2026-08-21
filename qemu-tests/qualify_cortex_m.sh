@@ -8,7 +8,7 @@ target_dir="$repo_root/qemu-tests/target/qualification"
 report_tsv="$repo_root/qemu-tests/resource-report.tsv"
 report_md="$repo_root/qemu-tests/resource-report.md"
 provenance="$repo_root/qemu-tests/resource-provenance.txt"
-stack_limit=${STACK_USAGE_LIMIT_BYTES:-8192}
+global_stack_limit=${STACK_USAGE_LIMIT_BYTES:-8192}
 
 for command in cargo qemu-system-arm rust-size rustc rustup; do
     command -v "$command" >/dev/null 2>&1 || {
@@ -22,7 +22,7 @@ if ! rustup target list --installed | grep -qx "$target"; then
     exit 2
 fi
 
-case "$stack_limit" in
+case "$global_stack_limit" in
     ''|*[!0-9]*)
         echo "STACK_USAGE_LIMIT_BYTES must be a non-negative integer" >&2
         exit 2
@@ -44,16 +44,30 @@ source_commit=${QUALIFICATION_SOURCE_SHA:-$checkout_commit}
     printf 'qemu=%s\n' "$(qemu-system-arm --version | head -n 1)"
     printf 'profile=release opt-level=z lto=true codegen-units=1 debug=true\n'
     printf 'rustflags=%s\n' "${RUSTFLAGS:-}"
-    printf 'stack_limit_bytes=%s\n' "$stack_limit"
+    printf 'global_stack_limit_bytes=%s\n' "$global_stack_limit"
+    printf 'budget_policy=pinned Rust 1.98.0 workload ceilings with deliberate review for increases\n'
 } > "$provenance"
 
-printf 'workload\ttext_bytes\ttext_delta\tdata_bytes\tdata_delta\tbss_bytes\tbss_delta\tflash_bytes\tstack_used\tstack_limit\tobject_bytes\n' > "$report_tsv"
+printf 'workload\ttext_bytes\ttext_limit\ttext_delta\tdata_bytes\tdata_delta\tbss_bytes\tbss_delta\tflash_bytes\tstack_used\tstack_limit\tobject_bytes\n' > "$report_tsv"
 
 baseline_text=
 baseline_data=
 baseline_bss=
 
 for profile in baseline dense3 dense6 dense6-f64 dense15 sparse block-sparse; do
+    case "$profile" in
+        baseline) text_limit=5200; stack_limit=256 ;;
+        dense3) text_limit=11500; stack_limit=768 ;;
+        dense6) text_limit=7500; stack_limit=1500 ;;
+        dense6-f64) text_limit=10000; stack_limit=2600 ;;
+        dense15) text_limit=7600; stack_limit=7200 ;;
+        sparse) text_limit=22500; stack_limit=3500 ;;
+        block-sparse) text_limit=10000; stack_limit=512 ;;
+    esac
+    if [ "$stack_limit" -gt "$global_stack_limit" ]; then
+        stack_limit=$global_stack_limit
+    fi
+
     feature="resource-$profile"
     binary="$target_dir/$target/release/cortex-m-resource"
 
@@ -90,8 +104,12 @@ for profile in baseline dense3 dense6 dense6-f64 dense15 sparse block-sparse; do
         echo "malformed resource result for $profile: $line" >&2
         exit 1
     fi
+    if [ "$text" -gt "$text_limit" ]; then
+        echo "$profile text size ($text bytes) exceeds budget ($text_limit bytes)" >&2
+        exit 1
+    fi
     if [ "$stack_used" -gt "$stack_limit" ]; then
-        echo "$profile stack usage ($stack_used bytes) exceeds configured limit ($stack_limit bytes)" >&2
+        echo "$profile stack usage ($stack_used bytes) exceeds budget ($stack_limit bytes)" >&2
         exit 1
     fi
 
@@ -107,18 +125,19 @@ for profile in baseline dense3 dense6 dense6-f64 dense15 sparse block-sparse; do
     flash_bytes=$((text + data))
     workload=$(printf '%s' "$profile" | tr '-' '_')
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$workload" "$text" "$text_delta" "$data" "$data_delta" "$bss" "$bss_delta" \
-        "$flash_bytes" "$stack_used" "$stack_limit" "$object_bytes" >> "$report_tsv"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$workload" "$text" "$text_limit" "$text_delta" "$data" "$data_delta" \
+        "$bss" "$bss_delta" "$flash_bytes" "$stack_used" "$stack_limit" \
+        "$object_bytes" >> "$report_tsv"
 done
 
 awk -F '\t' '
 BEGIN {
-    print "| workload | text B | Δtext B | data B | Δdata B | bss B | Δbss B | flash B | peak stack B | object B |";
-    print "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |";
+    print "| workload | text B | text budget B | Δtext B | data B | Δdata B | bss B | Δbss B | flash B | peak stack B | stack budget B | object B |";
+    print "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |";
 }
 NR > 1 {
-    printf "| `%s` | %s | %+d | %s | %+d | %s | %+d | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $11;
+    printf "| `%s` | %s | %s | %+d | %s | %+d | %s | %+d | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12;
 }
 ' "$report_tsv" > "$report_md"
 
