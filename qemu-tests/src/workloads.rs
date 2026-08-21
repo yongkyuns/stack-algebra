@@ -1,9 +1,7 @@
 use core::hint::black_box;
 use core::mem::size_of_val;
 
-use stack_algebra::{
-    Matrix, StaticBlockCscMatrix, StaticCscCholesky, StaticCscMatrix, Vector,
-};
+use stack_algebra::{Matrix, StaticBlockCscMatrix, StaticCscCholesky, StaticCscMatrix, Vector};
 
 #[inline(never)]
 pub fn baseline() -> usize {
@@ -12,11 +10,8 @@ pub fn baseline() -> usize {
 
 #[inline(never)]
 pub fn dense3() -> usize {
-    let matrix = Matrix::<3, 3, f32>::from_rows([
-        [4.0, 1.0, 0.5],
-        [1.0, 3.0, 0.25],
-        [0.5, 0.25, 2.0],
-    ]);
+    let matrix =
+        Matrix::<3, 3, f32>::from_rows([[4.0, 1.0, 0.5], [1.0, 3.0, 0.25], [0.5, 0.25, 2.0]]);
     let rhs = Vector::<3, f32>::from_columns([[1.0, 2.0, 3.0]]);
     let factor = matrix
         .try_partial_piv_lu()
