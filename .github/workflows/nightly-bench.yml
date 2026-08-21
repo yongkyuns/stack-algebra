@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bench: [comparison, dense_solvers, sparse, block_sparse]
+        bench: [comparison, dense_solvers, sparse, block_sparse, fused]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
