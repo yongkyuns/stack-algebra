@@ -6,6 +6,7 @@
 ## Overview
 
 - [Feature set](features.md)
+- [0.3 stabilization plan](stabilization-plan.md)
 - [Design review and improvement plan](design-review.md)
 - [Roadmap](roadmap.md)
 
