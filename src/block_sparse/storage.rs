@@ -63,8 +63,14 @@ where
         block_row_indices: &[usize],
         block_column_pointers: &[usize],
     ) -> Result<Self, CscError> {
-        if values.len() != block_row_indices.len() || values.len() > MAX_BLOCK_NNZ {
+        if values.len() != block_row_indices.len() {
             return Err(CscError::LengthMismatch);
+        }
+        if values.len() > MAX_BLOCK_NNZ {
+            return Err(CscError::CapacityExceeded {
+                required: values.len(),
+                capacity: MAX_BLOCK_NNZ,
+            });
         }
         let pattern = StaticCscPattern::from_arrays(block_row_indices, block_column_pointers)?;
         let mut output = Self::new();
@@ -245,7 +251,10 @@ where
                     let block = &self.values[index];
                     for local_row in 0..BLOCK_ROWS {
                         if nnz == MAX_SCALAR_NNZ {
-                            return Err(CscError::CapacityExceeded);
+                            return Err(CscError::CapacityExceeded {
+                                required: nnz.saturating_add(1),
+                                capacity: MAX_SCALAR_NNZ,
+                            });
                         }
                         row_indices[nnz] = (block_row * BLOCK_ROWS + local_row) as u32;
                         values[nnz] = block[(local_row, local_column)];
