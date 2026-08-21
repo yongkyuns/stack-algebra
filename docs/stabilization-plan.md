@@ -222,8 +222,10 @@ Until a real workload demonstrates need, continue to defer:
 - [x] Add invariant coverage around small-matrix/packet-boundary dimensions.
 - [x] Expand the curated public API smoke test to bounded, geometry, and sparse
       entry points.
-- [ ] Add release benchmark metadata/version pinning beyond the nightly triage
-      workflow.
+- [x] Add pinned-host release benchmark methodology, provenance, and artifact
+      capture separate from nightly regression triage.
+- [x] Add a release artifact workflow that packages the crate and records both a
+      human-readable public API snapshot and machine-readable rustdoc JSON.
 
 ### Slice B — bounded and sparse diagnostics
 
@@ -268,8 +270,12 @@ Until a real workload demonstrates need, continue to defer:
 
 ### Slice E — target qualification
 
-- [ ] Establish a repeatable real Cortex-M benchmark harness.
-- [ ] Publish resource tables for representative dense and sparse workloads.
+- [x] Establish a repeatable Cortex-M real-hardware benchmark harness using the
+      same representative workloads as emulator qualification.
+- [x] Generate and publish repeatable Cortex-M QEMU/static resource tables for
+      representative dense and sparse workloads with source/tool provenance.
+- [ ] Record timing/resource evidence on a named physical Cortex-M FPU device
+      under a controlled clock.
 - [ ] Add a second real target when maintainable.
 
 ## Release gate for 0.3
@@ -280,7 +286,9 @@ Do not call `0.3` stable until:
 - every public solver has invariant-based numerical coverage;
 - failure semantics are predictable for the common APIs;
 - bounded/sparse capacity failures are actionable;
-- release benchmark methodology is reproducible;
-- at least one real embedded target has resource measurements; and
+- the public API/package snapshot is captured for the exact release commit;
+- a pinned-host release benchmark has been run for the exact release commit;
+- at least one named physical embedded target has timing/resource measurements;
+  and
 - the README/docs describe the supported workload envelope without implying
   general Eigen/faer replacement.
