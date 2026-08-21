@@ -15,8 +15,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check
       - run: cargo check --no-default-features
-      - name: Check runnable examples
-        run: cargo check --examples --no-default-features
+      - name: Run representative examples
+        run: |
+          cargo run --example ekf_measurement_update --no-default-features
+          cargo run --example mapped_least_squares --no-default-features
+          cargo run --example embedded_resource_budget --no-default-features
       - name: Check release benchmark script syntax
         run: sh -n scripts/run_release_benchmarks.sh
       - name: Test SSE2 backend without AVX2
