@@ -4,9 +4,9 @@
 
 ## Supported Rust version
 
-The declared MSRV is **Rust 1.85**. CI builds the library with Rust 1.85 for both `no_std` and `std` configurations. Raising the MSRV is a compatibility change and should be called out in the changelog/release notes.
+The declared MSRV is **Rust 1.87**. CI builds the library with Rust 1.87 for both `no_std` and `std` configurations. Raising the MSRV is a compatibility change and should be called out in the changelog/release notes.
 
-The embedded resource qualification toolchain is separately pinned to Rust 1.98.0 so code-size/stack budgets do not drift merely because the hosted `stable` toolchain moves.
+The floor is evidence-based: Rust 1.85 exposed the library's use of `usize::is_multiple_of`, which became stable in Rust 1.87. The embedded resource qualification toolchain is separately pinned to Rust 1.98.0 so code-size/stack budgets do not drift merely because the hosted `stable` toolchain moves.
 
 ## Release candidate checklist
 
