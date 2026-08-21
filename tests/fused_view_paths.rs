@@ -16,11 +16,11 @@ fn fused_matrix_updates_match_equivalent_expressions() {
 
     let mut axpy = Matrix::<2, 2, f64>::zeros();
     x.axpy_into(2.0, &y, &mut axpy);
-    assert_eq!(axpy, 2.0 * x + y);
+    assert_eq!(axpy, x * 2.0 + y);
 
     let mut combination = Matrix::<2, 2, f64>::zeros();
     x.linear_combination_into(2.0, &y, -1.0, &mut combination);
-    assert_eq!(combination, 2.0 * x - y);
+    assert_eq!(combination, x * 2.0 - y);
 }
 
 static MATMUL_DISPATCHES: AtomicUsize = AtomicUsize::new(0);
