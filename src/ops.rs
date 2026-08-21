@@ -46,16 +46,16 @@ fn column_major_matrix_ref<const M: usize, const N: usize, T>(
 }
 
 #[inline]
-fn strided_column_major_matrix_ref<const M: usize, const N: usize, T>(
-    matrix: &StridedMap<'_, M, N, T>,
-) -> Option<&Matrix<M, N, T>> {
+fn strided_column_major_matrix_ref<'a, const M: usize, const N: usize, T>(
+    matrix: &'a StridedMap<'_, M, N, T>,
+) -> Option<&'a Matrix<M, N, T>> {
     if M > 1 && matrix.inner_stride() != 1 {
         return None;
     }
     if N > 1 && matrix.outer_stride() != M {
         return None;
     }
-    column_major_matrix_ref(matrix.as_slice())
+    column_major_matrix_ref::<M, N, T>(matrix.as_slice())
 }
 
 /// Computes `matrix * vector` directly from a fixed-size matrix view.
@@ -166,9 +166,9 @@ where
     /// kernel path as owned matrices.
     #[inline]
     pub fn mul_into<const P: usize>(&self, rhs: &Map<'_, N, P, T>, output: &mut Matrix<M, P, T>) {
-        let lhs = column_major_matrix_ref(self.as_slice())
+        let lhs = column_major_matrix_ref::<M, N, T>(self.as_slice())
             .expect("Map storage always matches its compile-time matrix shape");
-        let rhs = column_major_matrix_ref(rhs.as_slice())
+        let rhs = column_major_matrix_ref::<N, P, T>(rhs.as_slice())
             .expect("Map storage always matches its compile-time matrix shape");
         matmul(lhs, rhs, output);
     }
@@ -181,7 +181,7 @@ where
         rhs: &Matrix<N, P, T>,
         output: &mut Matrix<M, P, T>,
     ) {
-        let lhs = column_major_matrix_ref(self.as_slice())
+        let lhs = column_major_matrix_ref::<M, N, T>(self.as_slice())
             .expect("Map storage always matches its compile-time matrix shape");
         matmul(lhs, rhs, output);
     }
@@ -196,7 +196,7 @@ where
         output: &mut Matrix<M, P, T>,
     ) {
         if let Some(rhs) = strided_column_major_matrix_ref(rhs) {
-            let lhs = column_major_matrix_ref(self.as_slice())
+            let lhs = column_major_matrix_ref::<M, N, T>(self.as_slice())
                 .expect("Map storage always matches its compile-time matrix shape");
             matmul(lhs, rhs, output);
         } else {
@@ -221,7 +221,7 @@ where
     /// Multiplies this contiguous map by a vector into caller-owned output.
     #[inline]
     pub fn matvec_into(&self, vector: &Vector<N, T>, output: &mut Vector<M, T>) {
-        let matrix = column_major_matrix_ref(self.as_slice())
+        let matrix = column_major_matrix_ref::<M, N, T>(self.as_slice())
             .expect("Map storage always matches its compile-time matrix shape");
         matvec(matrix, vector, output);
     }
@@ -275,7 +275,7 @@ where
         output: &mut Matrix<M, P, T>,
     ) {
         if let Some(lhs) = strided_column_major_matrix_ref(self) {
-            let rhs = column_major_matrix_ref(rhs.as_slice())
+            let rhs = column_major_matrix_ref::<N, P, T>(rhs.as_slice())
                 .expect("Map storage always matches its compile-time matrix shape");
             matmul(lhs, rhs, output);
         } else {
@@ -582,7 +582,7 @@ where
         rhs: &Map<'_, N, P, T>,
         output: &mut Matrix<M, P, T>,
     ) {
-        let rhs = column_major_matrix_ref(rhs.as_slice())
+        let rhs = column_major_matrix_ref::<N, P, T>(rhs.as_slice())
             .expect("Map storage always matches its compile-time matrix shape");
         matmul(self, rhs, output);
     }
@@ -754,7 +754,7 @@ mod tests {
 
         let m = matrix![
               2.0_f32, 3.0, 0.0, 9.0, 0.0, 1.0, 0.0, 1.0, 1.0, 2.0, 1.0;
-              1.0, 1.0, 0.0, 3.0, 0.0, 0.0, 0.0, 9.0, 2.0, 3.0, 1.0;
+              1.0, 1.0, 0.0, 3.0, 0.0, 0.0, 9.0, 2.0, 3.0, 1.0;
               1.0, 4.0, 0.0, 2.0, 8.0, 5.0, 0.0, 3.0, 6.0, 1.0, 9.0;
               0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0;
               2.0, 2.0, 4.0, 1.0, 1.0, 2.0, 1.0, 6.0, 9.0, 0.0, 7.0;
