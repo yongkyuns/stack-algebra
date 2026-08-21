@@ -46,9 +46,12 @@ This roadmap reflects the current `0.3.0-alpha.1` development line. `stack-algeb
 ### Validation and release infrastructure
 
 - CI covers formatting, Clippy, host tests, docs, API/semver checks, Miri, cross-target builds, native AArch64 tests, and representative QEMU execution.
-- Cortex-M qualification records isolated code/static size and painted-stack high-water marks with source/tool provenance.
+- Rust 1.85 is the declared MSRV and is built in CI for both `no_std` and `std` library configurations.
+- Three executable robotics/embedded examples are compiled on every PR and serve as workload probes for future API decisions.
+- Cortex-M qualification records isolated code/static size and painted-stack high-water marks with source/tool provenance and per-workload regression budgets on a pinned toolchain.
 - A physical Cortex-M DWT timing harness exists and is kept buildable, but no named-board timing result is currently claimed.
 - Release artifact qualification captures the crate package, generated dependency lock, public API listing, rustdoc JSON, dependency metadata, and provenance.
+- A guarded manual release workflow verifies the requested version and package before optional crates.io publication.
 
 ## 0.3 release priorities
 
@@ -57,9 +60,10 @@ Before publishing `0.3.0`:
 1. Keep API/semver changes intentional and documented.
 2. Keep every public solver covered by invariant-based numerical evidence.
 3. Keep failure and capacity semantics predictable/actionable.
-4. Capture the release artifact snapshot for the exact release commit.
-5. Run the release benchmark workflow on a deliberately pinned machine **before publishing cross-library release performance claims**.
-6. Keep README/docs explicit that QEMU/static resource evidence is not physical-device timing evidence.
+4. Keep the Rust 1.85 MSRV and representative examples green.
+5. Capture the release artifact snapshot for the exact release commit.
+6. Run the release benchmark workflow on a deliberately pinned machine **before publishing cross-library release performance claims**.
+7. Keep README/docs explicit that QEMU/static resource evidence is not physical-device timing evidence.
 
 A physical board measurement is desirable follow-up evidence, but it is **not a portable-library release blocker**. It becomes mandatory before making real-device timing, throughput, or board-specific performance claims.
 
@@ -68,11 +72,11 @@ A physical board measurement is desirable follow-up evidence, but it is **not a 
 Work should be workload-driven rather than assigned to old phase/version buckets.
 
 - Validate optimized kernels on additional maintained architectures before adding new ISA-specific code.
-- Add broader leading-dimension/layout kernels only when benchmarks show material benefit.
-- Add a GEMM-like accumulate API only when a real workload justifies it.
+- Use the runnable estimation examples to decide whether a GEMM-like accumulate API materially reduces temporaries or runtime.
+- Add broader leading-dimension/layout kernels only when mapped-workload benchmarks show material benefit.
+- Add sparse symbolic/workspace preflight sizing where it improves fixed-capacity planning without hiding allocation.
 - Improve sparse/block ordering or cross-block pivot behavior only where bounded storage semantics remain explicit.
 - Add additional physical-target evidence when hardware and maintenance capacity are available.
-- Establish an MSRV only after testing the actual dependency/toolchain floor.
 
 ## Deliberately deferred
 
