@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use core::hint::black_box;
 use core::mem::size_of_val;
 
