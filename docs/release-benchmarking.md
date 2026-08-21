@@ -13,11 +13,11 @@ Do not put that label on interchangeable CI machines. It should identify the
 one host used for a release series, with a documented CPU, firmware/power
 configuration, and OS setup.
 
-The workflow pins Rust 1.98.0 and invokes `scripts/run_release_benchmarks.sh`.
-The runner must already provide Eigen at `/usr/include/eigen3`, Python 3, Git,
-and the normal native build toolchain. Keeping those prerequisites stable is
-part of the machine qualification; the workflow does not mutate the host with
-package-manager upgrades immediately before timing.
+The workflow pins Rust 1.98.0 and invokes the release benchmark script through
+`sh`. The runner must already provide Eigen at `/usr/include/eigen3`, Python 3,
+Git, `sha256sum`, and the normal native build toolchain. Keeping those
+prerequisites stable is part of the machine qualification; the workflow does
+not mutate the host with package-manager upgrades immediately before timing.
 
 The default release measurement profile is deliberately longer than nightly:
 
@@ -37,7 +37,7 @@ Every successful run records `benchmark-report/release/provenance.txt` with:
 
 - an explicit machine identifier (`BENCH_MACHINE_ID` / GitHub runner name);
 - source commit and ref;
-- clean/dirty checkout state;
+- source checkout cleanliness before generated benchmark files are created;
 - runner OS/architecture, CPU model, and kernel;
 - exact Rust and Cargo versions;
 - SHA-256 of the checked-in `Cargo.lock`;
@@ -46,8 +46,8 @@ Every successful run records `benchmark-report/release/provenance.txt` with:
 - Criterion and Eigen measurement parameters.
 
 The workflow also archives the exact `Cargo.lock`, source commit, raw Eigen CSV
-and text output, Criterion measurements consumed by the report, generated CSV,
-and self-contained HTML report. The artifact name includes the source SHA.
+and text output, raw Criterion measurements consumed by the report, generated
+CSV, and self-contained HTML report. The artifact name includes the source SHA.
 
 A release report is not comparable to another report if the machine identity,
 CPU configuration, compiler, ISA flags, dependency lockfile, or benchmark
@@ -61,7 +61,7 @@ The same runner can be invoked directly:
 ```text
 BENCH_MACHINE_ID=my-pinned-benchmark-host \
 EIGEN3_INCLUDE_DIR=/usr/include/eigen3 \
-scripts/run_release_benchmarks.sh
+sh scripts/run_release_benchmarks.sh
 ```
 
 By default the script refuses a dirty Git checkout. `ALLOW_DIRTY_BENCHMARK=1`
