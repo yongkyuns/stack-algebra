@@ -46,7 +46,7 @@ This roadmap reflects the current `0.3.0-alpha.1` development line. `stack-algeb
 ### Validation and release infrastructure
 
 - CI covers formatting, Clippy, host tests, docs, API/semver checks, Miri, cross-target builds, native AArch64 tests, and representative QEMU execution.
-- Rust 1.85 is the declared MSRV and is built in CI for both `no_std` and `std` library configurations.
+- Rust 1.87 is the declared MSRV and is built in CI for both `no_std` and `std` library configurations.
 - Three executable robotics/embedded examples are compiled on every PR and serve as workload probes for future API decisions.
 - Cortex-M qualification records isolated code/static size and painted-stack high-water marks with source/tool provenance and per-workload regression budgets on a pinned toolchain.
 - A physical Cortex-M DWT timing harness exists and is kept buildable, but no named-board timing result is currently claimed.
@@ -60,7 +60,7 @@ Before publishing `0.3.0`:
 1. Keep API/semver changes intentional and documented.
 2. Keep every public solver covered by invariant-based numerical evidence.
 3. Keep failure and capacity semantics predictable/actionable.
-4. Keep the Rust 1.85 MSRV and representative examples green.
+4. Keep the Rust 1.87 MSRV and representative examples green.
 5. Capture the release artifact snapshot for the exact release commit.
 6. Run the release benchmark workflow on a deliberately pinned machine **before publishing cross-library release performance claims**.
 7. Keep README/docs explicit that QEMU/static resource evidence is not physical-device timing evidence.
