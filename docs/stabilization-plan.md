@@ -1,294 +1,89 @@
 # 0.3 stabilization plan
 
-Status: active implementation plan
+Status: software qualification substantially complete; release-candidate evidence remains.
 
-This plan turns the current breadth of `stack-algebra` into a tighter, measurable
-contract before adding more major algorithms. The library already contains a
-substantial dense, bounded, sparse, block-sparse, geometry, SIMD, and embedded
-validation surface. The immediate risk is therefore stabilization debt rather
-than missing feature count.
+`0.3` is a stabilization release for the existing dense, bounded, sparse, block-sparse, geometry, SIMD, and embedded-portability surface. Major algorithm expansion remains secondary to making the current contract predictable and measurable.
 
 The target position is:
 
-> Predictable linear algebra for embedded and robotics workloads: small-to-medium
-> compile-time or tightly bounded matrices, explicit storage and workspace reuse,
-> zero-copy caller buffers, and fixed-capacity sparse/block-sparse solvers that
-> work in `no_std` environments.
-
-The project should not try to become a general replacement for Eigen, nalgebra,
-or faer across dynamic large dense and sparse workloads.
-
-## Release objective
-
-`0.3` is a stabilization release. Major algorithm expansion is paused until the
-existing API, numerical behavior, memory/resource envelope, and performance
-claims have release-quality evidence.
-
-The release should establish four contracts:
-
-1. **API contract** — normal usage has predictable naming and failure behavior,
-   and accidental public API breakage is caught in CI.
-2. **Numerical contract** — correctness is specified by reconstruction,
-   residual, orthogonality, rank, pivot, and convergence invariants rather than
-   element-for-element agreement with one reference implementation.
-3. **Resource contract** — representative operations have measured storage,
-   stack, code-size, and target evidence.
-4. **Scope contract** — unsupported workloads are stated directly instead of
-   being implied by broad Eigen/faer parity language.
-
-The active development line is versioned as `0.3.0-alpha.1` while intentional
-breaking contract changes are being made. Sparse capacity errors now carry
-`required` and `capacity` fields rather than being unit variants. Scalar
-extensions also explicitly opt into the portable factor/update contract through
-`FactorizationScalar`; `MatrixScalar` no longer owns decomposition-specific
-update hooks.
+> Predictable linear algebra for embedded and robotics workloads: small-to-medium compile-time or tightly bounded matrices, explicit storage and workspace reuse, zero-copy caller buffers, and fixed-capacity sparse/block-sparse solvers that work in `no_std` environments.
 
-## Priority 0 — freeze and measure the current surface
-
-### API/release gates
-
-- Add a pull-request semver check against the PR base revision.
-- Keep compile-time rejection tests for incompatible dimensions and scalar types.
-- Expand public API smoke coverage across dense, bounded, view, solver, geometry,
-  and representative sparse entry points.
-- Add an MSRV only after verifying the real dependency/toolchain floor on CI.
-- Before the `0.3.0` release, capture a machine-readable public API snapshot or
-  equivalent release artifact.
-
-### Numerical specification
-
-- Treat invariant tests as the primary numerical specification.
-- Test dimensions around packet boundaries, not only 3x3 and 4x3 examples.
-- Cover `f32` and `f64`, multiple scales, singular/rank-deficient cases,
-  non-finite values, and multiple right-hand sides.
-- Exercise owned, mapped, strided, block, and bounded-view paths with the same
-  mathematical inputs.
-- Keep Eigen as differential evidence; add a second independent reference where
-  it materially improves confidence.
-
-### Benchmark/release evidence
-
-- Keep short GitHub-hosted nightly runs as regression triage rather than release
-  performance evidence.
-- Release benchmarks should run longer on a pinned machine and record CPU,
-  compiler, dependency versions, ISA flags, allocation/setup semantics, sample
-  configuration, and correctness prechecks.
-- Report performance by operation/phase/shape/scalar/target; do not aggregate
-  unlike operations into a general "faster than Eigen" conclusion.
-
-## Priority 1 — clean the public contract
-
-### Scalar/kernel separation
-
-The scalar contract is split by operation family rather than exposing one trait
-that owns every backend hook:
-
-- `FactorizationScalar` is the portable factor/update opt-in. Downstream scalar
-  types can implement it with an empty impl and use the default scalar loops.
-- `MatrixScalar` owns matrix-product and Gram/dot accumulation behavior and has
-  `FactorizationScalar` as a supertrait.
-- `ReductionScalar` owns vector reductions and matrix-vector products.
-- x86 and NEON implementations override the relevant trait methods at compile
-  time; downstream code does not name architecture-specific backend types.
+The project is not intended to replace Eigen, nalgebra, or faer for general large dynamic workloads.
 
-This keeps the external extension path usable on stable Rust without runtime
-`TypeId` dispatch or unsafe type erasure. The remaining `MatrixScalar` and
-`ReductionScalar` implementation hooks are intentionally retained for now so
-floating-point specialization stays compile-time. Further sealing should be
-driven by codegen/performance evidence rather than API aesthetics alone.
-
-### Failure and mutation conventions
+## Release contracts
 
-Adopt predictable conventions:
-
-- `Result` when the failure reason is actionable;
-- `Option` only when absence has one obvious meaning;
-- `_into` for caller-provided distinct output;
-- `_in_place` when an input/output is overwritten;
-- `compute`/`recompute` consistently for factor reuse;
-- checked constructors by default for invariant-bearing objects.
+1. **API contract** — naming/failure behavior is predictable and accidental public breakage is caught in CI.
+2. **Numerical contract** — solver correctness is specified by reconstruction, residual, orthogonality, rank, pivot, and convergence invariants; reference-library agreement is secondary evidence.
+3. **Resource contract** — representative operations have reproducible storage, stack, code-size, and target evidence with explicit evidence levels.
+4. **Scope contract** — unsupported workloads and unmeasured hardware claims are stated directly.
 
-Specific cleanup targets:
+The development version is `0.3.0-alpha.1` while intentional contract changes are being finalized.
 
-- add safer bounded resize forms (`resize_zeroed`, `resize_with`) before
-  deprecating or renaming storage-preserving growth semantics;
-- make sparse capacity errors report required and available capacity;
-- make normalization and geometry validity failures explicit and scale-aware;
-- avoid determinant-vs-machine-epsilon singularity tests when a factor-relative
-  criterion is available.
+## Completed stabilization work
 
-## Priority 2 — improve real workload data flow
+### Release/API qualification
 
-Do **not** build a general Eigen-style expression-template system.
+- PR semver/API compatibility checking against the base revision.
+- Compile-time rejection tests for incompatible dimensions/scalars.
+- Public API smoke coverage across dense, bounded, view, solver, geometry, and sparse entry points.
+- Manual release-artifact workflow with pinned tools, generated dependency lock, package verification, human-readable API snapshot, rustdoc JSON, dependency metadata, and provenance.
 
-The first explicit fused operations are now the common estimation/control forms:
+### Numerical qualification
 
-- `axpy_in_place` for `y += alpha * x`;
-- `axpy_into` for `alpha * x + y` into distinct caller storage;
-- `linear_combination_into` for `alpha * x + beta * y`.
+- Invariant-based coverage across public solver families.
+- `f32`/`f64`, multiple scales, multiple RHS, singular/rank-deficient and failure cases where applicable.
+- Independent round-trip/reconstruction checks rather than same-algorithm equivalence where practical.
+- Eigen differential tests retained as secondary evidence.
+- A versioned solver-evidence matrix in [Solver invariant qualification](solver-qualification.md).
 
-They use `MatrixScalar::mul_add`, preserving the built-in floating-point fused
-multiply-add path where the selected target supports it. A focused Criterion
-suite compares these methods with their expression equivalents rather than
-assuming that removing a temporary is always faster.
+### Public contract cleanup
 
-Continue to consider only workload-driven additions such as:
+- `FactorizationScalar` separates portable factor/update behavior from matrix-product/reduction specialization.
+- `MatrixBuf` has explicit storage-preserving and initialized-growth resize forms.
+- Sparse capacity failures report `required` and `capacity`.
+- Recompute, `_into`, and `_in_place` conventions are aligned across the common factor/operation surface.
 
-- GEMM-like `C = alpha * A * B + beta * C`;
-- reusable multi-RHS solve/update paths where profiling shows material benefit.
+### Views and fused operations
 
-These operations should preserve the library's explicit-memory model while
-eliminating avoidable temporary matrices in hot loops.
-
-## Priority 3 — make zero-copy views a performance path
+- Contiguous column-major `Map`/compatible `StridedMap` products and matvecs reuse optimized owned kernels without copying.
+- Arbitrary/padded strides remain on the generic zero-copy path.
+- `axpy_in_place`, `axpy_into`, and `linear_combination_into` cover common estimation/control forms.
+- Focused fused-operation benchmarks are part of regression triage.
 
-The first mapped-view fast path is intentionally narrower than a general layout
-abstraction. `Map` is already guaranteed to be exact column-major contiguous,
-and a `StridedMap` can be recognized at runtime when its strides are exactly
-`inner_stride = 1` and `outer_stride = rows`. Direct product methods for those
-concrete mapped types reinterpret the validated storage as the same fixed-size
-layout used by `Matrix` and therefore reuse the existing compile-time-selected
-matrix/matvec kernels without copying.
-
-Padded column-major, row-major, and arbitrary-stride views remain zero-copy but
-currently use the generic `MatrixRead` loops. The free `matmul_view_into` and
-`matvec_view_into` functions likewise remain the fully generic path. This avoids
-silently materializing an owned matrix merely to claim optimized view support.
-
-A broader internal layout capability should only be introduced when it unlocks
-a measured kernel family, for example:
-
-- contiguous with a leading dimension;
-- arbitrary stride with a profitable specialized traversal.
-
-Safe public construction should continue to establish bounds/aliasing
-invariants once; optimized concrete paths must preserve those invariants without
-runtime type dispatch or unsafe type erasure.
-
-## Priority 4 — sparse/block-sparse ergonomics
-
-The bounded sparse layer is most valuable when capacity planning is explicit and
-diagnostic.
-
-- Report `required` versus `capacity` for pattern/fill exhaustion.
-- Keep symbolic analysis separate from numeric recomputation and solve timing.
-- Document lower/upper triangle semantics and pivot models precisely.
-- Test adversarial fill patterns and repeated symbolic/numeric reuse.
-- Keep global/cross-block pivot fallback explicit; do not hide dense fallback
-  behind an API that looks purely sparse.
-- State when a runtime sparse solver from another library is the better tool.
-
-## Priority 5 — prove the embedded advantage
-
-QEMU and cross-compilation are necessary but not sufficient evidence for an
-embedded-focused library.
-
-Qualify at least:
-
-- one Cortex-M FPU target (for example M4F/M7/H7 class); and
-- one maintained RISC-V or ESP-class target if hardware is available.
-
-For representative 3x3, 6x6, 15x15, and bounded sparse/block-sparse workloads,
-record:
-
-- cycles or wall time under a controlled clock;
-- peak stack for the measured call path;
-- factor/workspace/static storage size;
-- `.text` and `.data/.bss` contribution;
-- compile time/codegen impact;
-- `f32`/`f64` behavior where hardware support differs.
-
-Compare static nalgebra and CMSIS-DSP where the comparison is meaningful. This
-is the evidence most likely to establish a durable project advantage.
-
-## Deliberately deferred
-
-Until a real workload demonstrates need, continue to defer:
-
-- heap-owning fully dynamic matrices;
-- general expression templates;
-- general runtime sparse indefinite solving;
-- GPU/accelerator backends;
-- per-shape hand-written kernels;
-- new ISA families without maintained hardware and benchmarks;
-- broad geometry expansion unrelated to the linear-algebra core.
-
-## Implementation sequence
-
-### Slice A — release and contract gates
-
-- [x] Document this stabilization plan.
-- [x] Add a PR semver/API compatibility gate against the base revision.
-- [x] Add invariant coverage around small-matrix/packet-boundary dimensions.
-- [x] Expand the curated public API smoke test to bounded, geometry, and sparse
-      entry points.
-- [x] Add pinned-host release benchmark methodology, provenance, and artifact
-      capture separate from nightly regression triage.
-- [x] Add a release artifact workflow that packages the crate and records both a
-      human-readable public API snapshot and machine-readable rustdoc JSON.
-
-### Slice B — bounded and sparse diagnostics
-
-- [x] Add `MatrixBuf::resize_zeroed`.
-- [x] Add `MatrixBuf::resize_with`.
-- [x] Keep `resize` as the explicit storage-preserving form while initialized
-      growth uses the new APIs; revisit naming only if real migration feedback
-      shows ambiguity before `0.3.0`.
-- [x] Add detailed sparse capacity exhaustion errors with `required` and
-      `capacity` for CSC construction/insertion, scalar expansion, symbolic
-      factor fill, and block-sparse permutation/fill paths.
-- [x] Add exact capacity-contract tests for CSC storage and symbolic Cholesky
-      fill alongside existing numerical/pivot failure tests.
-
-### Slice C — public scalar/kernel boundary
-
-- [x] Define the supported scalar extension contract as explicit factorization,
-      matrix-product, and reduction traits with portable defaults.
-- [x] Separate factor/update hooks from `MatrixScalar` while preserving private
-      ISA backend types and compile-time x86/NEON specialization.
-- [x] Add an integration test for a representative external scalar that uses
-      only public traits and portable defaults.
-- [x] Record the `FactorizationScalar` supertrait requirement as an intentional
-      `0.3` API migration.
-- [ ] Evaluate further sealing of matrix-product/reduction hooks only with
-      benchmark and codegen evidence; do not add runtime type dispatch merely
-      to hide implementation details.
-
-### Slice D — views and fused operations
-
-- [x] Detect exact column-major contiguous `Map`/`StridedMap` storage for
-      zero-copy reuse of the owned matrix kernels.
-- [x] Route compatible mapped matrix products and matvecs through those existing
-      optimized kernels; keep padded/arbitrary strides on the generic zero-copy
-      fallback rather than repacking.
-- [x] Add `axpy_in_place`, `axpy_into`, and `linear_combination_into` primitives.
-- [x] Add focused 6x6, 15x15, and 32x32 Criterion coverage and include it in
-      nightly benchmark triage.
-- [ ] Add a leading-dimension or broader layout kernel only if benchmark evidence
-      shows it materially improves mapped workloads.
-- [ ] Add a GEMM-like accumulate primitive only after benchmark evidence.
-
-### Slice E — target qualification
-
-- [x] Establish a repeatable Cortex-M real-hardware benchmark harness using the
-      same representative workloads as emulator qualification.
-- [x] Generate and publish repeatable Cortex-M QEMU/static resource tables for
-      representative dense and sparse workloads with source/tool provenance.
-- [ ] Record timing/resource evidence on a named physical Cortex-M FPU device
-      under a controlled clock.
-- [ ] Add a second real target when maintainable.
-
-## Release gate for 0.3
-
-Do not call `0.3` stable until:
-
-- semver/API changes are intentional and documented;
-- every public solver has invariant-based numerical coverage;
-- failure semantics are predictable for the common APIs;
-- bounded/sparse capacity failures are actionable;
-- the public API/package snapshot is captured for the exact release commit;
-- a pinned-host release benchmark has been run for the exact release commit;
-- at least one named physical embedded target has timing/resource measurements;
-  and
-- the README/docs describe the supported workload envelope without implying
-  general Eigen/faer replacement.
+### Embedded/resource qualification
+
+- Cross-target builds and representative Cortex-M/RISC-V32/AArch64 QEMU smoke execution.
+- Reproducible Cortex-M isolated workload tables for code/static size and painted-stack high-water marks.
+- Source/tool/build provenance captured with those reports.
+- A physical Cortex-M DWT timing harness shares the same workload definitions and is kept buildable in CI.
+
+Physical timing has not been measured on a named board. That absence is documented as an evidence limitation rather than represented as a failed portable-library qualification.
+
+## Release benchmark policy
+
+Short GitHub-hosted runs are regression triage only. Release-quality host performance evidence must use the dedicated pinned-machine procedure, record machine/toolchain/ISA/dependency provenance, execute longer sequential measurements, and retain raw measurements.
+
+A pinned-machine run is required before publishing cross-library performance claims for the exact release. It is not necessary to invent a canonical performance number when no stable benchmark host is available; in that case, release without a cross-library release-performance claim.
+
+## Remaining 0.3 release checklist
+
+- [x] API/semver changes are intentional and documented.
+- [x] Every public solver family has invariant-based numerical evidence.
+- [x] Common failure semantics and bounded/sparse capacity failures are documented/tested.
+- [x] README/docs state the supported workload envelope and avoid general Eigen/faer replacement language.
+- [x] Cortex-M QEMU/static resource evidence is reproducible and provenance-carrying.
+- [x] A physical Cortex-M timing harness exists and remains buildable.
+- [ ] Capture the release artifact snapshot for the **exact** `0.3.0` release commit.
+- [ ] Run pinned-host release benchmarks for the exact release commit **if** cross-library release performance claims will be published.
+- [ ] Publish/update the combined documentation site from `main` for the release.
+
+A named physical embedded target measurement is **not a `0.3` release blocker**. It is required before making real-device timing, throughput, or board-specific performance claims.
+
+## Follow-up work
+
+- Establish an MSRV only after testing the actual dependency/toolchain floor.
+- Add broader leading-dimension/layout kernels only with measured benefit.
+- Add GEMM-like accumulate operations only for demonstrated workloads.
+- Add another ISA family only with maintainable validation.
+- Record physical Cortex-M and a second real target when hardware becomes available.
+- Continue to defer heap-owning fully dynamic matrices, general expression templates, general runtime sparse indefinite solving, GPU backends, and per-shape kernels without measured need.

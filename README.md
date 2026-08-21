@@ -4,409 +4,104 @@
 [![Docs.rs Latest](https://img.shields.io/badge/docs.rs-latest-blue.svg)](https://docs.rs/stack-algebra)
 ![Build Status](https://github.com/yongkyuns/stack-algebra/actions/workflows/ci.yml/badge.svg?branch=main)
 
-A fixed-size, `no_std` linear algebra library with inline storage.
+Predictable linear algebra for embedded and robotics workloads: fixed-size and tightly bounded matrices, explicit storage, reusable workspaces, zero-copy caller buffers, and fixed-capacity sparse/block-sparse solvers that work in `no_std` environments.
 
-## Overview
-This crate provides fixed-size matrices, vectors, views, factorizations, and
-bounded sparse structures for Rust programs that benefit from compile-time
-dimensions and predictable storage. It supports host applications as well as
-`no_std` and embedded targets.
+`stack-algebra` is intentionally **not** a general replacement for Eigen, nalgebra, or faer for large dynamic dense/sparse workloads. Its focus is small-to-medium compile-time or bounded problems where storage, allocation behavior, and target portability matter.
 
-The design provides:
-1. Compile-time matrix dimensions and generic scalar types, with optimized
-   `f32` and `f64` floating-point kernels
-2. Inline storage with no required heap allocation
-3. Fixed-capacity bounded matrices and sparse structures
-4. Dense, geometric, and sparse linear-algebra operations
+## Status
 
-The implementation roadmap and release gates are tracked in
-[`docs/roadmap.md`](docs/roadmap.md).
+The development branch is currently `0.3.0-alpha.1`. The published crates.io version may therefore lag the API documented on the development branch.
 
-For a consolidated capability matrix, see
-[`docs/features.md`](docs/features.md). For copy-ready API patterns, see
-[`docs/api-usage.md`](docs/api-usage.md); storage and algorithm recipes are in
-[`docs/use-cases.md`](docs/use-cases.md). External implementation and validation
-references are listed in [`docs/references.md`](docs/references.md).
+- `cargo add stack-algebra` installs the current crates.io release.
+- For the current development API, use this repository/branch explicitly.
+- The [0.3 stabilization plan](docs/stabilization-plan.md) records release gates and completed work.
+- The [feature set](docs/features.md) is the capability/limitation reference.
 
-The crate provides the matrix abstractions and algebra routines needed to build
-numerical algorithms while keeping dimensions and storage explicit.
+## Core design
+
+- `Matrix<M, N, T>` uses compile-time dimensions and inline column-major storage.
+- The core requires no heap allocation and supports `no_std`.
+- `MatrixBuf<MAX_ROWS, MAX_COLS, T>` provides bounded runtime-active dimensions.
+- `Map`, `MapMut`, `StridedMap`, blocks, rows, and columns provide zero-copy views over caller-owned storage.
+- Dense solvers include Cholesky, pivoted/non-pivoted LDLT, LU, Householder QR, column-pivoted QR, SVD, and self-adjoint eigendecomposition.
+- Fixed-capacity scalar and block CSC/CSR types provide sparse matvec, symbolic/numeric reuse, Cholesky, and LDLT paths with explicit capacity diagnostics and fallback semantics.
+- Geometry includes quaternions, rotation matrices, angle-axis, isometries, and affine transforms.
+- x86 SSE2/AVX2/FMA and AArch64 NEON kernels are selected at compile time where supported; portable scalar implementations remain the reference path.
+
+Inline storage describes representation, not physical placement. Values may live on a task stack, in static storage, inside another state object, in an arena, or in caller-owned external buffers. Applications remain responsible for choosing placement that fits their RAM/stack budget.
 
 ## Install
-Use cargo to add to your project (or add manually to your `Cargo.toml`)
+
+For the latest published release:
+
 ```sh
 cargo add stack-algebra
 ```
-Then import to your module by using
-```rust
-use stack_algebra::*; // or import just the items you need
-```
 
-## Usage
-
-### Fixed-size types
-
-`Matrix<R, C, T>` stores its data inline in column-major order. `T` defaults to
-`f32`; use `.cast::<f64>()` or an explicitly typed matrix when changing precision.
+Then import the items you need:
 
 ```rust
-use stack_algebra::{Matrix3d, Vector3f};
+use stack_algebra::{matrix, vector, Cholesky};
 
-let rotation: Matrix3d = Matrix3d::eye();
-let vector: Vector3f = Vector3f::from_columns([[1.0, 2.0, 3.0]]);
-let vector64 = vector.cast::<f64>();
+let a = matrix![4.0_f64, 1.0; 1.0, 3.0];
+let b = vector![1.0_f64; 2.0];
+let factor = Cholesky::try_decompose(&a).expect("positive definite");
+let x = factor.solve(&b);
+assert!((a * x - b).norm() < 1.0e-12);
 ```
 
-- `matrix!` macro can be used to create a new matrix
-  ```rust
-  // 2-by-3 matrix 
-  let m = matrix![
-      1.0, 2.0, 3.0;
-      4.0, 5.0, 6.0; // Semicolon here is optional
-  ]; 
-  ```
+For unreleased `0.3` development work, pin a Git revision rather than assuming crates.io exposes the same API:
 
-- `vector!` macro can be used to create a row/column vector
-  ```rust
-  // 1-by-3 row vector
-  let r = vector![1.0, 2.0, 3.0]; 
+```toml
+[dependencies]
+stack-algebra = { git = "https://github.com/yongkyuns/stack-algebra", rev = "<commit>" }
+```
 
-  // 3-by-1 column vector
-  let c = vector![1.0; 2.0; 3.0]; 
+## Common API patterns
 
-  // Vector to tuple conversion (for 3 or 4 element vectors)
-  let (x, y, z) = r.into();
-  ```
+```rust
+use stack_algebra::{matrix, vector, Matrix, MatrixBuf};
 
-- `eye!` for creating square identity matrix
-  ```rust
-  let m = eye!(2); 
-  let exp = matrix![
-    1.0, 0.0;
-	0.0, 1.0
-  ];
-  assert_eq!(m, exp);
-  ```
+let a = matrix![
+    1.0_f32, 2.0, 3.0;
+    4.0,     5.0, 6.0;
+];
+let x = vector![1.0_f32; 2.0; 3.0];
+let y = a.matvec(&x);
+assert_eq!(y, vector![14.0; 32.0]);
 
-- `zeros!` for creating zero-valued matrix
-  ```rust
-  let m = zeros!(2); // Square 2-by-2 matrix
-  let exp = matrix![
-    0.0, 0.0;
-	0.0, 0.0
-  ];
-  assert_eq!(m, exp);
+let mut out = Matrix::<2, 2, f32>::zeros();
+let eye = Matrix::<2, 2, f32>::eye();
+eye.mul_into(&eye, &mut out);
 
-  let m = zeros!(2,3); // 2-by-3 matrix
-  let exp = matrix![
-    0.0, 0.0, 0.0;
-	0.0, 0.0, 0.0
-  ];
-  assert_eq!(m, exp);
-  ```
+let mut bounded = MatrixBuf::<6, 6, f32>::new(3, 3).unwrap();
+bounded.resize_zeroed(4, 4).unwrap();
+```
 
-- `ones!` for creating matrix with 1.0s (same as `zeros!` for usage)
+Dense factors support reusable solve/output paths, and mapped contiguous column-major inputs can reuse the optimized owned-matrix kernels without copying. Padded or arbitrary-stride views remain zero-copy and use the generic view path rather than silently materializing temporary matrices.
 
-- `diag!` for creating a diagonal matrix with given entries (up to 6-by-6 size)
-  ```rust
-  let m = diag!(1.0, 2.0, 3.0);
-  let exp = matrix![
-    1.0, 0.0, 0.0;
-	0.0, 2.0, 0.0;
-	0.0, 0.0, 3.0
-  ];
-  assert_eq!(m, exp);
-  ```
+For complete examples, see [Getting started](docs/getting-started.md), [Tutorials](docs/tutorials.md), [API usage](docs/api-usage.md), and [Use cases](docs/use-cases.md).
 
-- `[i]` or `[(r,c)]` to access individual elements
-  ```rust
-  let m = matrix![
-      1.0, 2.0, 3.0;
-      4.0, 5.0, 6.0
-  ]; 
+## Validation and performance evidence
 
-  assert_eq!(m[1], 4.0); // Using a single index assumes column-major order
-  assert_eq!(m[(1,2)], 6.0);
-  ```
+CI covers host tests, rustdoc examples, formatting, Clippy, Miri, cross-target builds, native AArch64 tests, and QEMU smoke execution for representative Cortex-M, RISC-V32, and AArch64 paths. The project also records reproducible Cortex-M static-size and painted-stack measurements from isolated QEMU qualification workloads.
 
-- `*`, `/`, `+`, `-` for matrix arithmetic
-  ```rust
-  let m = matrix![
-      1.0, 2.0;
-	  3.0, 4.0
-  ];
+Those checks are **not physical-device timing evidence**. No STM32/ESP/other real-device performance claim is made without a named-board measurement. Physical Cortex-M timing is a follow-up evidence tier, not a prerequisite for publishing the portable `0.3` library.
 
-  let exp = matrix![
-      2.0, 4.0;
-	  6.0, 8.0
-  ];
+Performance claims are similarly evidence-scoped:
 
-  assert_eq!(m + m, exp); // Add matrices
-  
-  let exp = matrix![
-      2.0, 3.0;
-	  4.0, 5.0
-  ];
+- short GitHub-hosted runs are regression triage;
+- release comparisons require the pinned-machine qualification procedure;
+- embedded timing claims require physical-target measurements.
 
-  assert_eq!(m + 1.0, exp); // Add scalar to matrix (note scalar has to be behind the operator)
-  ```
+See [Target support and evidence](docs/targets.md), [Target qualification](docs/target-qualification.md), [Benchmarking](docs/benchmarking.md), [Release benchmark qualification](docs/release-benchmarking.md), and [Solver invariant qualification](docs/solver-qualification.md).
 
-- `.transpose()` for matrix transpose
-  ```rust
-  let m = matrix![
-      1.0, 2.0;
-	  3.0, 4.0
-  ];
+## Documentation
 
-  let exp = matrix![
-      1.0, 3.0;
-	  2.0, 4.0
-  ];
+The repository builds a combined mdBook guide and generated Rust API site. The documentation workflow tests examples, checks links/API coverage, and uploads the complete site artifact on pull requests. GitHub Pages publishing occurs from `main` when the repository variable `PUBLISH_DOCS=true` is configured.
 
-  assert_eq!(m.transpose(), exp);
-  ```
-
-- `.norm()` for computing the [`Frobenius norm`][frobenius]. The reduction is
-  scale-stable for finite extreme values; use `.squared_norm()` when the raw
-  sum-of-squares semantics are desired.
-  ```rust
-	let m = matrix![
-	  1.0,-2.0;
-	 -3.0, 6.0;
-	];
-	assert_relative_eq!(m.norm(), 7.0710678, max_relative = 1e-6);
-  ```
-
-- `.squared_norm()`, `.dot()`, and `.matvec()` for fixed-size reductions and
-  matrix-vector products
-  ```rust
-  let lhs = vector![1.0; 2.0; 3.0];
-  let rhs = vector![4.0; 5.0; 6.0];
-  assert_eq!(lhs.dot(&rhs), 32.0);
-  assert_eq!(lhs.squared_norm(), 14.0);
-
-  let matrix = matrix![
-      1.0, 2.0, 3.0;
-      4.0, 5.0, 6.0;
-  ];
-  assert_eq!(matrix.matvec(&lhs), vector![14.0; 32.0]);
-  ```
-
-- `.trace()` for the sum of diagonal elements of a square matrix
-  ```rust
-	let m = matrix![
-	  9.0, 8.0, 7.0;
-	  6.0, 5.0, 4.0;
-	  3.0, 2.0, 1.0;
-	];
-	assert_eq!(m.trace(), 15.0);
-  ```
-
-- `.determinant()` for determinant (only available for square matrix)
-  ```rust
-    let m = matrix![
-	  3.0, 7.0;
-	  1.0, -4.0;
-	];
-    assert_eq!(m.determinant(), -19.0);
-  ```
-
-- `.inverse()` for inverse of a square invertible matrix
-  ```rust
-	let m = matrix![
-	  6.0, 2.0, 3.0;
-	  1.0, 1.0, 1.0;
-	  0.0, 4.0, 9.0;
-	];
-	let exp = matrix![
-	  0.20833333, -0.25, -0.04166667;
-	      -0.375,  2.25,      -0.125;
-	  0.16666667,  -1.0,  0.16666667;
-	];
-	assert_relative_eq!(m.inverse(), exp, max_relative = 1e-6);
-  ```
-
-- `.cholesky()` for symmetric positive-definite systems
-  ```rust
-  let matrix = Matrix::<3, 3, f64>::eye();
-  let factor = matrix.cholesky().expect("matrix is positive-definite");
-  let solution = factor.solve(&vector![1.0; 2.0; 3.0]);
-  ```
-
-- `.ldlt()` for symmetric systems with Eigen-compatible diagonal pivoting
-  ```rust
-  let matrix = matrix![0.0_f64, 2.0; 2.0, 3.0];
-  let factor = matrix.ldlt().expect("matrix is nonsingular");
-  let solution = factor.solve(&vector![1.0; 4.0]);
-  ```
-
-- `.ldlt_no_pivot()` for stable systems when pivot-search overhead is unnecessary
-  ```rust
-  let factor = matrix.ldlt_no_pivot().expect("matrix is nonsingular");
-  ```
-
-The dense LDLT path stores compact 1x1 or 2x2 `D` pivot blocks using
-Eigen-compatible Bunch–Kaufman selection. `pivot_blocks()` reports the block
-layout (`1`, `2`, `3`), while `diagonal_matrix()` reconstructs the full `D`.
-Native block sparse LDLT retains block ordering plus local Bunch–Kaufman
-metadata inside each dense diagonal block. Use `try_dense_ldlt::<N>()` on a
-block matrix when a global scalar pivot may cross block boundaries.
-
-- `.householder_qr()` for full-rank square or overdetermined least-squares systems
-  ```rust
-  let design = matrix![
-      1.0_f64, 1.0;
-      1.0, 2.0;
-      1.0, 3.0;
-  ];
-  let observations = vector![3.0; 5.0; 7.0];
-  let coefficients = design
-      .householder_qr()
-      .solve_least_squares(&observations)
-      .expect("design matrix is full rank");
-  ```
-  QR factors also expose `apply_q`, `apply_q_transpose`, and in-place variants
-  for allocation-free orthogonal transforms.
-
-- `.col_piv_householder_qr()` for rank-aware least-squares systems
-  ```rust
-  let factor = design.col_piv_householder_qr();
-  assert_eq!(factor.rank(), 2);
-  let coefficients = factor
-      .solve_least_squares(&observations)
-      .expect("design matrix is full rank");
-  ```
-  Use `.solve_least_squares_basic()` when dependent columns should be handled
-  using Eigen-compatible basic rank-deficient semantics.
-
-- `.svd()` for fixed-size SVD of square, tall, or wide matrices
-  ```rust
-  let svd = design.svd().expect("SVD decomposition succeeds");
-  let rank = svd.rank();
-  let coefficients = svd.solve(&observations);
-  ```
-  SVD also exposes `singular_values()`, `u()`, `v()`, and `pseudo_inverse()`.
-
-All decompositions provide reusable-output solve variants: use `solve_into` for
-LU, Cholesky, LDLT, and SVD, or `solve_least_squares_into` for QR. Cholesky and
-LDLT also retain `solve_in_place` when the right-hand side itself can be reused.
-All factor types support Eigen-style recomputation: use `try_compute` for
-fallible factorizations and `compute` for infallible ones. Factor storage is
-owned by the factor object and reused by these methods.
-Self-adjoint eigendecomposition also accepts a reusable
-`SelfAdjointEigenWorkspace` through `try_compute_with_workspace` when callers
-need explicit stack/RAM control.
-
-- `.self_adjoint_eigen()` for fixed-size symmetric eigendecomposition
-  ```rust
-  let eig = matrix.self_adjoint_eigen().expect("matrix is symmetric");
-  let values = eig.eigenvalues();
-  let vectors = eig.eigenvectors();
-  ```
-  Eigenvalues are sorted in ascending order and eigenvectors are orthonormal.
-
-- `.self_adjoint_lower()` and `.self_adjoint_upper()` for zero-copy Eigen-style
-  views that mirror one authoritative triangle without reading the other.
-  Use `try_self_adjoint_lower(tolerance)` or
-  `try_self_adjoint_upper(tolerance)` when symmetry validation is required;
-  `validate_symmetric` and `is_symmetric` expose the same scaled check.
-
-- `PartialPivLu` for allocation-free linear solves
-  ```rust
-  let matrix = Matrix::<3, 3, f64>::eye();
-  let factor = matrix.partial_piv_lu();
-  let solution = factor.solve(&vector![1.0; 2.0; 3.0]);
-  ```
-
-- `.mul_into()` for allocation-free matrix multiplication into a reusable output
-  ```rust
-  let matrix = Matrix::<3, 3, f64>::eye();
-  let mut output = Matrix::<3, 3, f64>::zeros();
-  matrix.mul_into(&matrix, &mut output);
-  ```
-
-- `block`, `row`, and `column` views for fixed-size submatrix access
-  ```rust
-  let block = matrix.block::<2, 2>(0, 0).expect("block is in bounds");
-  let values = block.to_matrix();
-  ```
-  Mutable blocks are available through `block_mut`. Triangular views expose
-  `lower_triangular()` and `upper_triangular()` with in-place solves and
-  `mul_into` operations.
-
-- `Map` and `MapMut` for zero-copy fixed-size views over external column-major
-  buffers, with checked construction and mutable indexing. `StridedMap` and
-  `StridedMapMut` cover padded or row-major buffers without repacking.
-  `MatrixRead` and `MatrixWrite` provide a shared compile-time-dimension view
-  interface, and all dense decompositions expose `try_decompose_view` plus
-  `try_compute_view` variants for zero-copy factorization from compatible views.
-  `Matrix::from_view` remains available when an owned snapshot is required.
-
-- `MatrixBuf<MAX_ROWS, MAX_COLS, T>` for bounded runtime dimensions without
-  heap allocation. It reserves a compile-time capacity, tracks active rows and
-  columns, supports checked resizing and column access, and exposes matching
-  active regions through zero-copy `as_view::<M, N>()`/
-  `as_view_mut::<M, N>()` views. It can also round-trip to fixed-size `Matrix`
-  values. `Matrix`, `MatrixBuf`, sparse patterns/factors, and block sparse
-  matrices expose `storage_bytes()` for compile-time RAM budgeting on embedded
-  targets.
-
-- `StaticBlockCscMatrix` and `StaticBlockCsrMatrix` for fixed-capacity block
-  sparse storage. Block patterns are validated once, dense blocks remain
-  stack-owned, and block matvec writes into caller-provided scalar slices
-  without allocation. Block CSC supports native block Cholesky plus a bounded
-  scalar-CSC expansion reference path. Native block LDLT supports compact
-  local Bunch–Kaufman diagonal blocks, fixed block orderings, and analysis-time
-  block diagonal pivoting.
-
-- `StaticCscPattern` and `StaticCscMatrix` for allocation-free, bounded sparse
-  CSC storage. Symbolic structure can be validated once and numeric values
-  updated repeatedly; fixed-size sparse matrix-vector products are supported.
-  `StaticCscCholeskyPattern` and `StaticCscCholesky` add reusable symbolic and
-  numeric sparse LLT factorization with bounded fill-in storage. LLT consumes
-  the lower triangle (optional mirrored upper entries are checked for symmetry).
-
-- `Quaternion<T>` and `RotationMatrix<T>` for generic 3D rotations
-  ```rust
-  let rotation = Quaternion::from_axis_angle(&axis, angle)
-      .expect("axis is nonzero")
-      .to_rotation_matrix()
-      .expect("quaternion is nonzero");
-  let rotated = rotation.apply(&point);
-  ```
-  These types use existing fixed-size `Matrix`/`Vector` storage and do not
-  depend on robotics or code-generation crates.
-
-- `Isometry<T>` for fixed-size rigid transforms, with point/direction
-  application, composition, inverse, and homogeneous `4x4` conversion.
-
-- `AngleAxis<T>` and quaternion `slerp` provide interpolation-friendly
-  rotation APIs; `AffineTransform<T>` adds validated homogeneous affine
-  transforms with composition, point/direction application, and inversion.
-
-Fixed-size multiplication selects its kernel at compile time. On
-x86-64, `f32` and `f64` use AVX2 when enabled by the target and otherwise use
-an SSE2 kernel; AArch64 targets with NEON use the ARM NEON packet kernel;
-reduction kernels use fused multiply-add when both AVX2 and FMA are enabled.
-AVX2-only targets retain a non-FMA packet path, and targets without a packet
-backend use the portable scalar fallback. Use
-`RUSTFLAGS="-C target-cpu=native"` only when the resulting binary will run on
-the same CPU feature set. Dot products, squared norms, and matrix-vector
-products use the same compile-time scalar/packet dispatch.
-Custom scalar types can implement `MatrixScalar` for multiplication and add
-`ReductionScalar` when dot, norm, or matrix-vector kernels are needed.
-
-## Validation
-
-Continuous integration covers host tests, rustdoc examples, formatting,
-Clippy, Miri, cross-target compilation, QEMU smoke tests, and native AArch64
-tests. See [target support and evidence](docs/targets.md) for the current
-validation matrix and [benchmarking](docs/benchmarking.md) for the Eigen, faer,
-and nalgebra comparison methodology and reproduction commands.
+Start at [docs/index.md](docs/index.md). The [roadmap](docs/roadmap.md) describes what is already established in the 0.3 line and what remains intentionally deferred.
 
 ## License
 
-This project is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
-
-See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT) for details.
-
-[frobenius]: https://en.wikipedia.org/wiki/Matrix_norm#Frobenius_norm
+Dual-licensed under MIT or Apache-2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).

@@ -1,133 +1,85 @@
 # stack-algebra roadmap
 
-This document defines the path from the current fixed-size core to a stable,
-ergonomic, high-performance Rust algebra library for native and embedded
-robotics workloads. The crate remains standalone and has no dependency on
-SymForce or any other robotics framework.
+This roadmap reflects the current `0.3.0-alpha.1` development line. `stack-algebra` targets predictable linear algebra for embedded and robotics workloads rather than general large dynamic dense/sparse computing.
 
 ## Design commitments
 
 - Keep `Matrix<M, N, T>` fixed-size, column-major, `no_std`, and allocation-free.
-- Keep scalar/packet kernel selection at compile time. Do not introduce runtime
-  kernel dispatch into the embedded path.
-- Preserve explicit `f32`/`f64` types and explicit casts for mixed precision.
-- Add bounded runtime dimensions before adding heap-backed dynamic matrices.
-- Keep heap-backed dynamic owning matrices out of the core roadmap until a
-  concrete workload cannot be served by fixed, bounded, mapped, or sparse
-  storage. If eventually needed, add them only as an explicit `alloc`/`std`
-  layer rather than changing the embedded core contract.
-- Treat Eigen and faer as external correctness and performance references only.
+- Keep scalar/packet kernel selection at compile time; avoid runtime dispatch in the embedded path.
+- Preserve explicit scalar types and explicit casts for mixed precision.
+- Prefer fixed, bounded, mapped, and fixed-capacity sparse storage over heap-owning dynamic matrices.
+- Introduce any future dynamic owning layer only behind explicit `alloc`/`std` support and only for demonstrated workloads.
+- Treat Eigen, faer, and nalgebra as external correctness/performance references, not API targets.
 
-## Current status
+## Established in the 0.3 line
 
-- P0 sparse triangle semantics, compact dense permutations, typed dense
-  decomposition failures, and target smoke validation are implemented.
-- The P1 shared `MatrixRead`/`MatrixWrite` view foundation and
-  `Matrix::from_view` are implemented; Cholesky now supports zero-copy view
-  decomposition, and LDLT, LU, QR, SVD, and self-adjoint eigendecomposition
-  now support the same zero-copy view path.
-- The bounded `MatrixBuf<MAX_ROWS, MAX_COLS, T>` storage layer is implemented
-  with checked active dimensions and no heap allocation.
-- The first block-sparse layer, `StaticBlockCscMatrix`, is implemented with
-  fixed-capacity CSC patterns and allocation-free block matvec. The matching
-  `StaticBlockCsrMatrix` is now implemented. Native block CSC Cholesky with
-  symbolic fill and reusable solves is implemented. Native block CSC LDLT with
-  local Bunch–Kaufman diagonal blocks, ordering, and reusable solves is implemented.
-  A scalar-expansion adapter is retained for reference comparisons.
-- Scalar CSC LDLT now supports bounded diagonal pivoting with explicit
-  thresholds, a sparse-first dense-fallback factor, reusable numeric
-  recomputation, and in-place multi-RHS solves.
-- Eigen differential coverage includes dense and sparse `f32`/`f64` solves,
-  fallback paths, ordering, and multi-RHS cases. QEMU Cortex-M, RISC-V32, and
-  AArch64 smoke images plus focused Miri view/sparse suites pass locally.
+### Public API and storage
 
-## Execution phases
+- Fixed-size dense matrices/vectors and compile-time dimensions.
+- Shared `MatrixRead`/`MatrixWrite` view foundation, mapped/strided/block views, and owned snapshots through `Matrix::from_view`.
+- `MatrixBuf<MAX_ROWS, MAX_COLS, T>` bounded runtime-active storage with checked resize forms.
+- Reusable factor objects and consistent solve/recompute conventions.
+- Actionable fixed-capacity sparse errors carrying required and available capacity.
 
-### P0 — correctness and public API foundation
+### Dense numerical capability
 
-- Make sparse lower/upper triangle semantics explicit and Eigen-compatible.
-- Replace dense permutation matrices in factorizations with compact index
-  permutations shared by dense and sparse algorithms.
-- Standardize reusable factor recomputation and `*_in_place` solver APIs;
-  reserve `*_into` for caller-provided output operations.
-- Introduce structured decomposition errors while preserving compatibility
-  shims where a breaking change is not yet justified.
-- Split the monolithic sparse implementation into storage, ordering, LLT, and
-  LDLT modules after behavior is covered by regression tests.
-- Audit fixed-capacity workspaces and document or bound their RAM footprint.
+- Cholesky, pivoted and non-pivoted LDLT, partial-pivot LU, Householder QR, column-pivoted QR, SVD, and self-adjoint eigendecomposition.
+- Dense Bunch–Kaufman LDLT with compact 1x1/2x2 pivot metadata.
+- Lower/upper self-adjoint views and checked symmetry validation.
+- Solver invariant coverage for reconstruction, residuals, orthogonality, rank, pivoting, reuse, and failure semantics.
 
-### P1 — zero-copy and workspace ergonomics
+### Sparse and block-sparse capability
 
-- Add compile-time-dimension read/write view abstractions for `Map`, `Block`,
-  and strided views.
-- Allow products and decompositions to consume views without materializing a
-  new owning matrix.
-- Make caller-provided workspaces first-class for factorization and solves.
-  Cholesky, LDLT, LU, QR, SVD, and self-adjoint eigendecomposition now expose
-  the unified `compute`/`try_compute` recomputation convention; workspace-
-  specific scratch buffers are available for self-adjoint eigen sweeps, with
-  SVD requiring no additional matrix scratch beyond its factor storage.
-  Sparse LLT and LDLT factors use `recompute` (or `recompute_ordered` for
-  already-permuted CSC input) while symbolic patterns remain separate.
+- Fixed-capacity scalar CSC storage plus symbolic/numeric Cholesky and LDLT reuse.
+- Bounded sparse diagonal pivoting and explicit dense fallback for cases requiring global pivot behavior.
+- Fixed-capacity block CSC/CSR storage, native block Cholesky, native block LDLT with local Bunch–Kaufman pivots, ordering support, and explicit dense global-pivot fallback.
+- Scalar expansion paths retained as reference/comparison mechanisms rather than hidden fallback behavior.
 
-### P2 — portable performance architecture
+### Performance architecture
 
-- Keep portable scalar kernels as the reference implementation.
-- Maintain separate ISA modules for x86 SSE2/AVX2/FMA and AArch64 NEON;
-  add Arm32 NEON and RVV only with representative benchmarks and tests.
-- Use packet-width tails and general blocking policies rather than
-  size-specific bespoke kernels.
-- Validate each optimized kernel against the scalar reference with numerical
-  tolerances appropriate for FMA and reduction-order differences.
+- Portable scalar kernels remain the reference implementation.
+- x86 SSE2/AVX2/FMA and AArch64 NEON backends are selected at compile time.
+- Contiguous column-major mapped products reuse optimized owned-matrix kernels without copying; arbitrary strides stay on generic zero-copy loops.
+- Explicit fused operations cover common estimation/control forms (`axpy_*`, `linear_combination_into`).
+- Short hosted benchmarks are regression triage; release benchmark evidence has a separate pinned-machine contract.
 
-### P3 — numerical capability
+### Validation and release infrastructure
 
-- Match Eigen's dense Bunch–Kaufman LDLT behavior, including 1x1/2x2 pivot
-  selection, permutation conventions, and zero-pivot reporting. Extend the
-  same scalar pivot metadata into sparse block LDLT after validating bounded
-  storage and solve semantics.
-- Add sparse pivoted LDLT with the same documented threshold and failure model.
-- Strengthen QR, SVD, and self-adjoint eigensolver scaling, rank, convergence,
-  and tolerance behavior.
-- Add explicit lower/upper self-adjoint views, with strict symmetry checking as
-  an opt-in mode. The zero-copy lower/upper views and checked constructors are
-  implemented.
+- CI covers formatting, Clippy, host tests, docs, API/semver checks, Miri, cross-target builds, native AArch64 tests, and representative QEMU execution.
+- Cortex-M qualification records isolated code/static size and painted-stack high-water marks with source/tool provenance.
+- A physical Cortex-M DWT timing harness exists and is kept buildable, but no named-board timing result is currently claimed.
+- Release artifact qualification captures the crate package, generated dependency lock, public API listing, rustdoc JSON, dependency metadata, and provenance.
 
-### P4 — bounded and sparse storage
+## 0.3 release priorities
 
-- Add a bounded runtime-size matrix (`MatrixBuf<MAX_R, MAX_C, T>`-style) with
-  no allocation and an Eigen `MaxRows`/`MaxCols`-like capacity contract.
-- Extend fixed-capacity block CSC/CSR with additional block-level ordering
-  strategies and native cross-block pivot handling; local pivoted LDLT and an
-  explicit dense global-pivot fallback are implemented. Scalar CSC now also
-  exposes the same explicit bounded dense fallback for systems requiring a
-  global 2x2 pivot.
-- Revisit heap-backed dynamic matrices only after bounded, mapped, and sparse
-  storage are demonstrably insufficient for a concrete application; any future
-  implementation must remain behind an optional `alloc`/`std` layer.
+Before publishing `0.3.0`:
 
-### P5 — release and target gates
+1. Keep API/semver changes intentional and documented.
+2. Keep every public solver covered by invariant-based numerical evidence.
+3. Keep failure and capacity semantics predictable/actionable.
+4. Capture the release artifact snapshot for the exact release commit.
+5. Run the release benchmark workflow on a deliberately pinned machine **before publishing cross-library release performance claims**.
+6. Keep README/docs explicit that QEMU/static resource evidence is not physical-device timing evidence.
 
-- Differential tests against Eigen and faer for `f32`/`f64`, multi-RHS solves,
-  malformed inputs, non-finite values, near-singular thresholds, ordering, and
-  symbolic/numeric reuse.
-- Fair benchmarks separating symbolic analysis, checked factorization, reused
-  numeric factorization, and solve. Match storage, ordering, compiler flags,
-  scalar type, dimensions, RHS count, and allocation model.
-- CI builds portable, SSE2, AVX2/FMA, AArch64, `thumbv6m`, Cortex-M4F,
-  RISC-V/ESP32-C3-class, and WASM targets; execute QEMU smoke tests where the
-  machine model is meaningful.
-- Use real STM32/ESP hardware smoke and cycle measurements for peripheral and
-  device claims; QEMU alone cannot validate those peripherals.
-- Run Miri/sanitizer checks for view and SIMD unsafe code, plus no-allocation
-  checks for fixed sparse paths.
+A physical board measurement is desirable follow-up evidence, but it is **not a portable-library release blocker**. It becomes mandatory before making real-device timing, throughput, or board-specific performance claims.
 
-## Release intent
+## Next priorities after 0.3
 
-- `0.3`: P0 and P1 foundations with stable fixed-size behavior.
-- `0.4`: P2 performance portability and robust dense solver behavior.
-- `0.5`: P3/P4 sparse pivoting, bounded runtime dimensions, and block sparse
-  storage.
+Work should be workload-driven rather than assigned to old phase/version buckets.
 
-Each phase is complete only when correctness parity, target checks, and
-representative performance evidence are recorded alongside the implementation.
+- Validate optimized kernels on additional maintained architectures before adding new ISA-specific code.
+- Add broader leading-dimension/layout kernels only when benchmarks show material benefit.
+- Add a GEMM-like accumulate API only when a real workload justifies it.
+- Improve sparse/block ordering or cross-block pivot behavior only where bounded storage semantics remain explicit.
+- Add additional physical-target evidence when hardware and maintenance capacity are available.
+- Establish an MSRV only after testing the actual dependency/toolchain floor.
+
+## Deliberately deferred
+
+- heap-owning fully dynamic matrices in the core;
+- general Eigen-style expression templates;
+- general runtime sparse indefinite solving;
+- GPU/accelerator backends;
+- per-shape hand-written kernels without measured need;
+- new ISA families without maintained validation;
+- broad geometry expansion unrelated to the linear-algebra core.

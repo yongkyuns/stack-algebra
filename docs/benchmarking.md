@@ -1,138 +1,56 @@
-# Nightly benchmark comparison
+# Benchmarking
 
-The nightly workflow compares stack-algebra with Eigen, faer, and nalgebra
-through a shared set of deterministic dense operations. It runs on a
-GitHub-hosted Linux runner
-with a native CPU target and publishes the raw measurements plus a
-self-contained HTML report as the `nightly-benchmark-report` artifact. The
-four Rust benchmark groups and the native Eigen runner execute as parallel
-jobs; a final report job merges their measurements.
+The benchmark suite compares `stack-algebra` with Eigen, faer, and nalgebra where storage/operation semantics are comparable. Benchmark evidence is deliberately split into two tiers: short hosted regression triage and pinned-machine release qualification.
 
-Each report also contains runner provenance: commit and ref, dirty-tree state,
-runner OS/architecture, CPU model, kernel, Rust compiler, Cargo version, UTC
-generation time, and measurement count. These fields are shown in the report
-metadata line and written to `metadata.json` beside the HTML and CSV files.
+## Nightly regression triage
 
-Nightly uses short Criterion windows (0.1 seconds of warmup, 0.1 seconds of
-measurement, and 10 samples) and five 5-millisecond Eigen samples so the full
-comparison normally completes within a few minutes. Use longer windows and the
-default 15 Eigen samples for release-quality measurements. CI caches the
-Rust release artifacts and the source-keyed Eigen executable; the first run
-after changing the benchmark sources still pays their compilation costs.
+The nightly workflow runs five Rust benchmark groups — `comparison`, `dense_solvers`, `sparse`, `block_sparse`, and `fused` — plus the native Eigen reference runner. Jobs run on GitHub-hosted Linux with native CPU flags and are merged into a self-contained `nightly-benchmark-report` artifact.
+
+Nightly uses short measurement windows so broad coverage completes quickly. It records commit/ref, runner OS/architecture, CPU model, kernel, Rust/Cargo, dirty-tree state, generation time, and measurement count. These results answer **"did performance move enough to investigate?"**, not **"what is the canonical performance of this release?"**
+
+The standalone `scripts/bench_fast.sh` additionally sweeps the six older broad benchmark targets (`comparison`, `dense_solvers`, `sparse`, `block_sparse`, `fixed_size`, and `small_fixed`) for local triage; the focused `fused` suite is exercised directly by the nightly workflow.
 
 ## Run locally
 
-Install Eigen (`libeigen3-dev` on Ubuntu), then run the Criterion benches and
-native Eigen runner:
+Install Eigen and run an individual Criterion group with native CPU flags, for example:
 
 ```sh
-RUSTFLAGS="-C target-cpu=native" EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench \
-  --bench comparison -- --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
-for bench in dense_solvers sparse block_sparse; do
-  RUSTFLAGS="-C target-cpu=native" EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench --all-features \
-    --bench "$bench" -- --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
-done
-mkdir -p benchmark-report/raw
-CXXFLAGS='-march=native' EIGEN3_INCLUDE_DIR=/usr/include/eigen3 \
-  EIGEN_BENCH_SAMPLES=5 EIGEN_BENCH_MIN_SAMPLE_MS=5 \
-  EIGEN_BENCH_CSV=benchmark-report/raw/eigen-f32.csv \
-  ./eigen/run_native_bench.sh f32 > benchmark-report/raw/eigen-f32.txt
-EIGEN_BENCH_SKIP_BUILD=1 CXXFLAGS='-march=native' EIGEN3_INCLUDE_DIR=/usr/include/eigen3 \
-  EIGEN_BENCH_SAMPLES=5 EIGEN_BENCH_MIN_SAMPLE_MS=5 \
-  EIGEN_BENCH_CSV=benchmark-report/raw/eigen-f64.csv \
-  ./eigen/run_native_bench.sh f64 > benchmark-report/raw/eigen-f64.txt
-python3 scripts/generate_benchmark_report.py \
-  --criterion-dir target/criterion \
-  --eigen-csv benchmark-report/raw/eigen-f32.csv \
-  --eigen-csv benchmark-report/raw/eigen-f64.csv \
-  --output benchmark-report/index.html \
-  --csv-output benchmark-report/results.csv \
-  --require-eigen
+RUSTFLAGS="-C target-cpu=native" \
+EIGEN3_INCLUDE_DIR=/usr/include/eigen3 \
+cargo bench --all-features --bench dense_solvers -- \
+  --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10 --noplot
 ```
 
-### Fast full sweep
-
-For broad triage, run all six Rust benchmark targets in parallel with short,
-bounded Criterion windows. The script uses native CPU instructions for both
-Rust (`-C target-cpu=native`) and Eigen (`-march=native`) unless the caller
-provides explicit `RUSTFLAGS` or `CXXFLAGS`:
+For the broad fast sweep:
 
 ```sh
 EIGEN3_INCLUDE_DIR=/usr/include/eigen3 scripts/bench_fast.sh
 ```
 
-The default profile uses 10 ms warmup, 20 ms measurement, and 10 samples per
-case. Override `BENCH_WARMUP_TIME`, `BENCH_MEASUREMENT_TIME`, and
-`BENCH_SAMPLE_SIZE` when trading coverage for stability; Criterion requires at
-least 10 samples. Logs are written to `benchmark-report/raw/fast/`; the
-generated report is the same `benchmark-report/index.html` used by the longer
-run.
+Use these modes for regression investigation and architecture exploration. For release-quality host comparisons, use [Release benchmark qualification](release-benchmarking.md).
 
-This profile is for identifying regressions and ranking metrics. Use the longer
-windows above before making release or architecture decisions.
+## Comparison rules
 
-For reproducible local reports, pass provenance as newline-delimited
-`key=value` fields with `--metadata-file`; inline `--metadata` uses the same
-keys separated by semicolons. The generator adds `generated_utc` and
-`measurement_count` automatically.
+- Report median steady-state time per operation and retain Criterion confidence information in the raw/report artifacts.
+- Match shape, scalar type, storage model, ordering policy, compiler/ISA flags, setup semantics, RHS count, and allocation behavior before interpreting a ratio.
+- Run correctness checks before timing; a failed check must fail the benchmark rather than emit a performance result.
+- Separate one-time symbolic analysis, numeric assembly, factorization/refactorization, and solve phases.
+- Do not compare a reusable-factor solve against factor-and-solve as if they were the same operation.
+- Label dynamic allocation paths explicitly rather than presenting them as apples-to-apples fixed-storage results.
+- Treat Eigen/faer/nalgebra as references, not as targets that define the public API.
 
-The report generator also accepts one or more `--eigen-csv` files. CSV headers
-may use `operation`/`benchmark`, `library`, `shape`, `scalar`, `phase`, and
-`median_ns` (aliases such as `ns_per_op` and `time_ns` are accepted). Criterion
-paths are discovered recursively, so nested groups such as
-`sparse/llt/f64/.../stack-factor-reuse/15/new/estimates.json` do not require a
-fixed directory layout.
+Sparse cases intentionally separate symbolic analysis, numeric assembly into validated patterns, factorization, refactorization, ordering/permutation, and solve. Ordered cases must use comparable ordering policies. The stack-algebra sparse APIs expose fixed-capacity semantics that can differ materially from dynamic sparse libraries, so setup/storage differences belong in the interpretation rather than being hidden.
 
-## Interpreting results
+## Existing native baseline
 
-- Times are median steady-state nanoseconds per operation. Lower is better;
-  confidence intervals are retained in `results.csv` for Criterion rows.
-- The dense comparison executes eight identical operations per Criterion
-  iteration and normalizes the reported median back to one operation; the
-  native Eigen runner similarly normalizes its 64-operation batches.
-- Fixed-capacity stack-algebra matrices are compared with the corresponding
-  fixed-size Eigen/nalgebra cases where available. faer and dynamic cases are
-  labelled explicitly; a dynamic allocation path is not presented as an
-  apples-to-apples static-storage result.
-- Sparse benchmarks separate symbolic analysis, numeric assembly into a
-  validated pattern, factorization, refactorization, and solve. The
-  `stack-matvec` and `faer-matvec` phases measure sparse matrix–vector
-  multiplication into reusable output storage with identical input patterns
-  and sequential execution. The Eigen bridge covers sparse LLT matvec for the
-  tridiagonal reference case; the standalone `sparse-matvec` group covers
-  tridiagonal, banded, and star patterns at larger dimensions without requiring
-  factorization capacity.
-  `stack-assemble` phase measures repeated `zero_with_pattern` plus
-  coordinate-based `add_to_value` updates and is specific to the fixed-capacity
-  assembly API. `stack-assemble-indexed` uses entry positions precomputed from
-  the validated pattern and measures the no-lookup update path. Use the latter
-  when a generated workload assembles the same symbolic pattern repeatedly.
-  Ordered sparse cases also report one-shot `stack-permute` separately from
-  `stack-permute-reuse`, which uses a retained coordinate map.
-  `faer-factor-reuse` measures faer's high-level constructor, including its
-  numeric-buffer allocation; `faer-factor-reuse-storage` uses faer's low-level
-  numeric API with reusable factor and scratch storage. Compare ordered cases
-  with the same ordering policy: faer uses AMD by default, while the default
-  stack-algebra path preserves identity ordering.
-  Reusable-factor solve timings exclude the one-time factorization; factor-
-  and-solve timings include both. Do not compare these phases as if they were
-  the same operation.
-- The dense LDLT suite includes both factor-and-solve cases and reusable
-  two-right-hand-side solve cases; the latter keeps factorization outside the
-  timed region.
-- Sparse LDLT includes a separate auto-pivot group for zero-leading-diagonal
-  inputs, so sparse diagonal pivoting is not conflated with the no-pivot path;
-  its factor and reusable-refactorization phases are measured separately.
-- Inputs, dimensions, scalar type, and benchmark setup are owned by the bench
-  sources. Correctness checks should run before timing and failed checks must
-  fail the benchmark rather than produce a result.
-- Results are machine-specific. The report records the commit and runner, but
-  comparisons across different CPU models should be treated as directional.
+[Native benchmark baseline](benchmark-baseline.md) records a historical development baseline and follow-up kernel measurements. It is useful for identifying regressions and optimization opportunities, but it predates the pinned-machine release-evidence contract and should not be promoted to a canonical `0.3` release result.
 
-## Nightly report artifacts
+## Release evidence
 
-The nightly workflow always uploads a `nightly-benchmark-report` artifact. Open
-the [nightly benchmark workflow](https://github.com/yongkyuns/stack-algebra/actions/workflows/nightly-bench.yml),
-select a completed run, and download the artifact to view `index.html` and the
-raw CSV/JSON inputs. GitHub Pages is reserved for the documentation site, so a
-benchmark run cannot overwrite the published documentation.
+A release benchmark must run on the deliberately pinned host and preserve the exact source/toolchain/dependency/ISA/machine provenance plus raw measurements. If that controlled run is unavailable, release documentation should omit canonical cross-library performance claims rather than promote variable GitHub-hosted numbers.
+
+Host benchmark evidence does not establish embedded performance. Real-device timing requires named physical hardware; see [Target qualification](target-qualification.md).
+
+## Artifacts
+
+The nightly workflow uploads `nightly-benchmark-report`. The release workflow uploads a separate release report with raw Criterion/Eigen data and provenance. GitHub Pages is reserved for the combined documentation/API site rather than transient benchmark output.
