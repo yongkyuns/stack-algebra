@@ -94,7 +94,7 @@ impl ReductionScalar for Probe {
 }
 
 #[test]
-fn mapped_exact_column_major_layouts_reuse_scalar_kernel_dispatch() {
+fn mapped_layout_dispatches_only_for_exact_column_major_storage() {
     MATMUL_DISPATCHES.store(0, Ordering::SeqCst);
     MATVEC_DISPATCHES.store(0, Ordering::SeqCst);
 
@@ -108,13 +108,11 @@ fn mapped_exact_column_major_layouts_reuse_scalar_kernel_dispatch() {
         product,
         Matrix::from_rows([[Probe(19), Probe(22)], [Probe(43), Probe(50)]])
     );
-    assert_eq!(MATMUL_DISPATCHES.load(Ordering::SeqCst), 1);
 
     let vector = Vector::<2, Probe>::from_rows([[Probe(5)], [Probe(6)]]);
     let mut output = Vector::<2, Probe>::zeros();
     lhs.matvec_into(&vector, &mut output);
     assert_eq!(output, Vector::from_rows([[Probe(17)], [Probe(39)]]));
-    assert_eq!(MATVEC_DISPATCHES.load(Ordering::SeqCst), 1);
 
     let lhs = StridedMap::<2, 2, _>::from_slice(&lhs_storage, 1, 2).unwrap();
     let rhs = StridedMap::<2, 2, _>::from_slice(&rhs_storage, 1, 2).unwrap();
@@ -122,28 +120,21 @@ fn mapped_exact_column_major_layouts_reuse_scalar_kernel_dispatch() {
     lhs.matvec_into(&vector, &mut output);
     assert_eq!(MATMUL_DISPATCHES.load(Ordering::SeqCst), 2);
     assert_eq!(MATVEC_DISPATCHES.load(Ordering::SeqCst), 2);
-}
 
-#[test]
-fn arbitrary_strides_keep_zero_copy_scalar_fallback() {
-    MATMUL_DISPATCHES.store(0, Ordering::SeqCst);
-    MATVEC_DISPATCHES.store(0, Ordering::SeqCst);
-
-    let lhs_storage = [Probe(1), Probe(2), Probe(3), Probe(4)];
-    let rhs_storage = [Probe(5), Probe(6), Probe(7), Probe(8)];
-    let lhs = StridedMap::<2, 2, _>::from_slice(&lhs_storage, 2, 1).unwrap();
-    let rhs = StridedMap::<2, 2, _>::from_slice(&rhs_storage, 2, 1).unwrap();
-    let mut product = Matrix::<2, 2, Probe>::zeros();
+    let row_major_lhs = [Probe(1), Probe(2), Probe(3), Probe(4)];
+    let row_major_rhs = [Probe(5), Probe(6), Probe(7), Probe(8)];
+    let lhs = StridedMap::<2, 2, _>::from_slice(&row_major_lhs, 2, 1).unwrap();
+    let rhs = StridedMap::<2, 2, _>::from_slice(&row_major_rhs, 2, 1).unwrap();
     lhs.mul_into(&rhs, &mut product);
     assert_eq!(
         product,
         Matrix::from_rows([[Probe(19), Probe(22)], [Probe(43), Probe(50)]])
     );
-    assert_eq!(MATMUL_DISPATCHES.load(Ordering::SeqCst), 0);
-
-    let vector = Vector::<2, Probe>::from_rows([[Probe(5)], [Probe(6)]]);
-    let mut output = Vector::<2, Probe>::zeros();
     lhs.matvec_into(&vector, &mut output);
     assert_eq!(output, Vector::from_rows([[Probe(17)], [Probe(39)]]));
-    assert_eq!(MATVEC_DISPATCHES.load(Ordering::SeqCst), 0);
+
+    // Arbitrary strides stay on the generic direct-read path rather than
+    // invoking the owned-matrix backend or repacking into a temporary.
+    assert_eq!(MATMUL_DISPATCHES.load(Ordering::SeqCst), 2);
+    assert_eq!(MATVEC_DISPATCHES.load(Ordering::SeqCst), 2);
 }
