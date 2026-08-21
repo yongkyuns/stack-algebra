@@ -23,11 +23,11 @@ jobs:
         run: RUSTFLAGS="-C target-feature=-avx2,-fma" cargo test --lib
 
   msrv:
-    name: MSRV 1.85
+    name: MSRV 1.87
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.87.0
       - run: cargo check --lib --no-default-features
       - run: cargo check --lib --features std
 
