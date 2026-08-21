@@ -85,9 +85,7 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             zero_storage(ptr::addr_of_mut!((*output).aggregate_update_columns));
             zero_storage(ptr::addr_of_mut!((*output).numeric_pattern_starts));
             zero_storage(ptr::addr_of_mut!((*output).numeric_pattern_columns));
-            for value in &mut (*output).input_diagonal_indices {
-                *value = u32::MAX;
-            }
+            (*output).input_diagonal_indices.fill(u32::MAX);
         }
         let mut update_counts = [0usize; N];
         for column in 0..N {
@@ -327,7 +325,10 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             column_starts[N - 1] + column_counts[N - 1]
         };
         if total_nnz > MAX_L_NNZ {
-            return Err(SparseCholeskyError::CapacityExceeded);
+            return Err(SparseCholeskyError::CapacityExceeded {
+                required: total_nnz,
+                capacity: MAX_L_NNZ,
+            });
         }
 
         for (column, &start) in column_starts.iter().enumerate() {
@@ -444,7 +445,10 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
             column_starts[N - 1] + column_counts[N - 1]
         };
         if total_nnz > MAX_L_NNZ {
-            return Err(SparseCholeskyError::CapacityExceeded);
+            return Err(SparseCholeskyError::CapacityExceeded {
+                required: total_nnz,
+                capacity: MAX_L_NNZ,
+            });
         }
         let mut row_indices = [0u32; MAX_L_NNZ];
         for column in 0..N {
