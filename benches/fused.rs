@@ -99,12 +99,13 @@ fn gemm_accumulate_probe<const D: usize>(criterion: &mut Criterion) {
             black_box(&output);
         })
     });
-    group.bench_function(BenchmarkId::new("mul-then-axpy", D), |bench| {
+    group.bench_function(BenchmarkId::new("mul-then-add-assign", D), |bench| {
         bench.iter(|| {
             for _ in 0..BATCH {
                 black_box(&lhs).mul_into(black_box(&rhs), black_box(&mut output));
-                black_box(&addend).axpy_in_place(black_box(1.0), black_box(&mut output));
+                output += black_box(addend);
             }
+            black_box(&output);
         })
     });
     group.bench_function(BenchmarkId::new("prototype-fused", D), |bench| {
