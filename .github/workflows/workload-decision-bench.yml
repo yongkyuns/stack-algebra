@@ -28,5 +28,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: workload-decision-criterion
-          path: target/criterion/decision
+          path: target/criterion
           if-no-files-found: error
