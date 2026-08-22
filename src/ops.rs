@@ -851,7 +851,7 @@ mod tests {
             4.0, 5.0, 6.0;
             7.0, 8.0, 9.0;
         ];
-        assert_eq!(res, m);
+        assert_eq!(res, exp);
         let res = res - 3.0;
         assert_eq!(res, m);
     }
