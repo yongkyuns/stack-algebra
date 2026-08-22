@@ -4,9 +4,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use stack_algebra::{
-    matmul_view_into, matvec_view_into, Map, Matrix, MatrixRead, StridedMap,
-};
+use stack_algebra::{matmul_view_into, matvec_view_into, Map, Matrix, MatrixRead, StridedMap};
 
 const BATCH: usize = 8;
 const PAD: usize = 3;
@@ -196,11 +194,7 @@ fn padded_mapped_probe<const D: usize>(criterion: &mut Criterion) {
     group.bench_function(BenchmarkId::new("generic-zero-copy", D), |bench| {
         bench.iter(|| {
             for _ in 0..BATCH {
-                matmul_view_into(
-                    black_box(&lhs),
-                    black_box(&rhs),
-                    black_box(&mut output),
-                );
+                matmul_view_into(black_box(&lhs), black_box(&rhs), black_box(&mut output));
             }
         })
     });
