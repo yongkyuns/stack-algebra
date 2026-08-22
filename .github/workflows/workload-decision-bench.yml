@@ -1,0 +1,32 @@
+name: Workload decision benchmark
+
+on:
+  pull_request:
+    paths:
+      - "benches/fused.rs"
+      - ".github/workflows/workload-decision-bench.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  decision-bench:
+    name: GEMM accumulate and padded-view probes
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: "-C target-cpu=native"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run decision probes
+        run: >-
+          cargo bench --bench fused -- decision/
+          --warm-up-time 0.05 --measurement-time 0.05 --sample-size 10 --noplot
+      - name: Upload Criterion measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: workload-decision-criterion
+          path: target/criterion/decision
+          if-no-files-found: error
