@@ -1,69 +1,37 @@
 use super::{CscError, StaticCscOrdering, StaticCscPattern, StaticCscPermutation};
 
-/// Exact fixed-capacity requirements for a simplicial sparse Cholesky factor.
-///
-/// The count is structural: it depends only on the validated CSC sparsity
-/// pattern, not on numeric values. This makes it suitable for generated and
-/// offline sizing workflows before a concrete `StaticCscCholeskyPattern`
-/// capacity is selected.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StaticCscCholeskyRequirements {
-    factor_nnz: usize,
-}
-
-impl StaticCscCholeskyRequirements {
-    /// Returns the exact number of entries required by the lower Cholesky
-    /// factor, including its diagonal.
-    #[inline]
-    pub const fn factor_nnz(self) -> usize {
-        self.factor_nnz
-    }
-
-    /// Returns whether `capacity` can hold the analyzed lower factor.
-    #[inline]
-    pub const fn fits(self, capacity: usize) -> bool {
-        self.factor_nnz <= capacity
-    }
-
-    /// Returns the additional entries required beyond `capacity`, or zero when
-    /// the proposed capacity is sufficient.
-    #[inline]
-    pub const fn shortfall(self, capacity: usize) -> usize {
-        self.factor_nnz.saturating_sub(capacity)
-    }
-}
-
 impl<const N: usize, const MAX_NNZ: usize> StaticCscPattern<N, N, MAX_NNZ> {
     /// Computes the exact natural-order sparse Cholesky factor capacity.
     ///
-    /// This runs the same elimination-tree reachability count used by symbolic
-    /// analysis but does not construct a factor pattern or require a proposed
-    /// `MAX_L_NNZ`. Upper-triangle entries, when present, are ignored because
-    /// symmetric factorizations consume the lower triangle.
+    /// The result is the number of entries required by the lower factor,
+    /// including its diagonal. This is a structural preflight: it depends only
+    /// on the validated CSC sparsity pattern, not on numeric values, and does
+    /// not require selecting a tentative `MAX_L_NNZ` first.
+    ///
+    /// Upper-triangle entries, when present, are ignored because symmetric
+    /// factorizations consume the lower triangle.
     #[inline]
-    pub fn cholesky_requirements(&self) -> StaticCscCholeskyRequirements {
-        StaticCscCholeskyRequirements {
-            factor_nnz: required_factor_nnz(self),
-        }
+    pub fn cholesky_required_factor_nnz(&self) -> usize {
+        required_factor_nnz(self)
     }
 
     /// Computes the exact sparse Cholesky factor capacity after applying a
     /// caller-selected symmetric ordering.
     ///
     /// The permutation uses the existing fixed-capacity sparse permutation
-    /// machinery and performs no heap allocation.
+    /// machinery and performs no heap allocation. This is useful for generated
+    /// solvers that want to choose the smallest safe `MAX_L_NNZ` after an
+    /// ordering has been fixed.
     #[inline]
-    pub fn cholesky_requirements_with_ordering(
+    pub fn cholesky_required_factor_nnz_with_ordering(
         &self,
         ordering: StaticCscOrdering<N>,
-    ) -> Result<StaticCscCholeskyRequirements, CscError> {
+    ) -> Result<usize, CscError> {
         if ordering.is_identity() {
-            return Ok(self.cholesky_requirements());
+            return Ok(self.cholesky_required_factor_nnz());
         }
         let permutation = StaticCscPermutation::from_ordering(self, ordering)?;
-        Ok(StaticCscCholeskyRequirements {
-            factor_nnz: required_factor_nnz(permutation.pattern_ref()),
-        })
+        Ok(required_factor_nnz(permutation.pattern_ref()))
     }
 }
 
@@ -141,11 +109,9 @@ mod tests {
             &[0, 2, 4, 6, 7],
         )
         .unwrap();
-        let requirements = matrix.pattern().cholesky_requirements();
+        let required = matrix.pattern().cholesky_required_factor_nnz();
         let analyzed = StaticCscCholeskyPattern::<4, 10>::analyze(&matrix).unwrap();
-        assert_eq!(requirements.factor_nnz(), analyzed.lower().nnz());
-        assert!(requirements.fits(7));
-        assert_eq!(requirements.shortfall(6), 1);
+        assert_eq!(required, analyzed.lower().nnz());
     }
 
     #[test]
@@ -159,9 +125,8 @@ mod tests {
             &[0, 2, 4, 6, 7],
         )
         .unwrap();
-        let requirements = matrix.pattern().cholesky_requirements();
-        assert!(requirements.factor_nnz() >= matrix.nnz());
-        assert_eq!(requirements.shortfall(requirements.factor_nnz() - 1), 1);
+        let required = matrix.pattern().cholesky_required_factor_nnz();
+        assert!(required >= matrix.nnz());
     }
 
     #[test]
@@ -174,12 +139,12 @@ mod tests {
         )
         .unwrap();
         let ordering = StaticCscOrdering::minimum_degree(&matrix);
-        let requirements = matrix
+        let required = matrix
             .pattern()
-            .cholesky_requirements_with_ordering(ordering)
+            .cholesky_required_factor_nnz_with_ordering(ordering)
             .unwrap();
         let analyzed =
             StaticCscCholeskyPattern::<4, 10>::analyze_with_ordering(&matrix, ordering).unwrap();
-        assert_eq!(requirements.factor_nnz(), analyzed.lower().nnz());
+        assert_eq!(required, analyzed.lower().nnz());
     }
 }
