@@ -6,8 +6,9 @@
 //! This makes the API suitable for `no_std` and embedded applications while
 //! still supporting the symbolic/numeric split used by sparse solvers.
 //!
-//! A typical CSC workflow is to validate a pattern once, analyze it once, and
-//! then refactorize new numeric values during each control or estimation step:
+//! A typical CSC workflow is to validate a pattern once, size its factor
+//! capacity from structure, analyze it once, and then refactorize new numeric
+//! values during each control or estimation step:
 //!
 //! ```
 //! use stack_algebra::{Matrix, StaticCscCholeskyPattern, StaticCscMatrix};
@@ -18,8 +19,8 @@
 //!     &[0, 1, 1],
 //!     &[0, 2, 3],
 //! ).unwrap();
-//! let required = a.pattern().cholesky_requirements();
-//! assert_eq!(required.factor_nnz(), 3);
+//! let required = a.pattern().cholesky_required_factor_nnz();
+//! assert_eq!(required, 3);
 //! let pattern = StaticCscCholeskyPattern::<2, 3>::analyze(&a).unwrap();
 //! let mut factor = pattern.factor(&a).unwrap();
 //!
@@ -51,7 +52,6 @@ pub(crate) use errors::map_ldlt_error;
 pub use errors::{CscError, SparseCholeskyError};
 pub use ldlt::{StaticCscLdlt, StaticCscLdltFactor};
 pub use ordering::{StaticCscOrdering, StaticCscPermutation};
-pub use requirements::StaticCscCholeskyRequirements;
 pub use storage::{StaticCscMatrix, StaticCscPattern};
 
 /// Symbolic CSC pattern shared by sparse LLT and no-pivot LDLᵀ.
