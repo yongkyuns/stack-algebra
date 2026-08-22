@@ -18,6 +18,8 @@
 //!     &[0, 1, 1],
 //!     &[0, 2, 3],
 //! ).unwrap();
+//! let required = a.pattern().cholesky_requirements();
+//! assert_eq!(required.factor_nnz(), 3);
 //! let pattern = StaticCscCholeskyPattern::<2, 3>::analyze(&a).unwrap();
 //! let mut factor = pattern.factor(&a).unwrap();
 //!
@@ -41,6 +43,7 @@ mod cholesky;
 mod errors;
 mod ldlt;
 mod ordering;
+mod requirements;
 mod storage;
 
 pub use cholesky::{StaticCscCholesky, StaticCscCholeskyPattern};
@@ -48,6 +51,7 @@ pub(crate) use errors::map_ldlt_error;
 pub use errors::{CscError, SparseCholeskyError};
 pub use ldlt::{StaticCscLdlt, StaticCscLdltFactor};
 pub use ordering::{StaticCscOrdering, StaticCscPermutation};
+pub use requirements::StaticCscCholeskyRequirements;
 pub use storage::{StaticCscMatrix, StaticCscPattern};
 
 /// Symbolic CSC pattern shared by sparse LLT and no-pivot LDLᵀ.
