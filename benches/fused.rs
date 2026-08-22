@@ -199,6 +199,13 @@ fn padded_mapped_probe<const D: usize>(criterion: &mut Criterion) {
             }
         })
     });
+    group.bench_function(BenchmarkId::new("optimized-zero-copy", D), |bench| {
+        bench.iter(|| {
+            for _ in 0..BATCH {
+                black_box(&lhs).mul_into(black_box(&rhs), black_box(&mut output));
+            }
+        })
+    });
     group.bench_function(BenchmarkId::new("copy-then-optimized", D), |bench| {
         bench.iter(|| {
             for _ in 0..BATCH {
