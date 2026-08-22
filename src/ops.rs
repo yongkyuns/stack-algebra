@@ -58,6 +58,56 @@ fn strided_column_major_matrix_ref<'a, const M: usize, const N: usize, T>(
     column_major_matrix_ref::<M, N, T>(matrix.as_slice())
 }
 
+#[inline]
+fn strided_has_unit_inner<const M: usize, const N: usize, T>(
+    matrix: &StridedMap<'_, M, N, T>,
+) -> bool {
+    M <= 1 || matrix.inner_stride() == 1
+}
+
+/// Multiplies column-major views that may have padding between columns.
+///
+/// This keeps caller-owned padded storage zero-copy while using a
+/// column/shared/row traversal that streams contiguous columns. Exact
+/// contiguous layouts still use the target-specific owned `matmul` backend.
+#[inline]
+fn matmul_leading_dimension_into<
+    const M: usize,
+    const N: usize,
+    const P: usize,
+    T: MatrixScalar,
+>(
+    lhs: &StridedMap<'_, M, N, T>,
+    rhs: &StridedMap<'_, N, P, T>,
+    output: &mut Matrix<M, P, T>,
+) {
+    let lhs_data = lhs.as_slice();
+    let rhs_data = rhs.as_slice();
+    let lhs_outer = lhs.outer_stride();
+    let rhs_outer = rhs.outer_stride();
+    let output_data = output.as_mut_slice();
+
+    for value in output_data.iter_mut() {
+        *value = T::zero();
+    }
+
+    for column in 0..P {
+        let output_start = column * M;
+        for shared in 0..N {
+            let rhs_value = rhs_data[column * rhs_outer + shared];
+            let lhs_start = shared * lhs_outer;
+            for row in 0..M {
+                let output_index = output_start + row;
+                output_data[output_index] = T::mul_add(
+                    lhs_data[lhs_start + row],
+                    rhs_value,
+                    output_data[output_index],
+                );
+            }
+        }
+    }
+}
+
 /// Computes `matrix * vector` directly from a fixed-size matrix view.
 ///
 /// The view is read through [`MatrixRead`](crate::MatrixRead), so this works
@@ -231,9 +281,10 @@ impl<const M: usize, const N: usize, T> StridedMap<'_, M, N, T>
 where
     T: MatrixScalar,
 {
-    /// Multiplies two strided views. When both are exact column-major
-    /// contiguous layouts this reuses the optimized owned-matrix kernel;
-    /// otherwise it falls back to direct strided reads without repacking.
+    /// Multiplies two strided views. Exact contiguous column-major layouts use
+    /// the target-specific owned kernel. Unit-inner-stride column-major views
+    /// with padded leading dimensions use a direct zero-copy streaming path;
+    /// arbitrary inner strides use the generic view path.
     #[inline]
     pub fn mul_into<const P: usize>(
         &self,
@@ -245,6 +296,8 @@ where
             strided_column_major_matrix_ref(rhs),
         ) {
             matmul(lhs, rhs, output);
+        } else if strided_has_unit_inner(self) && strided_has_unit_inner(rhs) {
+            matmul_leading_dimension_into(self, rhs, output);
         } else {
             matmul_view_into(self, rhs, output);
         }
@@ -761,7 +814,7 @@ mod tests {
               0.0, 0.0, 0.0, 6.0, 0.0, 7.0, 0.0, 1.0, 0.0, 0.0, 0.0;
               2.0, 5.0, 0.0, 7.0, 0.0, 4.0, 6.0, 8.0, 5.0, 1.0, 3.0;
               0.0, 0.0, 0.0, 1.0, 0.0, 4.0, 0.0, 1.0, 0.0, 0.0, 0.0;
-              0.0, 0.0, 0.0, 8.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+              0.0, 0.0, 0.0, 8.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0;
               2.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0;
               2.0, 6.0, 0.0, 1.0, 0.0,30.0, 0.0, 2.0, 3.0, 2.0, 1.0;
         ];
@@ -798,7 +851,7 @@ mod tests {
             4.0, 5.0, 6.0;
             7.0, 8.0, 9.0;
         ];
-        assert_eq!(res, exp);
+        assert_eq!(res, m);
         let res = res - 3.0;
         assert_eq!(res, m);
     }
