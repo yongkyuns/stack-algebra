@@ -41,7 +41,8 @@ jobs:
           trigger = "# Temporary PR trigger for #9 scalar-fast-path performance sampling.\n"
           if manifest.count(trigger) != 1:
               raise SystemExit(f"expected exactly one benchmark trigger comment, found {manifest.count(trigger)}")
-          cargo.write_text(manifest.replace(trigger, "", 1))
+          cleaned_manifest = manifest.replace(trigger, "", 1).rstrip("\n") + "\n"
+          cargo.write_text(cleaned_manifest)
 
           Path(".github/workflows/apply-ldlt-cleanup.yml").unlink()
           PY
