@@ -688,6 +688,95 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
 
     #[inline]
     fn solve_permuted_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
+        if P == 1 {
+            self.solve_single_rhs_permuted_in_place(rhs);
+        } else {
+            self.solve_multi_rhs_permuted_in_place(rhs);
+        }
+    }
+
+    #[inline]
+    fn solve_single_rhs_permuted_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
+        let column = 0;
+        let mut row = 0;
+        while row < D {
+            if self.pivots[row] == 2 {
+                for target in (row + 2)..D {
+                    rhs[(target, column)] = rhs[(target, column)]
+                        - self.factor[(target, row)] * rhs[(row, column)]
+                        - self.factor[(target, row + 1)] * rhs[(row + 1, column)];
+                }
+                row += 2;
+            } else {
+                for target in (row + 1)..D {
+                    rhs[(target, column)] =
+                        rhs[(target, column)] - self.factor[(target, row)] * rhs[(row, column)];
+                }
+                row += 1;
+            }
+        }
+
+        let mut row = 0;
+        while row < D {
+            if self.pivots[row] == 2 {
+                let first = rhs[(row, column)];
+                let second = rhs[(row + 1, column)];
+                let d11 = self.factor[(row, row)];
+                let d12 = self.factor[(row + 1, row)];
+                let d22 = self.factor[(row + 1, row + 1)];
+                let scale = first
+                    .abs()
+                    .max(second.abs())
+                    .max(d11.abs())
+                    .max(d12.abs())
+                    .max(d22.abs());
+                let normalized_first = first / scale;
+                let normalized_second = second / scale;
+                let normalized_d11 = d11 / scale;
+                let normalized_d12 = d12 / scale;
+                let normalized_d22 = d22 / scale;
+                let determinant = normalized_d11 * normalized_d22 - normalized_d12 * normalized_d12;
+                rhs[(row, column)] = (normalized_first * normalized_d22
+                    - normalized_second * normalized_d12)
+                    / determinant;
+                rhs[(row + 1, column)] = (normalized_second * normalized_d11
+                    - normalized_first * normalized_d12)
+                    / determinant;
+                row += 2;
+            } else {
+                rhs[(row, column)] = rhs[(row, column)] / self.factor[(row, row)];
+                row += 1;
+            }
+        }
+
+        let mut row = D;
+        while row > 0 {
+            if row >= 2 && self.pivots[row - 2] == 2 {
+                let first = row - 2;
+                let second = row - 1;
+                let mut first_value = rhs[(first, column)];
+                let mut second_value = rhs[(second, column)];
+                for next in row..D {
+                    first_value = first_value - self.factor[(next, first)] * rhs[(next, column)];
+                    second_value = second_value - self.factor[(next, second)] * rhs[(next, column)];
+                }
+                rhs[(first, column)] = first_value;
+                rhs[(second, column)] = second_value;
+                row -= 2;
+            } else {
+                let current = row - 1;
+                let mut value = rhs[(current, column)];
+                for next in row..D {
+                    value = value - self.factor[(next, current)] * rhs[(next, column)];
+                }
+                rhs[(current, column)] = value;
+                row -= 1;
+            }
+        }
+    }
+
+    #[inline]
+    fn solve_multi_rhs_permuted_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
         let mut row = 0;
         while row < D {
             if self.pivots[row] == 2 {
