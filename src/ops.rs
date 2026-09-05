@@ -25,8 +25,38 @@ use core::ops::{
 use crate::index::MatrixIndex;
 use crate::kernels::{matmul, matvec, MatrixScalar, ReductionScalar};
 use crate::num::Zero;
-use crate::view::MatrixRead;
+use crate::view::{Map, MatrixRead, StridedMap};
 use crate::{Matrix, Vector};
+
+#[inline]
+fn column_major_matrix_ref<const M: usize, const N: usize, T>(
+    data: &[T],
+) -> Option<&Matrix<M, N, T>> {
+    let required = M.checked_mul(N)?;
+    let data = data.get(..required)?;
+    if core::mem::size_of_val(data) != core::mem::size_of::<Matrix<M, N, T>>() {
+        return None;
+    }
+
+    // SAFETY: `Matrix` is `repr(C)` over the nested array `[[T; M]; N]`.
+    // Arrays are contiguous with the same element alignment as `T`, and the
+    // slice above contains exactly `M * N` initialized `T` values in the
+    // matrix's column-major order. The returned borrow cannot outlive `data`.
+    Some(unsafe { &*data.as_ptr().cast::<Matrix<M, N, T>>() })
+}
+
+#[inline]
+fn strided_column_major_matrix_ref<'a, const M: usize, const N: usize, T>(
+    matrix: &'a StridedMap<'_, M, N, T>,
+) -> Option<&'a Matrix<M, N, T>> {
+    if M > 1 && matrix.inner_stride() != 1 {
+        return None;
+    }
+    if N > 1 && matrix.outer_stride() != M {
+        return None;
+    }
+    column_major_matrix_ref::<M, N, T>(matrix.as_slice())
+}
 
 /// Computes `matrix * vector` directly from a fixed-size matrix view.
 ///
@@ -80,10 +110,14 @@ pub fn matvec_view_into<const M: usize, const N: usize, T, V>(
         output[row] = value;
     }
 }
+
 /// Computes `lhs * rhs` directly from fixed-size matrix views.
 ///
 /// Both operands may be borrowed views with different backing layouts. The
-/// destination is an owning fixed-size matrix supplied by the caller.
+/// destination is an owning fixed-size matrix supplied by the caller. This
+/// generic path accepts arbitrary [`MatrixRead`] implementations; the direct
+/// `Map` and `StridedMap` methods use the optimized owned-matrix kernels when
+/// their storage is exactly column-major contiguous.
 ///
 /// # Example
 ///
@@ -116,6 +150,161 @@ pub fn matmul_view_into<const M: usize, const N: usize, const P: usize, T, Lhs, 
                     value + *lhs.get_in_bounds(row, shared) * *rhs.get_in_bounds(shared, column);
             }
             output[(row, column)] = value;
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Optimized mapped-view products
+////////////////////////////////////////////////////////////////////////////////
+
+impl<const M: usize, const N: usize, T> Map<'_, M, N, T>
+where
+    T: MatrixScalar,
+{
+    /// Multiplies two contiguous column-major maps using the same optimized
+    /// kernel path as owned matrices.
+    #[inline]
+    pub fn mul_into<const P: usize>(&self, rhs: &Map<'_, N, P, T>, output: &mut Matrix<M, P, T>) {
+        let lhs = column_major_matrix_ref::<M, N, T>(self.as_slice())
+            .expect("Map storage always matches its compile-time matrix shape");
+        let rhs = column_major_matrix_ref::<N, P, T>(rhs.as_slice())
+            .expect("Map storage always matches its compile-time matrix shape");
+        matmul(lhs, rhs, output);
+    }
+
+    /// Multiplies this contiguous map by an owned matrix using the optimized
+    /// owned-matrix kernel path.
+    #[inline]
+    pub fn mul_matrix_into<const P: usize>(
+        &self,
+        rhs: &Matrix<N, P, T>,
+        output: &mut Matrix<M, P, T>,
+    ) {
+        let lhs = column_major_matrix_ref::<M, N, T>(self.as_slice())
+            .expect("Map storage always matches its compile-time matrix shape");
+        matmul(lhs, rhs, output);
+    }
+
+    /// Multiplies this contiguous map by a strided view. Exact column-major
+    /// storage uses the optimized kernel; other layouts use the generic view
+    /// path without repacking.
+    #[inline]
+    pub fn mul_strided_into<const P: usize>(
+        &self,
+        rhs: &StridedMap<'_, N, P, T>,
+        output: &mut Matrix<M, P, T>,
+    ) {
+        if let Some(rhs) = strided_column_major_matrix_ref(rhs) {
+            let lhs = column_major_matrix_ref::<M, N, T>(self.as_slice())
+                .expect("Map storage always matches its compile-time matrix shape");
+            matmul(lhs, rhs, output);
+        } else {
+            matmul_view_into(self, rhs, output);
+        }
+    }
+}
+
+impl<const M: usize, const N: usize, T> Map<'_, M, N, T>
+where
+    T: ReductionScalar,
+{
+    /// Multiplies this contiguous map by a vector using the same optimized
+    /// reduction kernel as an owned matrix.
+    #[inline]
+    pub fn matvec(&self, vector: &Vector<N, T>) -> Vector<M, T> {
+        let mut output = Vector::<M, T>::zeros();
+        self.matvec_into(vector, &mut output);
+        output
+    }
+
+    /// Multiplies this contiguous map by a vector into caller-owned output.
+    #[inline]
+    pub fn matvec_into(&self, vector: &Vector<N, T>, output: &mut Vector<M, T>) {
+        let matrix = column_major_matrix_ref::<M, N, T>(self.as_slice())
+            .expect("Map storage always matches its compile-time matrix shape");
+        matvec(matrix, vector, output);
+    }
+}
+
+impl<const M: usize, const N: usize, T> StridedMap<'_, M, N, T>
+where
+    T: MatrixScalar,
+{
+    /// Multiplies two strided views. When both are exact column-major
+    /// contiguous layouts this reuses the optimized owned-matrix kernel;
+    /// otherwise it falls back to direct strided reads without repacking.
+    #[inline]
+    pub fn mul_into<const P: usize>(
+        &self,
+        rhs: &StridedMap<'_, N, P, T>,
+        output: &mut Matrix<M, P, T>,
+    ) {
+        if let (Some(lhs), Some(rhs)) = (
+            strided_column_major_matrix_ref(self),
+            strided_column_major_matrix_ref(rhs),
+        ) {
+            matmul(lhs, rhs, output);
+        } else {
+            matmul_view_into(self, rhs, output);
+        }
+    }
+
+    /// Multiplies this strided view by an owned matrix. Exact column-major
+    /// storage uses the optimized kernel; other layouts use direct strided
+    /// reads without materializing an intermediate matrix.
+    #[inline]
+    pub fn mul_matrix_into<const P: usize>(
+        &self,
+        rhs: &Matrix<N, P, T>,
+        output: &mut Matrix<M, P, T>,
+    ) {
+        if let Some(lhs) = strided_column_major_matrix_ref(self) {
+            matmul(lhs, rhs, output);
+        } else {
+            matmul_view_into(self, rhs, output);
+        }
+    }
+
+    /// Multiplies this strided view by a contiguous map, reusing the optimized
+    /// kernel when this view is also exact column-major contiguous.
+    #[inline]
+    pub fn mul_map_into<const P: usize>(
+        &self,
+        rhs: &Map<'_, N, P, T>,
+        output: &mut Matrix<M, P, T>,
+    ) {
+        if let Some(lhs) = strided_column_major_matrix_ref(self) {
+            let rhs = column_major_matrix_ref::<N, P, T>(rhs.as_slice())
+                .expect("Map storage always matches its compile-time matrix shape");
+            matmul(lhs, rhs, output);
+        } else {
+            matmul_view_into(self, rhs, output);
+        }
+    }
+}
+
+impl<const M: usize, const N: usize, T> StridedMap<'_, M, N, T>
+where
+    T: ReductionScalar,
+{
+    /// Multiplies this strided view by a vector. Exact column-major contiguous
+    /// storage uses the optimized reduction kernel; arbitrary strides use the
+    /// generic zero-copy view path.
+    #[inline]
+    pub fn matvec(&self, vector: &Vector<N, T>) -> Vector<M, T> {
+        let mut output = Vector::<M, T>::zeros();
+        self.matvec_into(vector, &mut output);
+        output
+    }
+
+    /// Multiplies this strided view by a vector into caller-owned output.
+    #[inline]
+    pub fn matvec_into(&self, vector: &Vector<N, T>, output: &mut Vector<M, T>) {
+        if let Some(matrix) = strided_column_major_matrix_ref(self) {
+            matvec(matrix, vector, output);
+        } else {
+            matvec_view_into(self, vector, output);
         }
     }
 }
@@ -383,6 +572,79 @@ where
     #[inline]
     pub fn mul_into<const P: usize>(&self, rhs: &Matrix<N, P, T>, output: &mut Matrix<M, P, T>) {
         matmul(self, rhs, output);
+    }
+
+    /// Multiplies this matrix by a contiguous column-major map using the same
+    /// optimized kernel as an owned right-hand side.
+    #[inline]
+    pub fn mul_map_into<const P: usize>(
+        &self,
+        rhs: &Map<'_, N, P, T>,
+        output: &mut Matrix<M, P, T>,
+    ) {
+        let rhs = column_major_matrix_ref::<N, P, T>(rhs.as_slice())
+            .expect("Map storage always matches its compile-time matrix shape");
+        matmul(self, rhs, output);
+    }
+
+    /// Multiplies this matrix by a strided view. Exact column-major contiguous
+    /// storage uses the optimized kernel; arbitrary strides use the generic
+    /// zero-copy view path.
+    #[inline]
+    pub fn mul_strided_into<const P: usize>(
+        &self,
+        rhs: &StridedMap<'_, N, P, T>,
+        output: &mut Matrix<M, P, T>,
+    ) {
+        if let Some(rhs) = strided_column_major_matrix_ref(rhs) {
+            matmul(self, rhs, output);
+        } else {
+            matmul_view_into(self, rhs, output);
+        }
+    }
+
+    /// Updates this matrix in place with `self += alpha * x`.
+    ///
+    /// For built-in floating-point scalars, the per-element multiply-add uses
+    /// the scalar backend's fused operation where the target supports it.
+    #[inline]
+    pub fn axpy_in_place(&mut self, alpha: T, x: &Self) {
+        for (output, &input) in self.as_mut_slice().iter_mut().zip(x.as_slice()) {
+            *output = T::mul_add(alpha, input, *output);
+        }
+    }
+
+    /// Writes `alpha * self + y` into caller-provided `output`.
+    ///
+    /// This is the non-aliasing output form of an AXPY-style update and avoids
+    /// the temporary matrix created by `self * alpha + y`.
+    #[inline]
+    pub fn axpy_into(&self, alpha: T, y: &Self, output: &mut Self) {
+        for ((output, &x), &y) in output
+            .as_mut_slice()
+            .iter_mut()
+            .zip(self.as_slice())
+            .zip(y.as_slice())
+        {
+            *output = T::mul_add(alpha, x, y);
+        }
+    }
+
+    /// Writes `alpha * self + beta * rhs` into caller-provided `output`.
+    ///
+    /// The operation is explicit rather than expression-template based, so the
+    /// destination storage remains obvious while one intermediate matrix is
+    /// eliminated from common estimation/control update patterns.
+    #[inline]
+    pub fn linear_combination_into(&self, alpha: T, rhs: &Self, beta: T, output: &mut Self) {
+        for ((output, &lhs), &rhs) in output
+            .as_mut_slice()
+            .iter_mut()
+            .zip(self.as_slice())
+            .zip(rhs.as_slice())
+        {
+            *output = T::mul_add(alpha, lhs, beta * rhs);
+        }
     }
 }
 

@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version expected in Cargo.toml (for example 0.3.0)"
+        required: true
+        type: string
+      publish:
+        description: "Publish to crates.io after validation"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stack-algebra-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validate and optionally publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Install Eigen reference dependency
+        run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
+      - name: Verify requested version matches Cargo.toml
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+        run: |
+          actual=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+          test -n "$actual"
+          if [ "$actual" != "$EXPECTED_VERSION" ]; then
+            echo "Cargo.toml version '$actual' does not match requested '$EXPECTED_VERSION'" >&2
+            exit 1
+          fi
+      - name: Validate release tree
+        env:
+          EIGEN3_INCLUDE_DIR: /usr/include/eigen3
+        run: |
+          test -z "$(git status --porcelain)"
+          cargo fmt --all -- --check
+          cargo clippy -- -D warnings
+          cargo test --no-default-features --lib --tests
+          cargo test --doc --all-features
+          cargo check --examples --no-default-features
+          cargo package --allow-dirty
+      - name: Publish to crates.io
+        if: ${{ inputs.publish }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          test -n "$CARGO_REGISTRY_TOKEN"
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"

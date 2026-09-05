@@ -65,7 +65,13 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
         column_pointers: &[usize],
         output: &mut MaybeUninit<Self>,
     ) -> Result<(), CscError> {
-        if row_indices.len() > MAX_NNZ || column_pointers.len() != COLS + 1 {
+        if row_indices.len() > MAX_NNZ {
+            return Err(CscError::CapacityExceeded {
+                required: row_indices.len(),
+                capacity: MAX_NNZ,
+            });
+        }
+        if column_pointers.len() != COLS + 1 {
             return Err(CscError::LengthMismatch);
         }
         if column_pointers[0] != 0 {
@@ -133,8 +139,14 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
         column_starts: &[usize; COLS],
         nnz: usize,
     ) -> Result<(), CscError> {
-        if nnz != row_indices.len() || nnz > MAX_NNZ {
+        if nnz != row_indices.len() {
             return Err(CscError::LengthMismatch);
+        }
+        if nnz > MAX_NNZ {
+            return Err(CscError::CapacityExceeded {
+                required: nnz,
+                capacity: MAX_NNZ,
+            });
         }
         if COLS == 0 || column_starts[0] != 0 {
             return Err(CscError::InvalidColumnPointers);
@@ -278,8 +290,14 @@ where
         row_indices: &[usize],
         column_pointers: &[usize],
     ) -> Result<Self, CscError> {
-        if values.len() != row_indices.len() || values.len() > MAX_NNZ {
+        if values.len() != row_indices.len() {
             return Err(CscError::LengthMismatch);
+        }
+        if values.len() > MAX_NNZ {
+            return Err(CscError::CapacityExceeded {
+                required: values.len(),
+                capacity: MAX_NNZ,
+            });
         }
         let pattern = StaticCscPattern::from_arrays(row_indices, column_pointers)?;
         let nnz = values.len();
@@ -481,11 +499,10 @@ where
             }
             Err(offset) => start + offset,
         };
-        if self.nnz() == MAX_NNZ {
-            return Err(CscError::CapacityExceeded);
-        }
-        if self.nnz() >= u32::MAX as usize {
-            return Err(CscError::CapacityExceeded);
+        let required = self.nnz().saturating_add(1);
+        let capacity = MAX_NNZ.min(u32::MAX as usize);
+        if required > capacity {
+            return Err(CscError::CapacityExceeded { required, capacity });
         }
 
         for index in (position..self.nnz()).rev() {

@@ -15,7 +15,7 @@ mod arm;
 pub(crate) trait MatmulBackend<T> {
     /// Multiplies fixed-size matrices into caller-provided output storage.
     ///
-    /// Implementations are selected through [`MatrixScalar::Matmul`], so the
+    /// Implementations are selected through [`MatrixScalar::matmul`], so the
     /// dispatch is resolved at compile time and does not add a runtime branch.
     fn run<const M: usize, const N: usize, const P: usize>(
         lhs: &Matrix<M, N, T>,
@@ -180,60 +180,14 @@ pub(crate) trait ReductionBackend<T> {
 
 pub(crate) use portable::ScalarReduction;
 
-/// Scalar support for fixed-size matrix multiplication and factorizations.
+/// Scalar support for portable factorization update operations.
 ///
-/// Implementing this trait enables matrix multiplication and the dense
-/// factorization APIs for a scalar type. The default methods use portable
-/// scalar loops. Built-in floating-point types override those methods with
-/// target-selected kernels when available.
-pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
-    /// Computes `lhs * rhs + addend` using the scalar backend's preferred
-    /// arithmetic operation.
-    #[doc(hidden)]
-    #[inline]
-    fn mul_add(lhs: Self, rhs: Self, addend: Self) -> Self {
-        addend + lhs * rhs
-    }
-
-    /// Multiplies matrices into caller-provided output storage.
-    ///
-    /// This is an implementation hook for scalar types. Normal callers use
-    /// [`crate::Matrix::mul_into`] or the `*` operator instead.
-    #[doc(hidden)]
-    #[inline]
-    fn matmul<const M: usize, const N: usize, const P: usize>(
-        lhs: &Matrix<M, N, Self>,
-        rhs: &Matrix<N, P, Self>,
-        output: &mut Matrix<M, P, Self>,
-    ) {
-        portable::matmul_scalar(lhs, rhs, output);
-    }
-
-    /// Accumulates a dot product starting from `initial`.
-    #[doc(hidden)]
-    #[inline]
-    fn dot_accumulate(lhs: &[Self], rhs: &[Self], initial: Self) -> Self {
-        let mut result = initial;
-        for (lhs_value, rhs_value) in lhs.iter().zip(rhs.iter()) {
-            result = result + *lhs_value * *rhs_value;
-        }
-        result
-    }
-
-    #[doc(hidden)]
-    #[inline]
-    fn symmetric_dot(lhs: &[Self], rhs: &[Self]) -> (Self, Self, Self) {
-        let mut lhs_squared = Self::zero();
-        let mut rhs_squared = Self::zero();
-        let mut product = Self::zero();
-        for (left, right) in lhs.iter().zip(rhs.iter()) {
-            lhs_squared = lhs_squared + *left * *left;
-            rhs_squared = rhs_squared + *right * *right;
-            product = product + *left * *right;
-        }
-        (lhs_squared, rhs_squared, product)
-    }
-
+/// This trait separates decomposition-specific update kernels from the core
+/// [`MatrixScalar`] contract. External scalar types can opt into dense
+/// factorization support with an empty implementation; the default methods use
+/// portable scalar loops. Built-in floating-point types override selected
+/// methods with target-specific kernels where that is profitable.
+pub trait FactorizationScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
     /// Applies the symmetric rank-k update used by LDLᵀ factorization.
     #[doc(hidden)]
     #[inline]
@@ -317,6 +271,7 @@ pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
         }
     }
 
+    /// Updates one Cholesky factor column after its diagonal is known.
     #[doc(hidden)]
     #[inline]
     fn cholesky_update_column<const D: usize>(
@@ -334,6 +289,61 @@ pub trait MatrixScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
             }
             data[column * D + row] = value / diagonal;
         }
+    }
+}
+
+/// Scalar support for fixed-size matrix multiplication.
+///
+/// Implementing [`FactorizationScalar`] and this trait enables matrix
+/// multiplication and the dense factorization APIs for a scalar type. The
+/// default methods use portable scalar loops. Built-in floating-point types
+/// override those methods with target-selected kernels when available.
+pub trait MatrixScalar: FactorizationScalar {
+    /// Computes `lhs * rhs + addend` using the scalar backend's preferred
+    /// arithmetic operation.
+    #[doc(hidden)]
+    #[inline]
+    fn mul_add(lhs: Self, rhs: Self, addend: Self) -> Self {
+        addend + lhs * rhs
+    }
+
+    /// Multiplies matrices into caller-provided output storage.
+    ///
+    /// This is an implementation hook for scalar types. Normal callers use
+    /// [`crate::Matrix::mul_into`] or the `*` operator instead.
+    #[doc(hidden)]
+    #[inline]
+    fn matmul<const M: usize, const N: usize, const P: usize>(
+        lhs: &Matrix<M, N, Self>,
+        rhs: &Matrix<N, P, Self>,
+        output: &mut Matrix<M, P, Self>,
+    ) {
+        portable::matmul_scalar(lhs, rhs, output);
+    }
+
+    /// Accumulates a dot product starting from `initial`.
+    #[doc(hidden)]
+    #[inline]
+    fn dot_accumulate(lhs: &[Self], rhs: &[Self], initial: Self) -> Self {
+        let mut result = initial;
+        for (lhs_value, rhs_value) in lhs.iter().zip(rhs.iter()) {
+            result = result + *lhs_value * *rhs_value;
+        }
+        result
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    fn symmetric_dot(lhs: &[Self], rhs: &[Self]) -> (Self, Self, Self) {
+        let mut lhs_squared = Self::zero();
+        let mut rhs_squared = Self::zero();
+        let mut product = Self::zero();
+        for (left, right) in lhs.iter().zip(rhs.iter()) {
+            lhs_squared = lhs_squared + *left * *left;
+            rhs_squared = rhs_squared + *right * *right;
+            product = product + *left * *right;
+        }
+        (lhs_squared, rhs_squared, product)
     }
 }
 
@@ -375,6 +385,12 @@ pub trait ReductionScalar: MatrixScalar {
     }
 }
 
+macro_rules! impl_scalar_factorization_scalar {
+    ($($scalar:ty),+ $(,)?) => {
+        $(impl FactorizationScalar for $scalar {})+
+    };
+}
+
 macro_rules! impl_scalar_matrix_scalar {
     ($($scalar:ty),+ $(,)?) => {
         $(impl MatrixScalar for $scalar {})+
@@ -387,8 +403,15 @@ macro_rules! impl_scalar_reduction_scalar {
     };
 }
 
+impl_scalar_factorization_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_scalar_matrix_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_scalar_reduction_scalar!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+
+#[cfg(not(any(
+    target_arch = "x86_64",
+    all(target_arch = "aarch64", target_feature = "neon"),
+)))]
+impl_scalar_factorization_scalar!(f32, f64);
 
 #[cfg(not(any(
     target_arch = "x86_64",
@@ -430,7 +453,7 @@ pub(crate) use portable::matmul_scalar;
 #[cfg(test)]
 mod tests {
     use super::matmul_scalar;
-    use crate::{Matrix, MatrixScalar, ReductionScalar, Vector, Zero};
+    use crate::{FactorizationScalar, Matrix, MatrixScalar, ReductionScalar, Vector, Zero};
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     struct CustomScalar(i32);
@@ -461,6 +484,7 @@ mod tests {
         }
     }
 
+    impl FactorizationScalar for CustomScalar {}
     impl MatrixScalar for CustomScalar {}
     impl ReductionScalar for CustomScalar {}
 
@@ -662,7 +686,13 @@ mod tests {
         let mut output = [1.0_f64, -2.0, 3.5, 4.0, -5.0, 6.25, 7.0];
         let first = [0.5_f64, 1.0, -2.0, 3.0, 4.0, -1.5, 2.5];
         let second = [-1.0_f64, 2.0, 0.5, -2.5, 1.5, 3.0, -4.0];
-        <f64 as MatrixScalar>::rank_update_two_sub(&mut output, &first, 1.25, &second, -0.75);
+        <f64 as FactorizationScalar>::rank_update_two_sub(
+            &mut output,
+            &first,
+            1.25,
+            &second,
+            -0.75,
+        );
 
         let expected = [-0.375, -1.75, 6.375, -1.625, -8.875, 10.375, 0.875];
         for (actual, expected) in output.iter().zip(expected) {
@@ -675,7 +705,13 @@ mod tests {
         let mut output = [1.0_f32, -2.0, 3.5, 4.0, -5.0, 6.25, 7.0];
         let first = [0.5_f32, 1.0, -2.0, 3.0, 4.0, -1.5, 2.5];
         let second = [-1.0_f32, 2.0, 0.5, -2.5, 1.5, 3.0, -4.0];
-        <f32 as MatrixScalar>::rank_update_two_sub(&mut output, &first, 1.25, &second, -0.75);
+        <f32 as FactorizationScalar>::rank_update_two_sub(
+            &mut output,
+            &first,
+            1.25,
+            &second,
+            -0.75,
+        );
 
         let expected = [-0.375, -1.75, 6.375, -1.625, -8.875, 10.375, 0.875];
         for (actual, expected) in output.iter().zip(expected) {

@@ -96,7 +96,13 @@ fn singular_and_non_positive_definite_inputs_are_rejected() {
 fn insufficient_factor_capacity_is_reported() {
     let matrix = tridiagonal_spd([4.0, 3.0, 2.0]);
     let result = StaticCscCholesky::<3, 2, f64>::decompose(&matrix);
-    assert!(matches!(result, Err(SparseCholeskyError::CapacityExceeded)));
+    assert_eq!(
+        result,
+        Err(SparseCholeskyError::CapacityExceeded {
+            required: 5,
+            capacity: 2,
+        })
+    );
 }
 
 #[test]
@@ -138,10 +144,13 @@ fn symbolic_fill_in_is_bounded() {
         &[0, 4, 6, 8, 10],
     )
     .unwrap();
-    assert!(matches!(
+    assert_eq!(
         StaticCscCholesky::<4, 9, f64>::decompose(&matrix),
-        Err(SparseCholeskyError::CapacityExceeded)
-    ));
+        Err(SparseCholeskyError::CapacityExceeded {
+            required: 10,
+            capacity: 9,
+        })
+    );
     let factor = StaticCscCholesky::<4, 10, f64>::decompose(&matrix).unwrap();
     assert_eq!(factor.lower().nnz(), 10);
 }

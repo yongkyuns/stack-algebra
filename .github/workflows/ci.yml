@@ -2,23 +2,43 @@ on: [push, pull_request]
 
 name: Build
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check
       - run: cargo check --no-default-features
+      - name: Run representative examples
+        run: |
+          cargo run --example ekf_measurement_update --no-default-features
+          cargo run --example mapped_least_squares --no-default-features
+          cargo run --example embedded_resource_budget --no-default-features
+      - name: Check release benchmark script syntax
+        run: sh -n scripts/run_release_benchmarks.sh
       - name: Test SSE2 backend without AVX2
         run: RUSTFLAGS="-C target-feature=-avx2,-fma" cargo test --lib
+
+  msrv:
+    name: MSRV 1.87
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.87.0
+      - run: cargo check --lib --no-default-features
+      - run: cargo check --lib --features std
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
       - run: EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo test --features eigen-compare
@@ -28,20 +48,21 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
       - run: EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo test --doc --all-features
       - run: EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo doc --no-deps --all-features
 
   embedded:
-    name: Embedded targets and QEMU
+    name: Embedded targets, QEMU, and resources
     runs-on: ubuntu-latest
     env:
       STACK_USAGE_LIMIT_BYTES: 8192
+      QUALIFICATION_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: aarch64-unknown-none,thumbv6m-none-eabi,thumbv7em-none-eabihf,riscv32imc-unknown-none-elf,wasm32-unknown-unknown
       - run: sudo apt-get update && sudo apt-get install --yes qemu-system-arm qemu-system-misc
@@ -55,6 +76,29 @@ jobs:
       - run: qemu-tests/run_cortex_m.sh
       - run: qemu-tests/run_riscv32.sh
       - run: qemu-tests/run_aarch64.sh
+      - name: Generate Cortex-M resource report and enforce budgets
+        run: qemu-tests/qualify_cortex_m.sh
+      - name: Check real-hardware benchmark harness builds
+        run: >-
+          RUSTFLAGS="-C link-arg=-Tlink.x"
+          cargo build --manifest-path qemu-tests/Cargo.toml
+          --target thumbv7em-none-eabihf --release --features cortex-m
+          --bin cortex-m-bench
+      - name: Add resource report to job summary
+        run: |
+          printf '### Cortex-M resource provenance\n\n```text\n' >> "$GITHUB_STEP_SUMMARY"
+          cat qemu-tests/resource-provenance.txt >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n\n### Cortex-M resource report\n\n' >> "$GITHUB_STEP_SUMMARY"
+          cat qemu-tests/resource-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Cortex-M resource report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-m-resource-report
+          path: |
+            qemu-tests/resource-provenance.txt
+            qemu-tests/resource-report.tsv
+            qemu-tests/resource-report.md
+          if-no-files-found: error
 
   arm64:
     name: Native ARM64 tests
@@ -69,7 +113,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path qemu-tests/Cargo.toml -- --check
@@ -78,7 +122,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo clippy -- -D warnings
 
@@ -86,7 +130,7 @@ jobs:
     name: Miri view and sparse safety
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
@@ -94,6 +138,7 @@ jobs:
       - run: >-
           cargo miri test --no-default-features
           --test view_ops
+          --test fused_view_paths
           --test sparse
           --test sparse_cholesky
           --test sparse_ldlt

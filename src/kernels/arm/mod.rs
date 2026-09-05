@@ -1,4 +1,4 @@
-use super::{MatmulBackend, MatrixScalar, ReductionBackend, ReductionScalar};
+use super::{FactorizationScalar, MatmulBackend, MatrixScalar, ReductionBackend, ReductionScalar};
 use crate::{Matrix, Vector};
 
 mod neon;
@@ -17,26 +17,7 @@ fn primitive_mul_add_f64(lhs: f64, rhs: f64, addend: f64) -> f64 {
 
 macro_rules! impl_neon_scalar {
     ($scalar:ty, $mul_add:ident) => {
-        impl MatrixScalar for $scalar {
-            #[inline]
-            fn mul_add(lhs: Self, rhs: Self, addend: Self) -> Self {
-                $mul_add(lhs, rhs, addend)
-            }
-
-            #[inline]
-            fn matmul<const M: usize, const N: usize, const P: usize>(
-                lhs: &Matrix<M, N, Self>,
-                rhs: &Matrix<N, P, Self>,
-                output: &mut Matrix<M, P, Self>,
-            ) {
-                <NeonMatmul as MatmulBackend<$scalar>>::run(lhs, rhs, output);
-            }
-
-            #[inline]
-            fn dot_accumulate(lhs: &[Self], rhs: &[Self], initial: Self) -> Self {
-                <NeonMatmul as MatmulBackend<$scalar>>::dot(lhs, rhs, initial)
-            }
-
+        impl FactorizationScalar for $scalar {
             #[inline]
             fn symmetric_rank_k_update<const D: usize>(
                 matrix: &mut Matrix<D, D, Self>,
@@ -86,6 +67,27 @@ macro_rules! impl_neon_scalar {
                 <NeonMatmul as MatmulBackend<$scalar>>::cholesky_update_column(
                     matrix, column, diagonal,
                 );
+            }
+        }
+
+        impl MatrixScalar for $scalar {
+            #[inline]
+            fn mul_add(lhs: Self, rhs: Self, addend: Self) -> Self {
+                $mul_add(lhs, rhs, addend)
+            }
+
+            #[inline]
+            fn matmul<const M: usize, const N: usize, const P: usize>(
+                lhs: &Matrix<M, N, Self>,
+                rhs: &Matrix<N, P, Self>,
+                output: &mut Matrix<M, P, Self>,
+            ) {
+                <NeonMatmul as MatmulBackend<$scalar>>::run(lhs, rhs, output);
+            }
+
+            #[inline]
+            fn dot_accumulate(lhs: &[Self], rhs: &[Self], initial: Self) -> Self {
+                <NeonMatmul as MatmulBackend<$scalar>>::dot(lhs, rhs, initial)
             }
         }
 

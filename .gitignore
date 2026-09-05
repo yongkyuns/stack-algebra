@@ -2,4 +2,5 @@
 /build
 /Cargo.lock
 /benchmark-report
+/release-artifacts
 __pycache__/

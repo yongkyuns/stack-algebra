@@ -1,0 +1,48 @@
+name: API stability
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  semver:
+    name: Semver against base
+    runs-on: ubuntu-latest
+    env:
+      EIGEN3_INCLUDE_DIR: /usr/include/eigen3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install Eigen
+        run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
+      - name: Check public API compatibility
+        if: github.event_name == 'pull_request'
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: ${{ github.event.pull_request.base.sha }}
+      - name: Check release compatibility with crates.io
+        if: github.event_name == 'workflow_dispatch'
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+
+  contracts:
+    name: Stabilization contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check no_std core
+        run: cargo check --no-default-features
+      - name: Run public API and invariant contracts
+        run: cargo test --no-default-features --test public_api --test numerical_contracts --test stabilization_contracts --test fused_view_paths
+      - name: Check focused benchmark harness
+        run: cargo check --bench fused

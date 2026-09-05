@@ -10,8 +10,13 @@ pub enum CscError {
     /// A row index is outside the matrix dimensions or is not strictly sorted
     /// within its column.
     InvalidRowIndices,
-    /// An insertion would exceed the compile-time nonzero capacity.
-    CapacityExceeded,
+    /// An operation requires more stored entries than the fixed capacity.
+    CapacityExceeded {
+        /// Number of entries required to complete the operation.
+        required: usize,
+        /// Number of entries available in the fixed-capacity storage.
+        capacity: usize,
+    },
     /// The requested row/column is outside the matrix dimensions.
     IndexOutOfBounds,
     /// The requested entry is not present in the sparse pattern.
@@ -23,8 +28,13 @@ pub enum CscError {
 /// Errors returned while analyzing or numerically factoring a sparse matrix.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SparseCholeskyError {
-    /// The sparse factor would exceed its compile-time capacity.
-    CapacityExceeded,
+    /// The sparse factor requires more entries than its fixed capacity.
+    CapacityExceeded {
+        /// Number of factor entries required by symbolic analysis.
+        required: usize,
+        /// Number of factor entries available in the fixed-capacity storage.
+        capacity: usize,
+    },
     /// A diagonal pivot was not strictly positive.
     NotPositiveDefinite,
     /// A diagonal LDLᵀ pivot was zero.
@@ -45,7 +55,9 @@ impl From<CscError> for SparseCholeskyError {
     #[inline]
     fn from(error: CscError) -> Self {
         match error {
-            CscError::CapacityExceeded => Self::CapacityExceeded,
+            CscError::CapacityExceeded { required, capacity } => {
+                Self::CapacityExceeded { required, capacity }
+            }
             other => Self::Csc(other),
         }
     }

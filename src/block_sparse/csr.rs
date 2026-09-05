@@ -64,10 +64,15 @@ where
         block_row_pointers: &[usize],
     ) -> Result<Self, CscError> {
         if values.len() != block_column_indices.len()
-            || values.len() > MAX_BLOCK_NNZ
             || block_row_pointers.len() != BLOCK_GRID_ROWS + 1
         {
             return Err(CscError::LengthMismatch);
+        }
+        if values.len() > MAX_BLOCK_NNZ {
+            return Err(CscError::CapacityExceeded {
+                required: values.len(),
+                capacity: MAX_BLOCK_NNZ,
+            });
         }
         if block_row_pointers[0] != 0 {
             return Err(CscError::InvalidColumnPointers);

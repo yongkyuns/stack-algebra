@@ -1,6 +1,6 @@
 #![no_std]
 #![deny(missing_docs)]
-//! Fixed-size, stack-allocated linear algebra for `no_std` Rust.
+//! Fixed-size, inline-storage linear algebra for `no_std` Rust.
 //!
 //! [`Matrix`] stores its dimensions in const generics, so a value such as
 //! `Matrix<3, 3, f64>` has no run-time shape metadata and no heap allocation.
@@ -93,7 +93,7 @@ pub use block_sparse::{
 pub use bounded::{MatrixBuf, MatrixBufError, MatrixBufView, MatrixBufViewMut};
 pub use geometry::{AffineTransform, AngleAxis, Isometry, Quaternion, RotationMatrix};
 pub use index::MatrixIndex;
-pub use kernels::{MatrixScalar, ReductionScalar};
+pub use kernels::{FactorizationScalar, MatrixScalar, ReductionScalar};
 pub use num::{AsPrimitive, Float, One, Real, Zero};
 pub use ops::{matmul_view_into, matvec_view, matvec_view_into};
 pub use sparse::{

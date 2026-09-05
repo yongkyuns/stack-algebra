@@ -1,1 +1,4 @@
 target/
+resource-provenance.txt
+resource-report.tsv
+resource-report.md
