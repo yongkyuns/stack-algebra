@@ -67,4 +67,4 @@ harness = false
 name = "dense_multi_rhs"
 harness = false
 
-# Temporary PR trigger for #9 multi-RHS performance sampling.
+# Temporary PR trigger for #9 scalar-fast-path performance sampling.
