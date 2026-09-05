@@ -1,138 +1,150 @@
-# Nightly benchmark comparison
+# Performance
 
-The nightly workflow compares stack-algebra with Eigen, faer, and nalgebra
-through a shared set of deterministic dense operations. It runs on a
-GitHub-hosted Linux runner
-with a native CPU target and publishes the raw measurements plus a
-self-contained HTML report as the `nightly-benchmark-report` artifact. The
-four Rust benchmark groups and the native Eigen runner execute as parallel
-jobs; a final report job merges their measurements.
+Performance measurements are included to help users understand the practical
+cost of choosing `stack-algebra` for fixed-size workloads. They are **not a
+leaderboard and not a claim that this project is intended to compete with or
+replace Eigen, faer, or nalgebra**.
 
-Each report also contains runner provenance: commit and ref, dirty-tree state,
-runner OS/architecture, CPU model, kernel, Rust compiler, Cargo version, UTC
-generation time, and measurement count. These fields are shown in the report
-metadata line and written to `metadata.json` beside the HTML and CSV files.
+Those libraries are useful references because they are familiar, mature, and
+represent different design points. The interesting question is whether
+`stack-algebra` is in a reasonable performance range for the workloads it
+serves while preserving its fixed/bounded storage and `no_std` model.
 
-Nightly uses short Criterion windows (0.1 seconds of warmup, 0.1 seconds of
-measurement, and 10 samples) and five 5-millisecond Eigen samples so the full
-comparison normally completes within a few minutes. Use longer windows and the
-default 15 Eigen samples for release-quality measurements. CI caches the
-Rust release artifacts and the source-keyed Eigen executable; the first run
-after changing the benchmark sources still pays their compilation costs.
+## What the comparisons are for
 
-## Run locally
+Use the benchmark results to answer questions such as:
 
-Install Eigen (`libeigen3-dev` on Ubuntu), then run the Criterion benches and
-native Eigen runner:
+- Is a fixed-size operation in roughly the expected performance class?
+- Is a particular factorization unexpectedly expensive for my problem shape?
+- What does factor reuse save compared with factor-and-solve?
+- Does an optimized host kernel materially change the result?
+- Is a performance regression visible from one revision to the next?
+
+Do **not** use a single ratio to conclude that one library is generally
+"faster." Different libraries make different choices about storage, allocation,
+runtime sizing, vectorization, sparse ordering, and supported workloads.
+
+## Representative snapshot
+
+The table below is a representative native-host snapshot from **August 8,
+2026**. Values are median nanoseconds per operation from the repository's fast
+benchmark sweep and are included only to show the approximate scale of the
+implementation at that point in time.
+
+### 32x32 dense operations
+
+| Operation | Scalar | stack-algebra | Eigen | faer |
+| --- | --- | ---: | ---: | ---: |
+| Matrix multiply | `f32` | 1,021 ns | 1,378 ns | 1,088 ns |
+| Matrix multiply | `f64` | 1,637 ns | 2,493 ns | 1,827 ns |
+| Matrix-vector multiply | `f32` | 33 ns | 52 ns | 174 ns |
+| Matrix-vector multiply | `f64` | 68 ns | 61 ns | 163 ns |
+| Cholesky factor | `f32` | 3,594 ns | 3,991 ns | 3,367 ns |
+| Cholesky factor | `f64` | 3,294 ns | 3,847 ns | 2,869 ns |
+| LDLT factor | `f32` | 4,793 ns | 4,953 ns | 2,783 ns |
+| LDLT factor | `f64` | 5,244 ns | 6,245 ns | 3,519 ns |
+| LU factor | `f32` | 3,671 ns | 4,757 ns | 7,576 ns |
+| LU factor | `f64` | 5,689 ns | 7,693 ns | 6,960 ns |
+| Householder QR factor | `f32` | 12,643 ns | 11,422 ns | — |
+| Householder QR factor | `f64` | 9,499 ns | 12,938 ns | — |
+
+### Tall SVD examples
+
+| Shape | Scalar | stack-algebra | Eigen |
+| --- | --- | ---: | ---: |
+| 6x3 | `f32` | 740 ns | 930 ns |
+| 6x3 | `f64` | 984 ns | 1,180 ns |
+| 15x6 | `f32` | 4,400 ns | 4,449 ns |
+| 15x6 | `f64` | 5,400 ns | 6,861 ns |
+
+The useful takeaway is not which cell wins. For these selected fixed-size host
+workloads, `stack-algebra` was broadly in the same order of magnitude as mature
+native references, with individual operations landing on either side depending
+on scalar type and algorithm. That is the level of interpretation this snapshot
+is meant to support.
+
+## Why the numbers are not universal
+
+Microbenchmark results are highly sensitive to context:
+
+- CPU model and frequency behavior;
+- compiler and target features;
+- `f32` vs `f64`;
+- matrix dimensions and shape;
+- whether storage is fixed, dynamic, sparse, or block sparse;
+- whether allocation is inside the timed region;
+- sparse ordering and symbolic-analysis policy;
+- whether a factor is created once or reused;
+- benchmark duration and concurrent load on the machine.
+
+The nightly report records runner and toolchain provenance for this reason.
+Comparisons across different machines or benchmark phases should be treated as
+directional rather than exact.
+
+## Matching the operation matters
+
+The benchmark suite separates phases that have different meanings.
+
+For dense solvers, **factor-and-solve** includes factorization while
+**reusable-factor solve** measures a solve using an already-built factor. Those
+numbers answer different application questions and should not be compared as if
+they were the same operation.
+
+For sparse systems, the suite distinguishes symbolic analysis, numeric assembly,
+factorization, refactorization, permutation/setup, and solve. It also labels
+cases where another library uses a dynamic or allocating path so that a user can
+see when the storage model is not identical.
+
+This distinction is more important than a small percentage difference between
+two timings.
+
+## Nightly measurements
+
+The repository runs a nightly benchmark workflow that measures selected dense,
+sparse, and block-sparse operations against Eigen, faer, and nalgebra where a
+meaningful comparable case exists.
+
+The workflow publishes a `nightly-benchmark-report` artifact containing:
+
+- a self-contained HTML report;
+- CSV measurements;
+- raw benchmark inputs;
+- commit, runner, CPU, compiler, and generation metadata.
+
+Open the [nightly benchmark workflow](https://github.com/yongkyuns/stack-algebra/actions/workflows/nightly-bench.yml),
+choose a completed run, and download the `nightly-benchmark-report` artifact for
+the freshest measurements.
+
+Nightly uses relatively short measurement windows so it can cover a broad set
+of cases regularly. For an architecture or release decision, run the relevant
+case for longer on the hardware that actually matters to your application.
+
+## Running a focused benchmark locally
+
+For the Rust comparison benchmark:
 
 ```sh
-RUSTFLAGS="-C target-cpu=native" EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench \
-  --bench comparison -- --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
-for bench in dense_solvers sparse block_sparse; do
-  RUSTFLAGS="-C target-cpu=native" EIGEN3_INCLUDE_DIR=/usr/include/eigen3 cargo bench --all-features \
-    --bench "$bench" -- --warm-up-time 0.1 --measurement-time 0.1 --sample-size 10
-done
-mkdir -p benchmark-report/raw
-CXXFLAGS='-march=native' EIGEN3_INCLUDE_DIR=/usr/include/eigen3 \
-  EIGEN_BENCH_SAMPLES=5 EIGEN_BENCH_MIN_SAMPLE_MS=5 \
-  EIGEN_BENCH_CSV=benchmark-report/raw/eigen-f32.csv \
-  ./eigen/run_native_bench.sh f32 > benchmark-report/raw/eigen-f32.txt
-EIGEN_BENCH_SKIP_BUILD=1 CXXFLAGS='-march=native' EIGEN3_INCLUDE_DIR=/usr/include/eigen3 \
-  EIGEN_BENCH_SAMPLES=5 EIGEN_BENCH_MIN_SAMPLE_MS=5 \
-  EIGEN_BENCH_CSV=benchmark-report/raw/eigen-f64.csv \
-  ./eigen/run_native_bench.sh f64 > benchmark-report/raw/eigen-f64.txt
-python3 scripts/generate_benchmark_report.py \
-  --criterion-dir target/criterion \
-  --eigen-csv benchmark-report/raw/eigen-f32.csv \
-  --eigen-csv benchmark-report/raw/eigen-f64.csv \
-  --output benchmark-report/index.html \
-  --csv-output benchmark-report/results.csv \
-  --require-eigen
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench comparison
 ```
 
-### Fast full sweep
+Some comparison cases require Eigen headers and optional benchmark features.
+The repository's nightly workflow is the canonical reference for the complete
+setup and report generation.
 
-For broad triage, run all six Rust benchmark targets in parallel with short,
-bounded Criterion windows. The script uses native CPU instructions for both
-Rust (`-C target-cpu=native`) and Eigen (`-march=native`) unless the caller
-provides explicit `RUSTFLAGS` or `CXXFLAGS`:
+For embedded work, host microbenchmarks are only a first check. The most useful
+measurement is the actual operation, scalar type, matrix shape, compiler flags,
+and memory placement on the target MCU or processor.
 
-```sh
-EIGEN3_INCLUDE_DIR=/usr/include/eigen3 scripts/bench_fast.sh
-```
+## How performance fits the library's goals
 
-The default profile uses 10 ms warmup, 20 ms measurement, and 10 samples per
-case. Override `BENCH_WARMUP_TIME`, `BENCH_MEASUREMENT_TIME`, and
-`BENCH_SAMPLE_SIZE` when trading coverage for stability; Criterion requires at
-least 10 samples. Logs are written to `benchmark-report/raw/fast/`; the
-generated report is the same `benchmark-report/index.html` used by the longer
-run.
+`stack-algebra` prioritizes a combination of:
 
-This profile is for identifying regressions and ranking metrics. Use the longer
-windows above before making release or architecture decisions.
+- predictable fixed or bounded storage;
+- `no_std` usability;
+- explicit ownership and reuse;
+- numerically appropriate solver choices;
+- performance that is reasonable for the intended matrix sizes.
 
-For reproducible local reports, pass provenance as newline-delimited
-`key=value` fields with `--metadata-file`; inline `--metadata` uses the same
-keys separated by semicolons. The generator adds `generated_utc` and
-`measurement_count` automatically.
-
-The report generator also accepts one or more `--eigen-csv` files. CSV headers
-may use `operation`/`benchmark`, `library`, `shape`, `scalar`, `phase`, and
-`median_ns` (aliases such as `ns_per_op` and `time_ns` are accepted). Criterion
-paths are discovered recursively, so nested groups such as
-`sparse/llt/f64/.../stack-factor-reuse/15/new/estimates.json` do not require a
-fixed directory layout.
-
-## Interpreting results
-
-- Times are median steady-state nanoseconds per operation. Lower is better;
-  confidence intervals are retained in `results.csv` for Criterion rows.
-- The dense comparison executes eight identical operations per Criterion
-  iteration and normalizes the reported median back to one operation; the
-  native Eigen runner similarly normalizes its 64-operation batches.
-- Fixed-capacity stack-algebra matrices are compared with the corresponding
-  fixed-size Eigen/nalgebra cases where available. faer and dynamic cases are
-  labelled explicitly; a dynamic allocation path is not presented as an
-  apples-to-apples static-storage result.
-- Sparse benchmarks separate symbolic analysis, numeric assembly into a
-  validated pattern, factorization, refactorization, and solve. The
-  `stack-matvec` and `faer-matvec` phases measure sparse matrix–vector
-  multiplication into reusable output storage with identical input patterns
-  and sequential execution. The Eigen bridge covers sparse LLT matvec for the
-  tridiagonal reference case; the standalone `sparse-matvec` group covers
-  tridiagonal, banded, and star patterns at larger dimensions without requiring
-  factorization capacity.
-  `stack-assemble` phase measures repeated `zero_with_pattern` plus
-  coordinate-based `add_to_value` updates and is specific to the fixed-capacity
-  assembly API. `stack-assemble-indexed` uses entry positions precomputed from
-  the validated pattern and measures the no-lookup update path. Use the latter
-  when a generated workload assembles the same symbolic pattern repeatedly.
-  Ordered sparse cases also report one-shot `stack-permute` separately from
-  `stack-permute-reuse`, which uses a retained coordinate map.
-  `faer-factor-reuse` measures faer's high-level constructor, including its
-  numeric-buffer allocation; `faer-factor-reuse-storage` uses faer's low-level
-  numeric API with reusable factor and scratch storage. Compare ordered cases
-  with the same ordering policy: faer uses AMD by default, while the default
-  stack-algebra path preserves identity ordering.
-  Reusable-factor solve timings exclude the one-time factorization; factor-
-  and-solve timings include both. Do not compare these phases as if they were
-  the same operation.
-- The dense LDLT suite includes both factor-and-solve cases and reusable
-  two-right-hand-side solve cases; the latter keeps factorization outside the
-  timed region.
-- Sparse LDLT includes a separate auto-pivot group for zero-leading-diagonal
-  inputs, so sparse diagonal pivoting is not conflated with the no-pivot path;
-  its factor and reusable-refactorization phases are measured separately.
-- Inputs, dimensions, scalar type, and benchmark setup are owned by the bench
-  sources. Correctness checks should run before timing and failed checks must
-  fail the benchmark rather than produce a result.
-- Results are machine-specific. The report records the commit and runner, but
-  comparisons across different CPU models should be treated as directional.
-
-## Nightly report artifacts
-
-The nightly workflow always uploads a `nightly-benchmark-report` artifact. Open
-the [nightly benchmark workflow](https://github.com/yongkyuns/stack-algebra/actions/workflows/nightly-bench.yml),
-select a completed run, and download the artifact to view `index.html` and the
-raw CSV/JSON inputs. GitHub Pages is reserved for the documentation site, so a
-benchmark run cannot overwrite the published documentation.
+A performance improvement is valuable when it preserves those properties and
+helps a real workload. Matching every specialized library or backend on every
+shape is not a project requirement.
