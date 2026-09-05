@@ -3,6 +3,7 @@ name = "stack-algebra"
 authors = ["Yongkyun Shin <yongkyuns@gmail.com>"]
 description = "Stack-allocated lightweight algebra for bare-metal rust"
 repository = "https://github.com/yongkyuns/stack-algebra"
+homepage = "https://yongkyuns.github.io/stack-algebra/"
 documentation = "https://docs.rs/stack-algebra"
 readme = "README.md"
 version = "0.2.0"
