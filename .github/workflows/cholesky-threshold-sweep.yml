@@ -96,3 +96,5 @@ jobs:
           git add .github/workflows/cholesky-threshold-sweep.yml
           git commit -m "chore: remove Cholesky threshold sweep helper"
           git push origin HEAD:agent/cholesky-blocked-threshold
+
+# Trigger after workflow registration.
