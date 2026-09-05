@@ -1,0 +1,136 @@
+name: Cholesky threshold summary
+
+on:
+  push:
+    branches:
+      - agent/cholesky-blocked-threshold
+    paths:
+      - .github/workflows/cholesky-threshold-summary.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/cholesky-blocked-threshold
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare focused Cholesky benchmark
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('benches/comparison.rs')
+          text = path.read_text()
+          marker = '            pub fn run(c: &mut Criterion) {'
+          start = text.index(marker)
+          brace = text.index('{', start)
+          depth = 0
+          for index in range(brace, len(text)):
+              if text[index] == '{':
+                  depth += 1
+              elif text[index] == '}':
+                  depth -= 1
+                  if depth == 0:
+                      end = index + 1
+                      break
+          replacement = '''            pub fn run(c: &mut Criterion) {
+                llt::<15>(c);
+                llt::<16>(c);
+                llt::<24>(c);
+                llt::<32>(c);
+                llt::<48>(c);
+                llt::<64>(c);
+            }'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+
+      - name: Measure thresholds and write compact summary
+        env:
+          RUSTFLAGS: -C target-cpu=native
+          STACK_ALGEBRA_BENCH_FAST: '1'
+        run: |
+          cp src/algebra/cholesky.rs /tmp/cholesky.rs
+          : > /tmp/cholesky-medians.csv
+
+          measure () {
+            label="$1"
+            threshold="$2"
+            cp /tmp/cholesky.rs src/algebra/cholesky.rs
+            THRESHOLD="$threshold" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path('src/algebra/cholesky.rs')
+          text = path.read_text()
+          old = 'const BLOCKED_THRESHOLD: usize = 64;'
+          count = text.count(old)
+          assert count == 2, count
+          path.write_text(text.replace(old, f"const BLOCKED_THRESHOLD: usize = {os.environ['THRESHOLD']};"))
+          PY
+            cargo bench --bench comparison -- 'comparison/llt-factor/(f32|f64)/stack-algebra'
+            LABEL="$label" python3 - <<'PY'
+          import csv, json, os
+          from pathlib import Path
+          rows = []
+          root = Path('target/criterion/comparison/llt-factor')
+          for dtype in ('f32', 'f64'):
+              for dim in (15, 16, 24, 32, 48, 64):
+                  p = root / dtype / 'stack-algebra' / str(dim) / 'new' / 'estimates.json'
+                  data = json.loads(p.read_text())
+                  rows.append((os.environ['LABEL'], dtype, dim, data['median']['point_estimate']))
+          with open('/tmp/cholesky-medians.csv', 'a', newline='') as f:
+              csv.writer(f).writerows(rows)
+          PY
+          }
+
+          measure 64 64
+          measure 48 48
+          measure 32 32
+          measure 24 24
+          measure 16 16
+          measure 64-repeat 64
+
+          python3 - <<'PY'
+          import csv
+          from collections import defaultdict
+          from pathlib import Path
+
+          rows = list(csv.reader(open('/tmp/cholesky-medians.csv')))
+          values = {(label, dtype, int(dim)): float(ns) for label, dtype, dim, ns in rows}
+          lines = [
+              '# Cholesky threshold sweep summary',
+              '',
+              'Same hosted runner; Rust stable; `-C target-cpu=native`; Criterion fast mode.',
+              'Percent is median change versus the first threshold=64 measurement; negative is faster.',
+              '',
+              '| threshold | type | D15 | D16 | D24 | D32 | D48 | D64 |',
+              '|---:|:---:|---:|---:|---:|---:|---:|---:|',
+          ]
+          for label in ('64', '48', '32', '24', '16', '64-repeat'):
+              for dtype in ('f32', 'f64'):
+                  cells = []
+                  for dim in (15, 16, 24, 32, 48, 64):
+                      v = values[(label, dtype, dim)]
+                      b = values[('64', dtype, dim)]
+                      pct = (v / b - 1.0) * 100.0
+                      cells.append(f'{v:.3f} ns ({pct:+.1f}%)')
+                  lines.append(f"| {label} | {dtype} | " + ' | '.join(cells) + ' |')
+          Path('cholesky-threshold-summary.md').write_text('\n'.join(lines) + '\n')
+          PY
+
+      - name: Restore source and publish summary
+        if: always()
+        run: |
+          git checkout -- src/algebra/cholesky.rs benches/comparison.rs
+          rm -f .github/workflows/cholesky-threshold-summary.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/cholesky-threshold-summary.yml cholesky-threshold-summary.md
+          git commit -m 'chore: record Cholesky threshold sweep summary'
+          git push origin HEAD:agent/cholesky-blocked-threshold
