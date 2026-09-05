@@ -1,0 +1,98 @@
+name: Cholesky threshold sweep
+
+on:
+  push:
+    branches:
+      - agent/cholesky-blocked-threshold
+    paths:
+      - .github/workflows/cholesky-threshold-sweep.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/cholesky-blocked-threshold
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare focused Cholesky benchmark
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("benches/comparison.rs")
+          text = path.read_text()
+          marker = "            pub fn run(c: &mut Criterion) {"
+          start = text.index(marker)
+          brace = text.index("{", start)
+          depth = 0
+          end = None
+          for index in range(brace, len(text)):
+              if text[index] == "{":
+                  depth += 1
+              elif text[index] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = index + 1
+                      break
+          assert end is not None
+          replacement = '''            pub fn run(c: &mut Criterion) {
+              llt::<15>(c);
+              llt::<16>(c);
+              llt::<24>(c);
+              llt::<32>(c);
+              llt::<48>(c);
+              llt::<64>(c);
+          }'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+          cargo fmt --bench comparison
+
+      - name: Sweep blocked thresholds
+        env:
+          RUSTFLAGS: -C target-cpu=native
+          STACK_ALGEBRA_BENCH_FAST: "1"
+        run: |
+          cp src/algebra/cholesky.rs /tmp/cholesky.rs
+          for threshold in 64 48 32 24 16; do
+            cp /tmp/cholesky.rs src/algebra/cholesky.rs
+            THRESHOLD="$threshold" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path("src/algebra/cholesky.rs")
+          text = path.read_text()
+          old = "const BLOCKED_THRESHOLD: usize = 64;"
+          count = text.count(old)
+          assert count == 2, count
+          text = text.replace(old, f"const BLOCKED_THRESHOLD: usize = {os.environ['THRESHOLD']};")
+          path.write_text(text)
+          PY
+            echo "===== BLOCKED_THRESHOLD=$threshold ====="
+            if [ "$threshold" = 64 ]; then
+              cargo bench --bench comparison -- 'comparison/llt-factor' --save-baseline cholesky-64 | tee "/tmp/cholesky-threshold-$threshold.log"
+            else
+              cargo bench --bench comparison -- 'comparison/llt-factor' --baseline cholesky-64 | tee "/tmp/cholesky-threshold-$threshold.log"
+            fi
+          done
+
+          cp /tmp/cholesky.rs src/algebra/cholesky.rs
+          echo "===== BLOCKED_THRESHOLD=64 REPEAT ====="
+          cargo bench --bench comparison -- 'comparison/llt-factor' --baseline cholesky-64 | tee /tmp/cholesky-threshold-64-repeat.log
+
+      - name: Remove helper
+        if: always()
+        run: |
+          git checkout -- src/algebra/cholesky.rs benches/comparison.rs
+          rm -f .github/workflows/cholesky-threshold-sweep.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/cholesky-threshold-sweep.yml
+          git commit -m "chore: remove Cholesky threshold sweep helper"
+          git push origin HEAD:agent/cholesky-blocked-threshold
