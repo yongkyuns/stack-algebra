@@ -193,20 +193,18 @@ QEMU and cross-compilation are useful portability checks, but they do not model
 your board's cache, FPU throughput, linker layout, interrupts, or real stack
 budget. See [Platforms and embedded use](targets.md) for the current test matrix.
 
-## When another library may be a better fit
+## Where this design is not a fit
 
-`stack-algebra` is intentionally centered on fixed and bounded workloads. A
-library designed around dynamic heap-backed matrices may be a better choice
-when:
+`stack-algebra` is centered on fixed and bounded workloads. It is not a direct
+fit when:
 
 - matrix dimensions are large and genuinely unpredictable at runtime;
-- the workload is dominated by large desktop/server dense algebra;
-- you need a broad dynamic sparse ecosystem or backend integrations that are
-  outside this crate's scope;
+- the workload is dominated by large freely resized dense matrices;
+- the application depends on a broad dynamic sparse ecosystem or backend
+  integrations outside this crate's scope;
 - allocating and resizing matrices freely is more important than static memory
   accounting.
 
-Using another library in those cases is not a failure of `stack-algebra`; it is
-simply a different design point. The [Performance](benchmarking.md) page uses
-other libraries as familiar measurement references for the same reason: to give
-context, not to position the project as a replacement for them.
+Those are simply outside the current operating model. The [Performance](benchmarking.md)
+page provides representative measurements for the workloads the library does
+serve so users can get a practical sense of runtime cost.

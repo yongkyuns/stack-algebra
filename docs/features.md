@@ -144,8 +144,7 @@ matrix.
 
 ## Where the current scope stops
 
-`stack-algebra` is not intended to cover every linear-algebra workload. The
-current core does **not** provide:
+The current core does **not** provide:
 
 - a general heap-backed dynamic matrix whose dimensions can grow freely at
   runtime;
@@ -155,8 +154,6 @@ current core does **not** provide:
 - globally pivoted native block-sparse LDLT across arbitrary block boundaries
   (an explicit fixed-size dense fallback is available when required).
 
-Those boundaries are useful when evaluating fit: if your application is mostly
-large dynamic desktop/server algebra, another library may be a better starting
-point. If the workload is fixed, bounded, embedded, or ownership-sensitive,
-these constraints are often exactly what makes the behavior easier to reason
-about.
+These boundaries define the intended operating model. Workloads centered on
+fixed, bounded, mapped, or fixed-capacity sparse data fit that model directly;
+large unbounded runtime dimensions and freely growing storage do not.
