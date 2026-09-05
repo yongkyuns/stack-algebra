@@ -51,13 +51,13 @@ jobs:
           path.write_text(text[:start] + replacement + text[end:])
           PY
 
-      - name: Measure thresholds and write compact summary
+      - name: Measure thresholds and capture concise output
         env:
           RUSTFLAGS: -C target-cpu=native
           STACK_ALGEBRA_BENCH_FAST: '1'
         run: |
           cp src/algebra/cholesky.rs /tmp/cholesky.rs
-          : > /tmp/cholesky-medians.csv
+          printf '# Cholesky threshold sweep\n\nSame hosted runner; Rust stable; `-C target-cpu=native`; Criterion fast mode.\n\n' > cholesky-threshold-summary.txt
 
           measure () {
             label="$1"
@@ -73,19 +73,30 @@ jobs:
           assert count == 2, count
           path.write_text(text.replace(old, f"const BLOCKED_THRESHOLD: usize = {os.environ['THRESHOLD']};"))
           PY
-            cargo bench --bench comparison -- 'comparison/llt-factor/(f32|f64)/stack-algebra'
-            LABEL="$label" python3 - <<'PY'
-          import csv, json, os
+            printf '\n===== threshold=%s =====\n' "$label" >> cholesky-threshold-summary.txt
+            if [ "$label" = 64 ]; then
+              cargo bench --bench comparison -- 'comparison/llt-factor/(f32|f64)/stack-algebra' --save-baseline cholesky-64 2>&1 | tee /tmp/cholesky-run.log
+            else
+              cargo bench --bench comparison -- 'comparison/llt-factor/(f32|f64)/stack-algebra' --baseline cholesky-64 2>&1 | tee /tmp/cholesky-run.log
+            fi
+            python3 - <<'PY'
+          import re
           from pathlib import Path
-          rows = []
-          root = Path('target/criterion/comparison/llt-factor')
-          for dtype in ('f32', 'f64'):
-              for dim in (15, 16, 24, 32, 48, 64):
-                  p = root / dtype / 'stack-algebra' / str(dim) / 'new' / 'estimates.json'
-                  data = json.loads(p.read_text())
-                  rows.append((os.environ['LABEL'], dtype, dim, data['median']['point_estimate']))
-          with open('/tmp/cholesky-medians.csv', 'a', newline='') as f:
-              csv.writer(f).writerows(rows)
+          ansi = re.compile(r'\x1b\[[0-9;]*m')
+          text = ansi.sub('', Path('/tmp/cholesky-run.log').read_text(errors='replace'))
+          keep = []
+          active = False
+          for line in text.splitlines():
+              if 'comparison/llt-factor/' in line and '/stack-algebra/' in line:
+                  active = True
+                  keep.append(line.strip())
+              elif active and any(token in line for token in ('time:', 'change:', 'Performance has ', 'No change in performance detected.')):
+                  keep.append(line.strip())
+              elif active and line.strip() == '':
+                  active = False
+          with Path('cholesky-threshold-summary.txt').open('a') as f:
+              for line in keep:
+                  f.write(line + '\n')
           PY
           }
 
@@ -96,42 +107,14 @@ jobs:
           measure 16 16
           measure 64-repeat 64
 
-          python3 - <<'PY'
-          import csv
-          from pathlib import Path
-
-          rows = list(csv.reader(open('/tmp/cholesky-medians.csv')))
-          values = {(label, dtype, int(dim)): float(ns) for label, dtype, dim, ns in rows}
-          lines = [
-              '# Cholesky threshold sweep summary',
-              '',
-              'Same hosted runner; Rust stable; `-C target-cpu=native`; Criterion fast mode.',
-              'Percent is median change versus the first threshold=64 measurement; negative is faster.',
-              '',
-              '| threshold | type | D15 | D16 | D24 | D32 | D48 | D64 |',
-              '|---:|:---:|---:|---:|---:|---:|---:|---:|',
-          ]
-          for label in ('64', '48', '32', '24', '16', '64-repeat'):
-              for dtype in ('f32', 'f64'):
-                  cells = []
-                  for dim in (15, 16, 24, 32, 48, 64):
-                      v = values[(label, dtype, dim)]
-                      b = values[('64', dtype, dim)]
-                      pct = (v / b - 1.0) * 100.0
-                      cells.append(f'{v:.3f} ns ({pct:+.1f}%)')
-                  lines.append(f"| {label} | {dtype} | " + ' | '.join(cells) + ' |')
-          Path('cholesky-threshold-summary.md').write_text('\n'.join(lines) + '\n')
-          PY
-
       - name: Restore source and publish summary
         if: always()
         run: |
           git checkout -- src/algebra/cholesky.rs benches/comparison.rs
+          touch cholesky-threshold-summary.txt
           rm -f .github/workflows/cholesky-threshold-summary.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/cholesky-threshold-summary.yml cholesky-threshold-summary.md
+          git add -A .github/workflows/cholesky-threshold-summary.yml cholesky-threshold-summary.txt
           git commit -m 'chore: record Cholesky threshold sweep summary'
           git push origin HEAD:agent/cholesky-blocked-threshold
-
-# Trigger after workflow registration.
