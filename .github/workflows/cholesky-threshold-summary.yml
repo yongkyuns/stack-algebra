@@ -98,7 +98,6 @@ jobs:
 
           python3 - <<'PY'
           import csv
-          from collections import defaultdict
           from pathlib import Path
 
           rows = list(csv.reader(open('/tmp/cholesky-medians.csv')))
@@ -134,3 +133,5 @@ jobs:
           git add .github/workflows/cholesky-threshold-summary.yml cholesky-threshold-summary.md
           git commit -m 'chore: record Cholesky threshold sweep summary'
           git push origin HEAD:agent/cholesky-blocked-threshold
+
+# Trigger after workflow registration.
