@@ -118,3 +118,5 @@ jobs:
           git add -A .github/workflows/cholesky-threshold-summary.yml cholesky-threshold-summary.txt
           git commit -m 'chore: record Cholesky threshold sweep summary'
           git push origin HEAD:agent/cholesky-blocked-threshold
+
+# Registered; this commit triggers the concise sweep.
