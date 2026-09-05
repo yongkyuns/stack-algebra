@@ -677,9 +677,7 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                         rhs[(next, column)] = value;
                         break;
                     }
-                    let next_value = rhs[(next, column)];
-                    rhs[(next, column)] = value;
-                    value = next_value;
+                    core::mem::swap(&mut rhs[(next, column)], &mut value);
                     current = next;
                 }
             }
