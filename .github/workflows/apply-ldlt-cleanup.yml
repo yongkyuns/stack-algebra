@@ -26,12 +26,12 @@ jobs:
 
           ldlt = Path("src/algebra/ldlt.rs")
           text = ldlt.read_text()
-          old = '''                    let next_value = rhs[(next, column)];
-                    rhs[(next, column)] = value;
-                    value = next_value;
-'''
-          new = '''                    core::mem::swap(&mut rhs[(next, column)], &mut value);
-'''
+          old = (
+              "                    let next_value = rhs[(next, column)];\n"
+              "                    rhs[(next, column)] = value;\n"
+              "                    value = next_value;\n"
+          )
+          new = "                    core::mem::swap(&mut rhs[(next, column)], &mut value);\n"
           if text.count(old) != 1:
               raise SystemExit(f"expected exactly one manual swap, found {text.count(old)}")
           ldlt.write_text(text.replace(old, new, 1))
