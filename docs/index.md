@@ -1,45 +1,84 @@
 # stack-algebra
 
-`stack-algebra` provides predictable linear algebra for embedded and robotics workloads: small-to-medium compile-time or tightly bounded matrices, explicit storage and workspace reuse, zero-copy caller buffers, and fixed-capacity sparse/block-sparse solvers that work in `no_std` environments.
+`stack-algebra` is a fixed-size linear-algebra library for Rust applications that
+care about **predictable memory use, compile-time dimensions, and `no_std`
+support**. It is particularly useful for embedded systems, robotics, estimation,
+control, and other workloads where matrix sizes are known or bounded ahead of
+time.
 
-The project is intentionally not a general Eigen/nalgebra/faer replacement for large dynamic workloads.
+The core types store their data inline and do not require a heap. When the data
+already lives elsewhere, borrowed views let you operate on caller-owned,
+strided, or submatrix storage without first repacking it into a new matrix.
 
-## 0.3 development status
+## When it is a good fit
 
-The current development line is `0.3.0-alpha.1`. The software qualification work covers API compatibility checks, solver invariants, host/native tests, Miri, cross-target builds, QEMU execution, Cortex-M static resource/stack reports, and reproducible release artifacts.
+| You need | Start with |
+| --- | --- |
+| Small or medium matrices with known dimensions | `Matrix<M, N, T>` |
+| Runtime-active dimensions with a fixed maximum | `MatrixBuf<MAX_ROWS, MAX_COLS, T>` |
+| A DMA, generated, padded, or caller-owned buffer | `Map`, `StridedMap`, or `Block` |
+| Dense linear solves or least squares | Cholesky, LDLT, LU, QR, or SVD |
+| 3D rotations and rigid transforms | `Quaternion`, `RotationMatrix`, `Isometry` |
+| A fixed or bounded sparse structure | Static CSC/CSR and block-sparse types |
+| An embedded target without `alloc` | The default `no_std` core |
 
-Physical-device timing is **not** currently available and is not required to publish the portable library. Until named-board measurements exist, the project makes no real-device timing or throughput claims. Release-level cross-library performance claims separately require the pinned-machine benchmark procedure.
+Very large, freely runtime-sized, heap-backed matrices are outside the current
+core scope. `stack-algebra` is centered on fixed, bounded, mapped, and
+fixed-capacity sparse workloads where dimensions and memory ownership stay
+explicit.
 
-## Start here
-
-- [Getting started](getting-started.md) — construct matrices and choose scalar types.
-- [Tutorials](tutorials.md) — follow workflows by storage layout and solver assumptions.
-- [API usage](api-usage.md) — select storage, views, products, and solvers.
-- [Feature set](features.md) — review supported operations and boundaries.
-- [Use cases](use-cases.md) — map estimation, optimization, geometry, and sparse workflows to the API.
-- [0.3 stabilization plan](stabilization-plan.md) — current release contract and remaining gates.
-- [Solver invariant qualification](solver-qualification.md) — numerical evidence by public solver family.
-- [Target support and evidence](targets.md) — distinguish compile, QEMU, resource, and physical-device evidence.
-- [Benchmarking](benchmarking.md) — run and interpret development comparisons.
-- [Release benchmark qualification](release-benchmarking.md) — requirements for publishable host performance evidence.
-- [Release artifact qualification](release-artifacts.md) — package/API/dependency provenance for a release candidate.
-- [Roadmap](roadmap.md) — established capabilities and future priorities.
-- [API reference](api-reference.md) — browse generated Rust documentation.
+## A first solve
 
 ```rust
 use stack_algebra::{matrix, Cholesky};
 
-let matrix = matrix![4.0_f64, 1.0; 1.0, 3.0];
-let rhs = matrix![1.0_f64; 2.0];
-let factor = Cholesky::try_decompose(&matrix).expect("positive definite");
-let solution = factor.solve(&rhs);
-assert!((matrix * solution - rhs).norm() < 1.0e-12);
+let a = matrix![
+    4.0_f64, 1.0;
+    1.0,     3.0;
+];
+let b = matrix![1.0_f64; 2.0];
+
+let factor = Cholesky::try_decompose(&a).expect("A must be positive definite");
+let x = factor.solve(&b);
+
+assert!((a * x - b).norm() < 1.0e-12);
 ```
 
-## Scope
+The dimensions are part of the Rust type, so shape mismatches are caught at
+compile time. The scalar type is explicit as well; use `.cast()` when crossing
+a deliberate precision boundary.
 
-- **Dense algebra** — fixed-size matrices, products, reductions, and decompositions.
-- **Storage and views** — bounded buffers, external maps, strided layouts, and zero-copy blocks.
-- **Geometry** — quaternions, rotation matrices, isometries, and affine transforms.
-- **Sparse systems** — fixed-capacity scalar and block CSC/CSR storage and factorization.
-- **Validation** — invariant tests, differential references, target checks, resource reports, and reproducible release artifacts.
+## Where to go next
+
+- [Getting started](getting-started.md) introduces the matrix model, storage,
+  precision, and solver choices with small examples.
+- [Choosing an API](api-usage.md) is the practical decision guide for storage,
+  views, decompositions, reuse, and sparse workflows.
+- [Common use cases](use-cases.md) maps the library to estimation, calibration,
+  control, geometry, sparse systems, and embedded loops.
+- [Capabilities and limits](features.md) is the compact inventory of what the
+  crate currently supports and where its boundaries are.
+- [Platforms and embedded use](targets.md) explains `no_std` support, tested
+  targets, memory placement, and what you should still validate on hardware.
+- [Performance](benchmarking.md) provides representative measurements to give a
+  practical sense of the runtime cost of common operations.
+- [API reference](api-reference.md) links to the rustdoc generated from the same
+  revision as this guide.
+
+## Design at a glance
+
+The library favors explicitness over hidden policy:
+
+- dimensions are compile-time constants for `Matrix`, or bounded for
+  `MatrixBuf`;
+- dense values are column-major;
+- the fixed-size core does not require heap allocation;
+- `f32` and `f64` precision is explicit rather than implicitly mixed;
+- reusable factors, workspaces, and `*_into`/in-place operations are available
+  for repeated loops;
+- sparse symbolic structure can be retained while numeric values change;
+- target-specific kernels are selected at compile time, with a portable scalar
+  path available for unsupported targets.
+
+Those choices are meant to make memory ownership, numerical assumptions, and
+runtime cost easier to reason about in systems code.

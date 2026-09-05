@@ -29,11 +29,11 @@ SelfAdjointEigen|src/algebra/eigen.rs|docs/api-usage.md
 SelfAdjointView|src/algebra/self_adjoint.rs|docs/api-usage.md
 LowerTriangular|src/algebra/triangular.rs|docs/api-usage.md
 UpperTriangular|src/algebra/triangular.rs|docs/api-usage.md
-Quaternion|src/geometry.rs|docs/tutorials.md
-AngleAxis|src/geometry.rs|docs/tutorials.md
-RotationMatrix|src/geometry.rs|docs/tutorials.md
-Isometry|src/geometry.rs|docs/tutorials.md
-AffineTransform|src/geometry.rs|docs/tutorials.md
+Quaternion|src/geometry.rs|docs/use-cases.md
+AngleAxis|src/geometry.rs|docs/use-cases.md
+RotationMatrix|src/geometry.rs|docs/use-cases.md
+Isometry|src/geometry.rs|docs/use-cases.md
+AffineTransform|src/geometry.rs|docs/use-cases.md
 StaticCscPattern|src/sparse/storage.rs|docs/api-usage.md
 StaticCscMatrix|src/sparse/storage.rs|docs/api-usage.md
 StaticCscOrdering|src/sparse/ordering.rs|docs/features.md

@@ -1,11 +1,15 @@
 # API reference
 
-The API reference is generated from the current crate with `rustdoc` and is
-published under `api/stack_algebra/` in the combined site build.
+The generated Rust API documentation is built from the **same revision** as this
+guide and published alongside it.
 
-- [Open generated API reference](api/stack_algebra/index.html)
-- [View the crate on docs.rs](https://docs.rs/stack-algebra)
+- [Open the generated API reference](api/stack_algebra/index.html)
+- [View the released crate on docs.rs](https://docs.rs/stack-algebra)
 
-The generated reference is authoritative for public signatures, trait bounds,
-intra-crate links, and item-level examples. The guide pages explain concepts,
-selection criteria, and workflows; they do not replace the generated API.
+Use the guide pages when you are deciding **which representation or solver fits
+a problem**. Use rustdoc once you know the type and need exact signatures,
+trait bounds, constructors, error types, or item-level examples.
+
+The documentation site intentionally keeps those roles separate: the guide
+explains workflows and tradeoffs, while rustdoc remains authoritative for the
+public Rust API.

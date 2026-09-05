@@ -5,15 +5,48 @@
 }
 
 .content main {
-  max-width: 960px;
+  max-width: 900px;
+  line-height: 1.65;
 }
 
 .content h1 {
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.75em;
+}
+
+.content h2 {
+  margin-top: 2.15em;
+}
+
+.content h3 {
+  margin-top: 1.65em;
+}
+
+.content main > p:first-of-type {
+  font-size: 1.04em;
+}
+
+.content table {
+  width: 100%;
+  font-size: 0.95em;
+}
+
+.content th {
+  text-align: left;
 }
 
 .content code {
   border-radius: 0.2rem;
+}
+
+@media (max-width: 700px) {
+  .content main {
+    line-height: 1.55;
+  }
+
+  .content table {
+    font-size: 0.9em;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
