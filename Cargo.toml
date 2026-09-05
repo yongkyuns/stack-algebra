@@ -66,3 +66,5 @@ harness = false
 [[bench]]
 name = "dense_multi_rhs"
 harness = false
+
+# Temporary PR trigger for #9 multi-RHS performance sampling.
