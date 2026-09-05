@@ -5,7 +5,6 @@ on:
     paths:
       - "Cargo.toml"
       - "benches/dense_multi_rhs.rs"
-      - "benches/dense_multi_rhs_impl.rs"
       - ".github/workflows/dense-multi-rhs-bench.yml"
   workflow_dispatch:
 
@@ -13,21 +12,6 @@ permissions:
   contents: read
 
 jobs:
-  formatted-source:
-    name: Capture rustfmt output
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Format benchmark source
-        run: cargo fmt --all
-      - name: Upload formatted benchmark source
-        uses: actions/upload-artifact@v4
-        with:
-          name: dense-multi-rhs-formatted-source
-          path: benches/dense_multi_rhs_impl.rs
-          if-no-files-found: error
-
   benchmark:
     name: Compile, precheck, and sample multi-RHS solves
     runs-on: ubuntu-latest
@@ -37,6 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Check formatting
+        run: cargo fmt --all -- --check
       - name: Run benchmark triage sweep
         run: >-
           cargo bench --bench dense_multi_rhs --
