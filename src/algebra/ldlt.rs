@@ -596,47 +596,135 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
     /// Solves `A * X = B` into a caller-provided output matrix.
     #[inline]
     pub fn solve_into<const P: usize>(&self, rhs: &Matrix<D, P, T>, output: &mut Matrix<D, P, T>) {
-        *output = *rhs;
-        self.solve_in_place(output);
+        let permuted = !self.permutation_is_identity();
+        if permuted {
+            self.permute_into(rhs, output);
+        } else {
+            *output = *rhs;
+        }
+        self.solve_permuted_in_place(output);
+        if permuted {
+            self.unpermute_rows_in_place(output);
+        }
     }
 
     /// Solves `A * X = B` in place.
     #[inline]
     pub fn solve_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
-        let mut transformed: Matrix<D, P, T> = Matrix::zeros();
+        let permuted = !self.permutation_is_identity();
+        if permuted {
+            self.permute_rows_in_place(rhs);
+        }
+        self.solve_permuted_in_place(rhs);
+        if permuted {
+            self.unpermute_rows_in_place(rhs);
+        }
+    }
+
+    #[inline]
+    fn permutation_is_identity(&self) -> bool {
+        self.permutation
+            .iter()
+            .enumerate()
+            .all(|(row, &source)| row == source)
+    }
+
+    #[inline]
+    fn permute_into<const P: usize>(&self, rhs: &Matrix<D, P, T>, output: &mut Matrix<D, P, T>) {
         for column in 0..P {
             for row in 0..D {
-                transformed[(row, column)] = rhs[(self.permutation[row], column)];
+                output[(row, column)] = rhs[(self.permutation[row], column)];
+            }
+        }
+    }
+
+    fn permute_rows_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
+        for column in 0..P {
+            let mut visited = [false; D];
+            for start in 0..D {
+                if visited[start] {
+                    continue;
+                }
+                let mut current = start;
+                let saved = rhs[(start, column)];
+                loop {
+                    visited[current] = true;
+                    let next = self.permutation[current];
+                    if next == start {
+                        rhs[(current, column)] = saved;
+                        break;
+                    }
+                    rhs[(current, column)] = rhs[(next, column)];
+                    current = next;
+                }
+            }
+        }
+    }
+
+    fn unpermute_rows_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
+        for column in 0..P {
+            let mut visited = [false; D];
+            for start in 0..D {
+                if visited[start] {
+                    continue;
+                }
+                let mut current = start;
+                let mut value = rhs[(current, column)];
+                loop {
+                    visited[current] = true;
+                    let next = self.permutation[current];
+                    if next == start {
+                        rhs[(next, column)] = value;
+                        break;
+                    }
+                    let next_value = rhs[(next, column)];
+                    rhs[(next, column)] = value;
+                    value = next_value;
+                    current = next;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn solve_permuted_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
+        let mut row = 0;
+        while row < D {
+            if self.pivots[row] == 2 {
+                let first_values: [T; P] = core::array::from_fn(|column| rhs[(row, column)]);
+                let second_values: [T; P] = core::array::from_fn(|column| rhs[(row + 1, column)]);
+                for target in (row + 2)..D {
+                    let first_factor = self.factor[(target, row)];
+                    let second_factor = self.factor[(target, row + 1)];
+                    for column in 0..P {
+                        rhs[(target, column)] = rhs[(target, column)]
+                            - first_factor * first_values[column]
+                            - second_factor * second_values[column];
+                    }
+                }
+                row += 2;
+            } else {
+                let source_values: [T; P] = core::array::from_fn(|column| rhs[(row, column)]);
+                for target in (row + 1)..D {
+                    let factor = self.factor[(target, row)];
+                    for column in 0..P {
+                        rhs[(target, column)] =
+                            rhs[(target, column)] - factor * source_values[column];
+                    }
+                }
+                row += 1;
             }
         }
 
-        for column in 0..P {
-            let mut row = 0;
-            while row < D {
-                if self.pivots[row] == 2 {
-                    for target in (row + 2)..D {
-                        transformed[(target, column)] = transformed[(target, column)]
-                            - self.factor[(target, row)] * transformed[(row, column)]
-                            - self.factor[(target, row + 1)] * transformed[(row + 1, column)];
-                    }
-                    row += 2;
-                } else {
-                    for target in (row + 1)..D {
-                        transformed[(target, column)] = transformed[(target, column)]
-                            - self.factor[(target, row)] * transformed[(row, column)];
-                    }
-                    row += 1;
-                }
-            }
-
-            let mut row = 0;
-            while row < D {
-                if self.pivots[row] == 2 {
-                    let first = transformed[(row, column)];
-                    let second = transformed[(row + 1, column)];
-                    let d11 = self.factor[(row, row)];
-                    let d12 = self.factor[(row + 1, row)];
-                    let d22 = self.factor[(row + 1, row + 1)];
+        let mut row = 0;
+        while row < D {
+            if self.pivots[row] == 2 {
+                let d11 = self.factor[(row, row)];
+                let d12 = self.factor[(row + 1, row)];
+                let d22 = self.factor[(row + 1, row + 1)];
+                for column in 0..P {
+                    let first = rhs[(row, column)];
+                    let second = rhs[(row + 1, column)];
                     let scale = first
                         .abs()
                         .max(second.abs())
@@ -650,51 +738,58 @@ impl<const D: usize, T: Real + MatrixScalar> Ldlt<D, T> {
                     let normalized_d22 = d22 / scale;
                     let determinant =
                         normalized_d11 * normalized_d22 - normalized_d12 * normalized_d12;
-                    transformed[(row, column)] = (normalized_first * normalized_d22
+                    rhs[(row, column)] = (normalized_first * normalized_d22
                         - normalized_second * normalized_d12)
                         / determinant;
-                    transformed[(row + 1, column)] = (normalized_second * normalized_d11
+                    rhs[(row + 1, column)] = (normalized_second * normalized_d11
                         - normalized_first * normalized_d12)
                         / determinant;
-                    row += 2;
-                } else {
-                    transformed[(row, column)] =
-                        transformed[(row, column)] / self.factor[(row, row)];
-                    row += 1;
                 }
-            }
-
-            let mut row = D;
-            while row > 0 {
-                if row >= 2 && self.pivots[row - 2] == 2 {
-                    let first = row - 2;
-                    let second = row - 1;
-                    let mut first_value = transformed[(first, column)];
-                    let mut second_value = transformed[(second, column)];
-                    for next in row..D {
-                        first_value =
-                            first_value - self.factor[(next, first)] * transformed[(next, column)];
-                        second_value = second_value
-                            - self.factor[(next, second)] * transformed[(next, column)];
-                    }
-                    transformed[(first, column)] = first_value;
-                    transformed[(second, column)] = second_value;
-                    row -= 2;
-                } else {
-                    let current = row - 1;
-                    let mut value = transformed[(current, column)];
-                    for next in row..D {
-                        value = value - self.factor[(next, current)] * transformed[(next, column)];
-                    }
-                    transformed[(current, column)] = value;
-                    row -= 1;
+                row += 2;
+            } else {
+                let diagonal = self.factor[(row, row)];
+                for column in 0..P {
+                    rhs[(row, column)] = rhs[(row, column)] / diagonal;
                 }
+                row += 1;
             }
         }
 
-        for column in 0..P {
-            for row in 0..D {
-                rhs[(self.permutation[row], column)] = transformed[(row, column)];
+        let mut row = D;
+        while row > 0 {
+            if row >= 2 && self.pivots[row - 2] == 2 {
+                let first = row - 2;
+                let second = row - 1;
+                let mut first_values: [T; P] = core::array::from_fn(|column| rhs[(first, column)]);
+                let mut second_values: [T; P] =
+                    core::array::from_fn(|column| rhs[(second, column)]);
+                for next in row..D {
+                    let first_factor = self.factor[(next, first)];
+                    let second_factor = self.factor[(next, second)];
+                    for column in 0..P {
+                        let next_value = rhs[(next, column)];
+                        first_values[column] = first_values[column] - first_factor * next_value;
+                        second_values[column] = second_values[column] - second_factor * next_value;
+                    }
+                }
+                for column in 0..P {
+                    rhs[(first, column)] = first_values[column];
+                    rhs[(second, column)] = second_values[column];
+                }
+                row -= 2;
+            } else {
+                let current = row - 1;
+                let mut values: [T; P] = core::array::from_fn(|column| rhs[(current, column)]);
+                for next in row..D {
+                    let factor = self.factor[(next, current)];
+                    for column in 0..P {
+                        values[column] = values[column] - factor * rhs[(next, column)];
+                    }
+                }
+                for column in 0..P {
+                    rhs[(current, column)] = values[column];
+                }
+                row -= 1;
             }
         }
     }
@@ -769,6 +864,59 @@ mod tests {
         let rhs = matrix![1.0_f64; 4.0];
         let factor = matrix.ldlt().expect("matrix is nonsingular");
         assert_relative_eq!(matrix * factor.solve(&rhs), rhs, max_relative = 1e-12);
+    }
+
+    #[test]
+    fn multi_rhs_solve_apis_match_for_identity_permutation() {
+        let matrix = matrix![
+            4.0_f64, 0.5, 0.25;
+            0.5, -3.0, 0.2;
+            0.25, 0.2, 2.0;
+        ];
+        let rhs = matrix![
+            1.0_f64, 2.0, 3.0, 4.0;
+            -2.0, 1.0, 0.5, 3.0;
+            0.25, -1.5, 2.5, -0.75;
+        ];
+        let factor = matrix.ldlt().expect("matrix is nonsingular");
+        assert_eq!(factor.permutation_indices(), &[0, 1, 2]);
+
+        let solved = factor.solve(&rhs);
+        let mut into = Matrix::<3, 4, f64>::zeros();
+        factor.solve_into(&rhs, &mut into);
+        let mut in_place = rhs;
+        factor.solve_in_place(&mut in_place);
+
+        assert_relative_eq!(into, solved, max_relative = 1e-12);
+        assert_relative_eq!(in_place, solved, max_relative = 1e-12);
+        assert_relative_eq!(matrix * solved, rhs, max_relative = 1e-12);
+    }
+
+    #[test]
+    fn multi_rhs_solve_apis_match_for_permuted_two_by_two_pivot() {
+        let matrix = matrix![
+            0.0_f64, 0.0, 1.0;
+            0.0, 2.0, 0.1;
+            1.0, 0.1, 0.0;
+        ];
+        let rhs = matrix![
+            1.0_f64, 2.0, -1.0, 0.5;
+            -2.0, 0.25, 3.0, -4.0;
+            3.0, -1.5, 2.0, 1.25;
+        ];
+        let factor = matrix.ldlt().expect("nonsingular permuted 2x2 pivot");
+        assert_eq!(factor.pivot_blocks(), &[2, 3, 1]);
+        assert_ne!(factor.permutation_indices(), &[0, 1, 2]);
+
+        let solved = factor.solve(&rhs);
+        let mut into = Matrix::<3, 4, f64>::zeros();
+        factor.solve_into(&rhs, &mut into);
+        let mut in_place = rhs;
+        factor.solve_in_place(&mut in_place);
+
+        assert_relative_eq!(into, solved, max_relative = 1e-12);
+        assert_relative_eq!(in_place, solved, max_relative = 1e-12);
+        assert_relative_eq!(matrix * solved, rhs, max_relative = 1e-12);
     }
 
     #[test]
