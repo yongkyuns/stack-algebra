@@ -22,10 +22,10 @@ strided, or submatrix storage without first repacking it into a new matrix.
 | A fixed or bounded sparse structure | Static CSC/CSR and block-sparse types |
 | An embedded target without `alloc` | The default `no_std` core |
 
-`stack-algebra` is less suitable when the primary requirement is very large,
-fully dynamic, heap-backed matrices whose dimensions change freely at runtime.
-In that case, a library centered on dynamic desktop/server workloads may be a
-better match.
+Very large, freely runtime-sized, heap-backed matrices are outside the current
+core scope. `stack-algebra` is centered on fixed, bounded, mapped, and
+fixed-capacity sparse workloads where dimensions and memory ownership stay
+explicit.
 
 ## A first solve
 
@@ -60,9 +60,8 @@ a deliberate precision boundary.
   crate currently supports and where its boundaries are.
 - [Platforms and embedded use](targets.md) explains `no_std` support, tested
   targets, memory placement, and what you should still validate on hardware.
-- [Performance](benchmarking.md) gives measured context against familiar linear
-  algebra libraries. The comparisons are informational rather than a claim
-  that `stack-algebra` is intended to replace or outperform them.
+- [Performance](benchmarking.md) provides representative measurements to give a
+  practical sense of the runtime cost of common operations.
 - [API reference](api-reference.md) links to the rustdoc generated from the same
   revision as this guide.
 
