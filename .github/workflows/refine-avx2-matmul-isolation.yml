@@ -1,0 +1,81 @@
+name: Refine AVX2 matmul isolation
+
+on:
+  push:
+    branches:
+      - agent/avx2-matmul-blocking
+    paths:
+      - .github/workflows/refine-avx2-matmul-isolation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/avx2-matmul-blocking
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Isolate aligned f32 kernel
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          path = Path('src/kernels/x86/avx2_fma.rs')
+          current = path.read_text()
+          base = subprocess.check_output(
+              ['git', 'show', '706ea80508b70e4944750f1cef0fa208e6d9e1bb:src/kernels/x86/avx2_fma.rs'],
+              text=True,
+          )
+
+          marker32 = '#[target_feature(enable = "avx2,fma")]\nunsafe fn matmul_f32'
+          marker64 = '#[target_feature(enable = "avx2,fma")]\nunsafe fn matmul_f64'
+
+          base32_start = base.index(marker32)
+          base64_start = base.index(marker64)
+          original_f32 = base[base32_start:base64_start]
+
+          cur32_start = current.index(marker32)
+          cur64_start = current.index(marker64)
+          aligned = current[cur32_start:cur64_start]
+          aligned = aligned.replace('unsafe fn matmul_f32', 'unsafe fn matmul_f32_aligned16', 1)
+
+          eight = '    while !M.is_multiple_of(16) && P >= 8 && P % 8 <= 2 && column + 8 <= P {'
+          eight_start = aligned.index(eight)
+          four_start = aligned.index('    while column + 4 <= P {', eight_start)
+          aligned = aligned[:eight_start] + aligned[four_start:]
+
+          current = current[:cur32_start] + original_f32 + aligned + current[cur64_start:]
+
+          old_call = '        unsafe { matmul_f32(lhs, rhs, output) }'
+          new_call = '''        if M.is_multiple_of(16) {
+              unsafe { matmul_f32_aligned16(lhs, rhs, output) }
+          } else {
+              unsafe { matmul_f32(lhs, rhs, output) }
+          }'''
+          assert current.count(old_call) == 1, current.count(old_call)
+          current = current.replace(old_call, new_call, 1)
+
+          path.write_text(current)
+          PY
+          cargo fmt -- src/kernels/x86/avx2_fma.rs
+      - name: Validate refined candidate
+        env:
+          RUSTFLAGS: -C target-cpu=native
+        run: |
+          cargo test --lib
+          cargo clippy --lib -- -D warnings
+          cargo check --no-default-features
+          git diff --check
+      - name: Commit refined source and remove helper
+        run: |
+          git config user.name "Yongkyun Shin"
+          git config user.email "yongkyuns@gmail.com"
+          git rm .github/workflows/refine-avx2-matmul-isolation.yml
+          git add src/kernels/x86/avx2_fma.rs
+          git commit -m "Isolate aligned AVX2 f32 matmul path"
+          git push origin HEAD:agent/avx2-matmul-blocking
