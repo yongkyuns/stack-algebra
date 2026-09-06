@@ -1,0 +1,199 @@
+name: Sparse ordered update study
+
+on:
+  push:
+    branches:
+      - agent/sparse-ordered-update-overhead
+    paths:
+      - .github/workflows/sparse-ordered-update-study.yml
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/sparse-ordered-update-overhead
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Create focused decision benchmark
+        run: |
+          cat > benches/sparse_ordered_study.rs <<'RS'
+          use std::hint::black_box;
+          use std::time::Duration;
+
+          use criterion::{criterion_group, criterion_main, Criterion};
+          use num_traits::FromPrimitive;
+          use stack_algebra::{
+              Matrix, Real, StaticCscCholeskyPattern, StaticCscMatrix, StaticCscOrdering,
+          };
+
+          const CAP: usize = 1024;
+
+          fn cast<T: FromPrimitive>(value: f64) -> T {
+              T::from_f64(value).unwrap()
+          }
+
+          fn star<const N: usize, T: Real + FromPrimitive>() -> StaticCscMatrix<N, N, CAP, T> {
+              let mut matrix = StaticCscMatrix::new();
+              for column in 0..N {
+                  matrix.insert(column, column, cast(4.0)).unwrap();
+                  if column == 0 {
+                      for row in 1..N {
+                          matrix.insert(row, column, cast(1.0)).unwrap();
+                      }
+                  }
+              }
+              matrix
+          }
+
+          fn rhs<const N: usize, T: Real + FromPrimitive>() -> Matrix<N, 1, T> {
+              Matrix::from_fn(|row, _| cast((row + 1) as f64))
+          }
+
+          fn study<const N: usize, T: Real + FromPrimitive>(c: &mut Criterion, scalar: &str) {
+              let source = star::<N, T>();
+              let ordering = StaticCscOrdering::minimum_degree(&source);
+              let permutation = ordering.permutation_for_pattern(source.pattern()).unwrap();
+              let symbolic =
+                  StaticCscCholeskyPattern::<N, CAP>::analyze_with_ordering(&source, ordering).unwrap();
+
+              let ordered_source = permutation.apply(&source);
+              let mut permute_target = permutation.apply(&source);
+              let mut natural_update = star::<N, T>();
+              let mut natural_ordered = permutation.apply(&natural_update);
+              let mut direct_ordered = permutation.apply(&source);
+              let direct_source = permutation.apply(&source);
+
+              let mut factor_with_permutation = symbolic.factor(&source).unwrap();
+              let mut ordered_factor = symbolic.factor_ordered(&ordered_source).unwrap();
+              let mut natural_factor = symbolic.factor_ordered(&natural_ordered).unwrap();
+              let mut direct_factor = symbolic.factor_ordered(&direct_ordered).unwrap();
+              let b = rhs::<N, T>();
+              let mut x = Matrix::<N, 1, T>::zeros();
+
+              let prefix = format!("sparse-ordered-study/{scalar}/star/{N}");
+
+              c.bench_function(format!("{prefix}/ordering-analysis"), |bench| {
+                  bench.iter(|| black_box(StaticCscOrdering::minimum_degree(black_box(&source))));
+              });
+              c.bench_function(format!("{prefix}/permutation-map"), |bench| {
+                  bench.iter(|| {
+                      black_box(ordering.permutation_for_pattern(black_box(source.pattern()))).unwrap()
+                  });
+              });
+              c.bench_function(format!("{prefix}/permutation-apply-into"), |bench| {
+                  bench.iter(|| {
+                      permutation.apply_into(black_box(&source), black_box(&mut permute_target));
+                      black_box(&permute_target);
+                  });
+              });
+              c.bench_function(format!("{prefix}/direct-ordered-value-update"), |bench| {
+                  bench.iter(|| {
+                      let nnz = direct_ordered.nnz();
+                      direct_ordered.values_mut()[..nnz]
+                          .copy_from_slice(&direct_source.values()[..nnz]);
+                      black_box(&direct_ordered);
+                  });
+              });
+              c.bench_function(format!("{prefix}/factor-reuse-with-permutation"), |bench| {
+                  bench.iter(|| {
+                      factor_with_permutation
+                          .recompute_with_pattern(black_box(&symbolic), black_box(&source))
+                          .unwrap();
+                      black_box(&factor_with_permutation);
+                  });
+              });
+              c.bench_function(format!("{prefix}/factor-ordered-only"), |bench| {
+                  bench.iter(|| {
+                      ordered_factor
+                          .recompute_ordered_with_pattern(
+                              black_box(&symbolic),
+                              black_box(&ordered_source),
+                          )
+                          .unwrap();
+                      black_box(&ordered_factor);
+                  });
+              });
+              c.bench_function(format!("{prefix}/natural-update-permute-factor"), |bench| {
+                  bench.iter(|| {
+                      let nnz = natural_update.nnz();
+                      natural_update.values_mut()[..nnz]
+                          .copy_from_slice(&source.values()[..nnz]);
+                      permutation.apply_into(
+                          black_box(&natural_update),
+                          black_box(&mut natural_ordered),
+                      );
+                      natural_factor
+                          .recompute_ordered_with_pattern(
+                              black_box(&symbolic),
+                              black_box(&natural_ordered),
+                          )
+                          .unwrap();
+                      black_box(&natural_factor);
+                  });
+              });
+              c.bench_function(format!("{prefix}/direct-ordered-update-factor"), |bench| {
+                  bench.iter(|| {
+                      let nnz = direct_ordered.nnz();
+                      direct_ordered.values_mut()[..nnz]
+                          .copy_from_slice(&direct_source.values()[..nnz]);
+                      direct_factor
+                          .recompute_ordered_with_pattern(
+                              black_box(&symbolic),
+                              black_box(&direct_ordered),
+                          )
+                          .unwrap();
+                      black_box(&direct_factor);
+                  });
+              });
+              c.bench_function(format!("{prefix}/solve-only"), |bench| {
+                  bench.iter(|| {
+                      ordered_factor.solve_into(black_box(&b), black_box(&mut x));
+                      black_box(&x);
+                  });
+              });
+          }
+
+          fn bench(c: &mut Criterion) {
+              study::<15, f32>(c, "f32");
+              study::<32, f32>(c, "f32");
+              study::<15, f64>(c, "f64");
+              study::<32, f64>(c, "f64");
+          }
+
+          fn config() -> Criterion {
+              Criterion::default()
+                  .sample_size(20)
+                  .warm_up_time(Duration::from_millis(100))
+                  .measurement_time(Duration::from_millis(250))
+          }
+
+          criterion_group! { name = benches; config = config(); targets = bench }
+          criterion_main!(benches);
+          RS
+          cat >> Cargo.toml <<'TOML'
+
+          [[bench]]
+          name = "sparse_ordered_study"
+          harness = false
+          TOML
+      - name: Run focused study
+        env:
+          RUSTFLAGS: -C target-cpu=native
+        run: cargo bench --bench sparse_ordered_study -- --noplot
+      - name: Print median summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('target/criterion/sparse-ordered-study')
+          for p in sorted(root.rglob('new/estimates.json')):
+              data = json.loads(p.read_text())
+              ns = data['median']['point_estimate']
+              name = '/'.join(p.parts[len(Path('target/criterion').parts):-2])
+              print(f'{name}: {ns:.3f} ns')
+          PY
