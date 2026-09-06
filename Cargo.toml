@@ -63,3 +63,7 @@ harness = false
 [[bench]]
 name = "fused"
 harness = false
+
+[[bench]]
+name = "dense_multi_rhs"
+harness = false
