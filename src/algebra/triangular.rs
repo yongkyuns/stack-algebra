@@ -1,5 +1,7 @@
 use crate::{Matrix, MatrixScalar, Real};
 
+const COLUMN_UPDATE_MIN_DIM: usize = 16;
+
 /// Lower-triangular view of a fixed-size square matrix.
 ///
 /// The view borrows the matrix and ignores entries above the diagonal. Use
@@ -39,13 +41,15 @@ impl<'a, const D: usize, T: Real + MatrixScalar> LowerTriangular<'a, D, T> {
     /// Solves `L * X = B` in place.
     #[inline]
     pub fn solve_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
-        if P == 1 {
-            for row in 0..D {
-                let mut value = rhs[(row, 0)];
-                for previous in 0..row {
-                    value = value - self.matrix[(row, previous)] * rhs[(previous, 0)];
+        if P == 1 || D < COLUMN_UPDATE_MIN_DIM {
+            for column in 0..P {
+                for row in 0..D {
+                    let mut value = rhs[(row, column)];
+                    for previous in 0..row {
+                        value = value - self.matrix[(row, previous)] * rhs[(previous, column)];
+                    }
+                    rhs[(row, column)] = value / self.matrix[(row, row)];
                 }
-                rhs[(row, 0)] = value / self.matrix[(row, row)];
             }
             return;
         }
@@ -116,6 +120,19 @@ impl<'a, const D: usize, T: Real + MatrixScalar> UpperTriangular<'a, D, T> {
     /// Solves `U * X = B` in place.
     #[inline]
     pub fn solve_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
+        if D < COLUMN_UPDATE_MIN_DIM {
+            for column in 0..P {
+                for row in (0..D).rev() {
+                    let mut value = rhs[(row, column)];
+                    for next in (row + 1)..D {
+                        value = value - self.matrix[(row, next)] * rhs[(next, column)];
+                    }
+                    rhs[(row, column)] = value / self.matrix[(row, row)];
+                }
+            }
+            return;
+        }
+
         for row in (0..D).rev() {
             let diagonal = self.matrix[(row, row)];
             for column in 0..P {
