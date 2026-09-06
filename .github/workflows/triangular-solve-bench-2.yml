@@ -39,3 +39,5 @@ jobs:
         if: always()
         run: |
           grep -E 'dense-multi-rhs/triangular|time:|change:|Performance has|No change' /tmp/triangular-candidate.log || true
+
+# Re-run after isolating the large-D traversal from the small-size inline path.
