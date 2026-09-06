@@ -14,6 +14,7 @@ fi
 rm -rf "$BUILD_DIR" "$CARGO_TARGET_DIR"
 
 python3 "$ROOT_DIR/scripts/generate_docs_performance_charts.py"
+python3 "$ROOT_DIR/scripts/generate_docs_benchmark_reference.py"
 cargo doc --no-deps --target-dir "$CARGO_TARGET_DIR"
 mdbook build "$DOCS_DIR" --dest-dir "$BUILD_DIR"
 
