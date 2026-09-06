@@ -773,7 +773,7 @@ unsafe fn matmul_f32<const M: usize, const N: usize, const P: usize>(
     let rhs_values = rhs.as_slice();
     let output_values = output.as_mut_slice();
     let mut column = 0;
-    while !M.is_multiple_of(16) && P >= 8 && P % 8 <= 2 && column + 8 <= P {
+    while P >= 8 && P % 8 <= 2 && column + 8 <= P {
         let rhs0 = rhs_values.as_ptr().add(column * N);
         let rhs1 = rhs_values.as_ptr().add((column + 1) * N);
         let rhs2 = rhs_values.as_ptr().add((column + 2) * N);
@@ -859,6 +859,180 @@ unsafe fn matmul_f32<const M: usize, const N: usize, const P: usize>(
         }
         column += 8;
     }
+    while column + 4 <= P {
+        let mut row = 0;
+        while row + 8 <= M {
+            let mut accumulator0 = _mm256_setzero_ps();
+            let mut accumulator1 = _mm256_setzero_ps();
+            let mut accumulator2 = _mm256_setzero_ps();
+            let mut accumulator3 = _mm256_setzero_ps();
+            for shared in 0..N {
+                let lhs_packet = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row));
+                accumulator0 = _mm256_fmadd_ps(
+                    lhs_packet,
+                    _mm256_set1_ps(*rhs_values.as_ptr().add(column * N + shared)),
+                    accumulator0,
+                );
+                accumulator1 = _mm256_fmadd_ps(
+                    lhs_packet,
+                    _mm256_set1_ps(*rhs_values.as_ptr().add((column + 1) * N + shared)),
+                    accumulator1,
+                );
+                accumulator2 = _mm256_fmadd_ps(
+                    lhs_packet,
+                    _mm256_set1_ps(*rhs_values.as_ptr().add((column + 2) * N + shared)),
+                    accumulator2,
+                );
+                accumulator3 = _mm256_fmadd_ps(
+                    lhs_packet,
+                    _mm256_set1_ps(*rhs_values.as_ptr().add((column + 3) * N + shared)),
+                    accumulator3,
+                );
+            }
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add(column * M + row),
+                accumulator0,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 1) * M + row),
+                accumulator1,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 2) * M + row),
+                accumulator2,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 3) * M + row),
+                accumulator3,
+            );
+            row += 8;
+        }
+        while row < M {
+            let remaining = M - row;
+            let mask = _mm256_set_epi32(
+                if remaining > 7 { -1 } else { 0 },
+                if remaining > 6 { -1 } else { 0 },
+                if remaining > 5 { -1 } else { 0 },
+                if remaining > 4 { -1 } else { 0 },
+                if remaining > 3 { -1 } else { 0 },
+                if remaining > 2 { -1 } else { 0 },
+                if remaining > 1 { -1 } else { 0 },
+                if remaining > 0 { -1 } else { 0 },
+            );
+            let mut accumulator0 = _mm256_setzero_ps();
+            let mut accumulator1 = _mm256_setzero_ps();
+            let mut accumulator2 = _mm256_setzero_ps();
+            let mut accumulator3 = _mm256_setzero_ps();
+            for shared in 0..N {
+                let lhs_packet =
+                    _mm256_maskload_ps(lhs_values.as_ptr().add(shared * M + row), mask);
+                accumulator0 = _mm256_fmadd_ps(
+                    lhs_packet,
+                    _mm256_set1_ps(*rhs_values.as_ptr().add(column * N + shared)),
+                    accumulator0,
+                );
+                accumulator1 = _mm256_fmadd_ps(
+                    lhs_packet,
+                    _mm256_set1_ps(*rhs_values.as_ptr().add((column + 1) * N + shared)),
+                    accumulator1,
+                );
+                accumulator2 = _mm256_fmadd_ps(
+                    lhs_packet,
+                    _mm256_set1_ps(*rhs_values.as_ptr().add((column + 2) * N + shared)),
+                    accumulator2,
+                );
+                accumulator3 = _mm256_fmadd_ps(
+                    lhs_packet,
+                    _mm256_set1_ps(*rhs_values.as_ptr().add((column + 3) * N + shared)),
+                    accumulator3,
+                );
+            }
+            _mm256_maskstore_ps(
+                output_values.as_mut_ptr().add(column * M + row),
+                mask,
+                accumulator0,
+            );
+            _mm256_maskstore_ps(
+                output_values.as_mut_ptr().add((column + 1) * M + row),
+                mask,
+                accumulator1,
+            );
+            _mm256_maskstore_ps(
+                output_values.as_mut_ptr().add((column + 2) * M + row),
+                mask,
+                accumulator2,
+            );
+            _mm256_maskstore_ps(
+                output_values.as_mut_ptr().add((column + 3) * M + row),
+                mask,
+                accumulator3,
+            );
+            row = M;
+        }
+        column += 4;
+    }
+    while column < P {
+        let mut row = 0;
+        while row + 8 <= M {
+            let mut accumulator = _mm256_setzero_ps();
+            for shared in 0..N {
+                accumulator = _mm256_fmadd_ps(
+                    _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row)),
+                    _mm256_set1_ps(*rhs_values.as_ptr().add(column * N + shared)),
+                    accumulator,
+                );
+            }
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add(column * M + row),
+                accumulator,
+            );
+            row += 8;
+        }
+        while row < M {
+            let remaining = M - row;
+            let mask = _mm256_set_epi32(
+                if remaining > 7 { -1 } else { 0 },
+                if remaining > 6 { -1 } else { 0 },
+                if remaining > 5 { -1 } else { 0 },
+                if remaining > 4 { -1 } else { 0 },
+                if remaining > 3 { -1 } else { 0 },
+                if remaining > 2 { -1 } else { 0 },
+                if remaining > 1 { -1 } else { 0 },
+                if remaining > 0 { -1 } else { 0 },
+            );
+            let mut accumulator = _mm256_setzero_ps();
+            for shared in 0..N {
+                accumulator = _mm256_fmadd_ps(
+                    _mm256_maskload_ps(lhs_values.as_ptr().add(shared * M + row), mask),
+                    _mm256_set1_ps(*rhs_values.as_ptr().add(column * N + shared)),
+                    accumulator,
+                );
+            }
+            _mm256_maskstore_ps(
+                output_values.as_mut_ptr().add(column * M + row),
+                mask,
+                accumulator,
+            );
+            row = M;
+        }
+        column += 1;
+    }
+}
+
+#[target_feature(enable = "avx2,fma")]
+unsafe fn matmul_f32_aligned16<const M: usize, const N: usize, const P: usize>(
+    lhs: &Matrix<M, N, f32>,
+    rhs: &Matrix<N, P, f32>,
+    output: &mut Matrix<M, P, f32>,
+) {
+    use core::arch::x86_64::{
+        _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_maskload_ps, _mm256_maskstore_ps, _mm256_set1_ps,
+        _mm256_set_epi32, _mm256_setzero_ps, _mm256_storeu_ps,
+    };
+    let lhs_values = lhs.as_slice();
+    let rhs_values = rhs.as_slice();
+    let output_values = output.as_mut_slice();
+    let mut column = 0;
     while column + 4 <= P {
         let mut row = 0;
         while row + 16 <= M {
@@ -1313,7 +1487,11 @@ impl MatmulBackend<f32> for X86Avx2FmaMatmul {
         rhs: &Matrix<N, P, f32>,
         output: &mut Matrix<M, P, f32>,
     ) {
-        unsafe { matmul_f32(lhs, rhs, output) }
+        if M.is_multiple_of(16) {
+            unsafe { matmul_f32_aligned16(lhs, rhs, output) }
+        } else {
+            unsafe { matmul_f32(lhs, rhs, output) }
+        }
     }
 
     #[inline]
