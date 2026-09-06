@@ -41,19 +41,24 @@ impl<'a, const D: usize, T: Real + MatrixScalar> LowerTriangular<'a, D, T> {
     /// Solves `L * X = B` in place.
     #[inline]
     pub fn solve_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
-        if P == 1 || D < COLUMN_UPDATE_MIN_DIM {
-            for column in 0..P {
-                for row in 0..D {
-                    let mut value = rhs[(row, column)];
-                    for previous in 0..row {
-                        value = value - self.matrix[(row, previous)] * rhs[(previous, column)];
-                    }
-                    rhs[(row, column)] = value / self.matrix[(row, row)];
-                }
-            }
+        if P > 1 && D >= COLUMN_UPDATE_MIN_DIM {
+            self.solve_column_update(rhs);
             return;
         }
 
+        for column in 0..P {
+            for row in 0..D {
+                let mut value = rhs[(row, column)];
+                for previous in 0..row {
+                    value = value - self.matrix[(row, previous)] * rhs[(previous, column)];
+                }
+                rhs[(row, column)] = value / self.matrix[(row, row)];
+            }
+        }
+    }
+
+    #[inline(never)]
+    fn solve_column_update<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
         for row in 0..D {
             let diagonal = self.matrix[(row, row)];
             for column in 0..P {
@@ -120,19 +125,24 @@ impl<'a, const D: usize, T: Real + MatrixScalar> UpperTriangular<'a, D, T> {
     /// Solves `U * X = B` in place.
     #[inline]
     pub fn solve_in_place<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
-        if D < COLUMN_UPDATE_MIN_DIM {
-            for column in 0..P {
-                for row in (0..D).rev() {
-                    let mut value = rhs[(row, column)];
-                    for next in (row + 1)..D {
-                        value = value - self.matrix[(row, next)] * rhs[(next, column)];
-                    }
-                    rhs[(row, column)] = value / self.matrix[(row, row)];
-                }
-            }
+        if D >= COLUMN_UPDATE_MIN_DIM {
+            self.solve_column_update(rhs);
             return;
         }
 
+        for column in 0..P {
+            for row in (0..D).rev() {
+                let mut value = rhs[(row, column)];
+                for next in (row + 1)..D {
+                    value = value - self.matrix[(row, next)] * rhs[(next, column)];
+                }
+                rhs[(row, column)] = value / self.matrix[(row, row)];
+            }
+        }
+    }
+
+    #[inline(never)]
+    fn solve_column_update<const P: usize>(&self, rhs: &mut Matrix<D, P, T>) {
         for row in (0..D).rev() {
             let diagonal = self.matrix[(row, row)];
             for column in 0..P {
@@ -239,5 +249,54 @@ mod tests {
             [12.0, 8.0, 3.0, -1.0],
             [10.0, 15.0, 5.0, 20.0],
         ]));
+    }
+
+    #[test]
+    fn column_update_paths_reconstruct_large_multi_rhs_systems() {
+        let lower = Matrix::<16, 16, f64>::from_fn(|row, column| {
+            if row < column {
+                0.0
+            } else if row == column {
+                4.0 + row as f64 * 0.01
+            } else {
+                ((row + column) % 5 + 1) as f64 * 0.01
+            }
+        });
+        let upper = Matrix::<16, 16, f64>::from_fn(|row, column| {
+            if row > column {
+                0.0
+            } else if row == column {
+                4.0 + row as f64 * 0.01
+            } else {
+                ((row + column) % 5 + 1) as f64 * 0.01
+            }
+        });
+        let rhs = Matrix::<16, 4, f64>::from_fn(|row, column| {
+            (row + 1) as f64 * 0.25 + column as f64 * 0.5
+        });
+
+        let lower_solution = lower.lower_triangular().solve(&rhs);
+        let mut lower_reconstructed = Matrix::<16, 4, f64>::zeros();
+        lower
+            .lower_triangular()
+            .mul_into(&lower_solution, &mut lower_reconstructed);
+        assert_relative_eq!(
+            lower_reconstructed,
+            rhs,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
+
+        let upper_solution = upper.upper_triangular().solve(&rhs);
+        let mut upper_reconstructed = Matrix::<16, 4, f64>::zeros();
+        upper
+            .upper_triangular()
+            .mul_into(&upper_solution, &mut upper_reconstructed);
+        assert_relative_eq!(
+            upper_reconstructed,
+            rhs,
+            epsilon = 1e-12,
+            max_relative = 1e-12
+        );
     }
 }
