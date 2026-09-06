@@ -1,0 +1,102 @@
+name: Confirm AVX2 matmul policy
+
+on:
+  push:
+    branches:
+      - agent/avx2-matmul-blocking
+    paths:
+      - .github/workflows/confirm-avx2-matmul-policy.yml
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compare exact base and production candidate
+        env:
+          RUSTFLAGS: -C target-cpu=native
+        run: |
+          write_bench () {
+            cat > benches/matmul_policy_confirm.rs <<'RS'
+          use std::{hint::black_box, time::Duration};
+          use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+          use stack_algebra::{Matrix, MatrixScalar};
+
+          fn dense<const D: usize, T>() -> Matrix<D, D, T>
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              Matrix::from_fn(|r, c| T::from_f64((1 + r * D + 2 * c) as f64 / 17.0).unwrap())
+          }
+
+          fn case<const D: usize, T>(c: &mut Criterion, scalar: &str)
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              let a = dense::<D, T>();
+              let b = dense::<D, T>();
+              let mut out = Matrix::<D, D, T>::zeros();
+              let mut group = c.benchmark_group(format!("matmul-policy/{scalar}"));
+              group.bench_function(BenchmarkId::new("stack", D), |bench| {
+                  bench.iter(|| black_box(&a).mul_into(black_box(&b), black_box(&mut out)))
+              });
+              group.finish();
+          }
+
+          fn run(c: &mut Criterion) {
+              case::<15, f32>(c, "f32");
+              case::<16, f32>(c, "f32");
+              case::<20, f32>(c, "f32");
+              case::<24, f32>(c, "f32");
+              case::<28, f32>(c, "f32");
+              case::<32, f32>(c, "f32");
+              case::<40, f32>(c, "f32");
+              case::<48, f32>(c, "f32");
+              case::<15, f64>(c, "f64");
+              case::<16, f64>(c, "f64");
+              case::<20, f64>(c, "f64");
+              case::<24, f64>(c, "f64");
+              case::<28, f64>(c, "f64");
+              case::<32, f64>(c, "f64");
+              case::<40, f64>(c, "f64");
+              case::<48, f64>(c, "f64");
+          }
+
+          fn config() -> Criterion {
+              Criterion::default()
+                  .warm_up_time(Duration::from_millis(40))
+                  .measurement_time(Duration::from_millis(70))
+                  .sample_size(15)
+          }
+
+          criterion_group! { name = benches; config = config(); targets = run }
+          criterion_main!(benches);
+          RS
+            cat >> Cargo.toml <<'TOML'
+
+          [[bench]]
+          name = "matmul_policy_confirm"
+          harness = false
+          TOML
+          }
+
+          git checkout --detach 706ea80508b70e4944750f1cef0fa208e6d9e1bb
+          write_bench
+          cargo bench --bench matmul_policy_confirm -- --noplot --save-baseline matmul-main
+
+          rm -f benches/matmul_policy_confirm.rs
+          git checkout -- Cargo.toml
+          git checkout --detach 61bc9bace1668d4f291bb1318635207e3309009e
+          write_bench
+          cargo test --lib
+          cargo bench --bench matmul_policy_confirm -- --noplot --baseline matmul-main 2>&1 | tee /tmp/matmul-policy.log
+
+      - name: Print comparison lines
+        if: always()
+        run: grep -E 'matmul-policy|time:|change:|Performance has|No change|within noise' /tmp/matmul-policy.log || true
