@@ -1,0 +1,70 @@
+name: Unsafe audit
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unsafe-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unsafe-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Report current unsafe-bearing source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          files="$(grep -RIlE '\bunsafe\b' src --include='*.rs' | sort || true)"
+          {
+            echo '## Unsafe boundary inventory'
+            echo
+            if [[ -n "$files" ]]; then
+              echo 'Source files containing an `unsafe` token:'
+              echo
+              while IFS= read -r file; do
+                printf -- '- `%s`\n' "$file"
+              done <<< "$files"
+            else
+              echo 'No `unsafe` tokens found under `src/`.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require policy update for new unsafe code
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          base="origin/$BASE_REF"
+
+          added_unsafe="$({
+            git diff --unified=0 "$base"...HEAD -- 'src/*.rs' 'src/**/*.rs' \
+              | grep -E '^\+[^+].*\bunsafe\b' || true
+          })"
+
+          if [[ -z "$added_unsafe" ]]; then
+            echo 'No new unsafe tokens added under src/.'
+            exit 0
+          fi
+
+          echo 'New unsafe source lines detected:'
+          printf '%s\n' "$added_unsafe"
+
+          if ! git diff --name-only "$base"...HEAD | grep -qx 'UNSAFE.md'; then
+            echo '::error::PRs that add unsafe code under src/ must also update UNSAFE.md with the invariant and validation evidence.'
+            exit 1
+          fi
+
+          echo 'UNSAFE.md was updated with this unsafe-code change.'
