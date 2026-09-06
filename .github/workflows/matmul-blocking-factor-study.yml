@@ -1,0 +1,176 @@
+name: AVX2 matmul blocking factor study
+
+on:
+  push:
+    branches:
+      - agent/matmul-blocking-study
+    paths:
+      - .github/workflows/matmul-blocking-factor-study.yml
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-24.04
+    env:
+      RUSTFLAGS: -C target-cpu=native
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/matmul-blocking-study
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Create focused matmul benchmark
+        run: |
+          cat > benches/matmul_blocking_factor_study.rs <<'RS'
+          use std::{hint::black_box, time::Duration};
+          use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+          use stack_algebra::{Matrix, MatrixScalar};
+
+          fn dense<const D: usize, T>() -> Matrix<D, D, T>
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              Matrix::from_fn(|r, c| T::from_f64((1 + r * D + 2 * c) as f64 / 17.0).unwrap())
+          }
+
+          fn case<const D: usize, T>(c: &mut Criterion, scalar: &str)
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              let a = dense::<D, T>();
+              let b = dense::<D, T>();
+              let mut out = Matrix::<D, D, T>::zeros();
+              let mut group = c.benchmark_group(format!("matmul-factor/{scalar}"));
+              group.bench_function(BenchmarkId::new("stack", D), |bench| {
+                  bench.iter(|| black_box(&a).mul_into(black_box(&b), black_box(&mut out)))
+              });
+              group.finish();
+          }
+
+          fn run(c: &mut Criterion) {
+              case::<15, f32>(c, "f32");
+              case::<16, f32>(c, "f32");
+              case::<20, f32>(c, "f32");
+              case::<24, f32>(c, "f32");
+              case::<28, f32>(c, "f32");
+              case::<32, f32>(c, "f32");
+              case::<40, f32>(c, "f32");
+              case::<48, f32>(c, "f32");
+              case::<15, f64>(c, "f64");
+              case::<16, f64>(c, "f64");
+              case::<20, f64>(c, "f64");
+              case::<24, f64>(c, "f64");
+              case::<28, f64>(c, "f64");
+              case::<32, f64>(c, "f64");
+              case::<40, f64>(c, "f64");
+              case::<48, f64>(c, "f64");
+          }
+
+          fn config() -> Criterion {
+              Criterion::default()
+                  .warm_up_time(Duration::from_millis(40))
+                  .measurement_time(Duration::from_millis(70))
+                  .sample_size(15)
+          }
+
+          criterion_group! { name = benches; config = config(); targets = run }
+          criterion_main!(benches);
+          RS
+          cat >> Cargo.toml <<'TOML'
+
+          [[bench]]
+          name = "matmul_blocking_factor_study"
+          harness = false
+          TOML
+
+      - name: Save current baseline
+        run: cargo bench --bench matmul_blocking_factor_study -- --noplot --save-baseline current
+
+      - name: Candidate A - four-column output blocking only
+        run: |
+          cp src/kernels/x86/avx2_fma.rs /tmp/avx2-current.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/kernels/x86/avx2_fma.rs')
+          text = path.read_text()
+          old = 'while P >= 8 && P % 8 <= 2 && column + 8 <= P {'
+          assert text.count(old) == 2
+          text = text.replace(old, 'while false && P >= 8 && P % 8 <= 2 && column + 8 <= P {')
+          path.write_text(text)
+          PY
+          cargo fmt -- src/kernels/x86/avx2_fma.rs
+          cargo test --lib
+          cargo bench --bench matmul_blocking_factor_study -- --noplot --baseline current 2>&1 | tee /tmp/fourcol-vs-current.log
+          cargo bench --bench matmul_blocking_factor_study -- --noplot --save-baseline fourcol >/tmp/fourcol-save.log 2>&1
+
+      - name: Candidate B - add f32 16-row packet reuse on four-column path
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/kernels/x86/avx2_fma.rs')
+          text = path.read_text()
+          f32_start = text.index('unsafe fn matmul_f32')
+          f64_start = text.index('unsafe fn matmul_f64')
+          f32 = text[f32_start:f64_start]
+          four_start = f32.index('while column + 4 <= P {')
+          row8 = f32.index('        while row + 8 <= M {', four_start)
+          block16 = '''        while row + 16 <= M {
+              let mut acc00 = _mm256_setzero_ps();
+              let mut acc01 = _mm256_setzero_ps();
+              let mut acc02 = _mm256_setzero_ps();
+              let mut acc03 = _mm256_setzero_ps();
+              let mut acc10 = _mm256_setzero_ps();
+              let mut acc11 = _mm256_setzero_ps();
+              let mut acc12 = _mm256_setzero_ps();
+              let mut acc13 = _mm256_setzero_ps();
+              for shared in 0..N {
+                  let lhs0 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row));
+                  let lhs1 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row + 8));
+                  let rhs0 = _mm256_set1_ps(*rhs_values.as_ptr().add(column * N + shared));
+                  let rhs1 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 1) * N + shared));
+                  let rhs2 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 2) * N + shared));
+                  let rhs3 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 3) * N + shared));
+                  acc00 = _mm256_fmadd_ps(lhs0, rhs0, acc00);
+                  acc01 = _mm256_fmadd_ps(lhs0, rhs1, acc01);
+                  acc02 = _mm256_fmadd_ps(lhs0, rhs2, acc02);
+                  acc03 = _mm256_fmadd_ps(lhs0, rhs3, acc03);
+                  acc10 = _mm256_fmadd_ps(lhs1, rhs0, acc10);
+                  acc11 = _mm256_fmadd_ps(lhs1, rhs1, acc11);
+                  acc12 = _mm256_fmadd_ps(lhs1, rhs2, acc12);
+                  acc13 = _mm256_fmadd_ps(lhs1, rhs3, acc13);
+              }
+              _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row), acc00);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row), acc01);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row), acc02);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row), acc03);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row + 8), acc10);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row + 8), acc11);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row + 8), acc12);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row + 8), acc13);
+              row += 16;
+          }
+          '''
+          f32 = f32[:row8] + block16 + f32[row8:]
+          text = text[:f32_start] + f32 + text[f64_start:]
+          path.write_text(text)
+          PY
+          cargo fmt -- src/kernels/x86/avx2_fma.rs
+          cargo test --lib
+          cargo bench --bench matmul_blocking_factor_study -- --noplot --baseline fourcol 2>&1 | tee /tmp/row16-vs-fourcol.log
+
+      - name: Report comparisons
+        if: always()
+        run: |
+          echo '=== Candidate A: four-column vs current ==='
+          grep -E 'matmul-factor|change:|Performance has|No change' /tmp/fourcol-vs-current.log || true
+          echo '=== Candidate B: f32 row16 vs four-column ==='
+          grep -E 'matmul-factor|change:|Performance has|No change' /tmp/row16-vs-fourcol.log || true
+
+      - name: Restore source
+        if: always()
+        run: |
+          cp /tmp/avx2-current.rs src/kernels/x86/avx2_fma.rs || true
+          git checkout -- Cargo.toml
+          rm -f benches/matmul_blocking_factor_study.rs
