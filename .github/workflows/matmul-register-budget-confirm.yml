@@ -199,6 +199,7 @@ jobs:
           PY
           cargo fmt -- src/kernels/x86/avx2_fma.rs
           cargo test --lib
+          cp src/kernels/x86/avx2_fma.rs /tmp/avx2-candidate.rs
 
       - name: Save candidate round 1
         run: cargo bench --bench matmul_register_budget_confirm -- --noplot --save-baseline cand1
@@ -208,29 +209,9 @@ jobs:
           cp /tmp/avx2-base.rs src/kernels/x86/avx2_fma.rs
           cargo bench --bench matmul_register_budget_confirm -- --noplot --save-baseline base2
 
-      - name: Reapply candidate and save round 2
+      - name: Save candidate round 2
         run: |
-          git checkout -- src/kernels/x86/avx2_fma.rs
-          # Reuse the candidate source produced earlier from the build artifact copy.
-          # Reconstruct it deterministically by restoring the candidate from target's incremental-independent source snapshot.
-          # The candidate file was saved before baseline round 2.
-        shell: bash
-
-      - name: Recreate candidate round 2 source
-        run: |
-          # Restore candidate by replaying the exact prior patch from the working-tree diff captured before baseline2.
-          # This keeps both candidate rounds source-identical.
-          cp /tmp/avx2-base.rs src/kernels/x86/avx2_fma.rs
-          python3 - <<'PY'
-          from pathlib import Path
-          wf = Path('.github/workflows/matmul-register-budget-confirm.yml').read_text()
-          start = wf.index("          python3 - <<'PY'\n", wf.index('- name: Apply packet-aware candidate'))
-          end = wf.index("\n          PY\n", start) + len("\n          PY\n")
-          script = wf[start:end].split("python3 - <<'PY'\n",1)[1].rsplit("\n          PY\n",1)[0]
-          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in script.splitlines())
-          exec(compile(script, '<candidate-replay>', 'exec'))
-          PY
-          cargo fmt -- src/kernels/x86/avx2_fma.rs
+          cp /tmp/avx2-candidate.rs src/kernels/x86/avx2_fma.rs
           cargo bench --bench matmul_register_budget_confirm -- --noplot --save-baseline cand2
 
       - name: Summarize alternating rounds
