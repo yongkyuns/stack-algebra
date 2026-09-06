@@ -82,11 +82,10 @@ jobs:
           harness = false
           TOML
 
-      - name: Compare four-column microkernel candidate
+      - name: Compare mixed blocking candidate
         env:
           RUSTFLAGS: -C target-cpu=native
         run: |
-          cp src/kernels/x86/avx2_fma.rs /tmp/avx2_fma.rs
           cargo bench --bench matmul_blocking_study -- --noplot --save-baseline block-current
 
           python3 - <<'PY'
@@ -96,11 +95,23 @@ jobs:
           text = path.read_text()
           old_eight = 'while P >= 8 && P % 8 <= 2 && column + 8 <= P {'
           assert text.count(old_eight) == 2
-          text = text.replace(old_eight, 'while false && P >= 8 && P % 8 <= 2 && column + 8 <= P {')
 
           f32_start = text.index('unsafe fn matmul_f32')
           f64_start = text.index('unsafe fn matmul_f64')
           f32 = text[f32_start:f64_start]
+          f64 = text[f64_start:]
+
+          f32 = f32.replace(
+              old_eight,
+              'while P >= 40 && P % 8 <= 2 && column + 8 <= P {',
+              1,
+          )
+          f64 = f64.replace(
+              old_eight,
+              'while false && P >= 8 && P % 8 <= 2 && column + 8 <= P {',
+              1,
+          )
+
           four_start = f32.index('while column + 4 <= P {')
           row8 = f32.index('        while row + 8 <= M {', four_start)
           block16 = '''        while row + 16 <= M {
@@ -132,48 +143,23 @@ jobs:
                   accumulator12 = _mm256_fmadd_ps(lhs_packet1, rhs2, accumulator12);
                   accumulator13 = _mm256_fmadd_ps(lhs_packet1, rhs3, accumulator13);
               }
-              _mm256_storeu_ps(
-                  output_values.as_mut_ptr().add(column * M + row),
-                  accumulator00,
-              );
-              _mm256_storeu_ps(
-                  output_values.as_mut_ptr().add((column + 1) * M + row),
-                  accumulator01,
-              );
-              _mm256_storeu_ps(
-                  output_values.as_mut_ptr().add((column + 2) * M + row),
-                  accumulator02,
-              );
-              _mm256_storeu_ps(
-                  output_values.as_mut_ptr().add((column + 3) * M + row),
-                  accumulator03,
-              );
-              _mm256_storeu_ps(
-                  output_values.as_mut_ptr().add(column * M + row + 8),
-                  accumulator10,
-              );
-              _mm256_storeu_ps(
-                  output_values.as_mut_ptr().add((column + 1) * M + row + 8),
-                  accumulator11,
-              );
-              _mm256_storeu_ps(
-                  output_values.as_mut_ptr().add((column + 2) * M + row + 8),
-                  accumulator12,
-              );
-              _mm256_storeu_ps(
-                  output_values.as_mut_ptr().add((column + 3) * M + row + 8),
-                  accumulator13,
-              );
+              _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row), accumulator00);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row), accumulator01);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row), accumulator02);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row), accumulator03);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row + 8), accumulator10);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row + 8), accumulator11);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row + 8), accumulator12);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row + 8), accumulator13);
               row += 16;
           }
           '''
           f32 = f32[:row8] + block16 + f32[row8:]
-          text = text[:f32_start] + f32 + text[f64_start:]
-          path.write_text(text)
+          path.write_text(text[:f32_start] + f32 + f64)
           PY
 
           cargo fmt -- src/kernels/x86/avx2_fma.rs
-          cargo test --lib kernels::x86
+          cargo test --lib
           cargo bench --bench matmul_blocking_study -- --noplot --baseline block-current 2>&1 | tee /tmp/matmul-candidate.log
 
       - name: Print comparison lines
