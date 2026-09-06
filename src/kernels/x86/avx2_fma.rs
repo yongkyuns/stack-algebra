@@ -50,10 +50,32 @@ impl ReductionBackend<f64> for X86Avx2FmaReduction {
 #[target_feature(enable = "avx2,fma")]
 unsafe fn reduction_dot_f32<const M: usize>(lhs: &Vector<M, f32>, rhs: &Vector<M, f32>) -> f32 {
     use core::arch::x86_64::{
-        _mm256_add_ps, _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+        _mm256_add_ps, _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_fmadd_ps,
+        _mm256_loadu_ps, _mm256_setzero_ps, _mm_add_ps, _mm_add_ss, _mm_cvtss_f32, _mm_loadu_ps,
+        _mm_movehl_ps, _mm_mul_ps, _mm_shuffle_ps,
     };
 
-    if M < 8 {
+    macro_rules! horizontal_sum4 {
+        ($value:expr) => {{
+            let value = $value;
+            let pair_sums = _mm_add_ps(value, _mm_movehl_ps(value, value));
+            let upper_pair = _mm_shuffle_ps::<0x55>(pair_sums, pair_sums);
+            _mm_cvtss_f32(_mm_add_ss(pair_sums, upper_pair))
+        }};
+    }
+
+    macro_rules! horizontal_sum8 {
+        ($value:expr) => {{
+            let value = $value;
+            let halves = _mm_add_ps(
+                _mm256_castps256_ps128(value),
+                _mm256_extractf128_ps::<1>(value),
+            );
+            horizontal_sum4!(halves)
+        }};
+    }
+
+    if M < 4 {
         let mut result = 0.0_f32;
         let mut index = 0;
         while index < M {
@@ -65,21 +87,54 @@ unsafe fn reduction_dot_f32<const M: usize>(lhs: &Vector<M, f32>, rhs: &Vector<M
 
     let lhs_values = lhs.as_slice();
     let rhs_values = rhs.as_slice();
+    if M < 8 {
+        let product = _mm_mul_ps(
+            _mm_loadu_ps(lhs_values.as_ptr()),
+            _mm_loadu_ps(rhs_values.as_ptr()),
+        );
+        let mut result = horizontal_sum4!(product);
+        let mut index = 4;
+        while index < M {
+            result += lhs_values[index] * rhs_values[index];
+            index += 1;
+        }
+        return result;
+    }
+
     if M < 32 {
-        let mut accumulator = _mm256_setzero_ps();
+        let mut accumulator0 = _mm256_setzero_ps();
+        let mut accumulator1 = _mm256_setzero_ps();
         let mut index = 0;
-        while index + 8 <= M {
-            accumulator = _mm256_fmadd_ps(
+        while index + 16 <= M {
+            accumulator0 = _mm256_fmadd_ps(
                 _mm256_loadu_ps(lhs_values.as_ptr().add(index)),
                 _mm256_loadu_ps(rhs_values.as_ptr().add(index)),
-                accumulator,
+                accumulator0,
+            );
+            accumulator1 = _mm256_fmadd_ps(
+                _mm256_loadu_ps(lhs_values.as_ptr().add(index + 8)),
+                _mm256_loadu_ps(rhs_values.as_ptr().add(index + 8)),
+                accumulator1,
+            );
+            index += 16;
+        }
+        while index + 8 <= M {
+            accumulator0 = _mm256_fmadd_ps(
+                _mm256_loadu_ps(lhs_values.as_ptr().add(index)),
+                _mm256_loadu_ps(rhs_values.as_ptr().add(index)),
+                accumulator0,
             );
             index += 8;
         }
-        let mut lanes = [0.0_f32; 8];
-        _mm256_storeu_ps(lanes.as_mut_ptr(), accumulator);
-        let mut result = lanes[0] + lanes[1] + lanes[2] + lanes[3];
-        result += lanes[4] + lanes[5] + lanes[6] + lanes[7];
+        let mut result = horizontal_sum8!(_mm256_add_ps(accumulator0, accumulator1));
+        if index + 4 <= M {
+            let product = _mm_mul_ps(
+                _mm_loadu_ps(lhs_values.as_ptr().add(index)),
+                _mm_loadu_ps(rhs_values.as_ptr().add(index)),
+            );
+            result += horizontal_sum4!(product);
+            index += 4;
+        }
         while index < M {
             result += lhs_values[index] * rhs_values[index];
             index += 1;
@@ -127,15 +182,78 @@ unsafe fn reduction_dot_f32<const M: usize>(lhs: &Vector<M, f32>, rhs: &Vector<M
     accumulator0 = _mm256_add_ps(accumulator0, accumulator1);
     accumulator2 = _mm256_add_ps(accumulator2, accumulator3);
     accumulator0 = _mm256_add_ps(accumulator0, accumulator2);
-    let mut lanes = [0.0_f32; 8];
-    _mm256_storeu_ps(lanes.as_mut_ptr(), accumulator0);
-    let mut result = lanes[0] + lanes[1] + lanes[2] + lanes[3];
-    result += lanes[4] + lanes[5] + lanes[6] + lanes[7];
+    let mut result = horizontal_sum8!(accumulator0);
+    if index + 4 <= M {
+        let product = _mm_mul_ps(
+            _mm_loadu_ps(lhs_values.as_ptr().add(index)),
+            _mm_loadu_ps(rhs_values.as_ptr().add(index)),
+        );
+        result += horizontal_sum4!(product);
+        index += 4;
+    }
     while index < M {
         result += lhs_values[index] * rhs_values[index];
         index += 1;
     }
     result
+}
+
+#[cfg(test)]
+mod f32_dot_tests {
+    use crate::Vector;
+
+    fn scalar_dot<const M: usize>(lhs: &Vector<M, f32>, rhs: &Vector<M, f32>) -> f32 {
+        let mut result = 0.0_f32;
+        let mut index = 0;
+        while index < M {
+            result += lhs[index] * rhs[index];
+            index += 1;
+        }
+        result
+    }
+
+    fn check<const M: usize>() {
+        let lhs = Vector::<M, f32>::from_fn(|row, _| ((row % 7) as f32 - 3.0) / 7.0);
+        let rhs = Vector::<M, f32>::from_fn(|row, _| ((2 * row % 11) as f32 - 5.0) / 9.0);
+        let expected = scalar_dot(&lhs, &rhs);
+        let actual = lhs.dot(&rhs);
+        let tolerance = 8.0 * f32::EPSILON * (M as f32) * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "M={M}: expected {expected}, got {actual}, tolerance {tolerance}"
+        );
+    }
+
+    #[test]
+    fn dot_matches_scalar_around_packet_boundaries() {
+        check::<1>();
+        check::<2>();
+        check::<3>();
+        check::<4>();
+        check::<5>();
+        check::<6>();
+        check::<7>();
+        check::<8>();
+        check::<9>();
+        check::<15>();
+        check::<16>();
+        check::<17>();
+        check::<31>();
+        check::<32>();
+        check::<33>();
+    }
+
+    #[test]
+    fn dot_preserves_non_finite_classification() {
+        let ones = Vector::<8, f32>::from_fn(|_, _| 1.0);
+        let mut infinity = ones;
+        infinity[5] = f32::INFINITY;
+        assert_eq!(infinity.dot(&ones), f32::INFINITY);
+
+        let mut nan = ones;
+        nan[2] = f32::NAN;
+        assert!(nan.dot(&ones).is_nan());
+    }
 }
 
 #[target_feature(enable = "avx2,fma")]
