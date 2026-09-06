@@ -773,7 +773,7 @@ unsafe fn matmul_f32<const M: usize, const N: usize, const P: usize>(
     let rhs_values = rhs.as_slice();
     let output_values = output.as_mut_slice();
     let mut column = 0;
-    while P >= 8 && P % 8 <= 2 && column + 8 <= P {
+    while !M.is_multiple_of(16) && P >= 8 && P % 8 <= 2 && column + 8 <= P {
         let rhs0 = rhs_values.as_ptr().add(column * N);
         let rhs1 = rhs_values.as_ptr().add((column + 1) * N);
         let rhs2 = rhs_values.as_ptr().add((column + 2) * N);
@@ -861,6 +861,65 @@ unsafe fn matmul_f32<const M: usize, const N: usize, const P: usize>(
     }
     while column + 4 <= P {
         let mut row = 0;
+        while row + 16 <= M {
+            let mut accumulator00 = _mm256_setzero_ps();
+            let mut accumulator01 = _mm256_setzero_ps();
+            let mut accumulator02 = _mm256_setzero_ps();
+            let mut accumulator03 = _mm256_setzero_ps();
+            let mut accumulator10 = _mm256_setzero_ps();
+            let mut accumulator11 = _mm256_setzero_ps();
+            let mut accumulator12 = _mm256_setzero_ps();
+            let mut accumulator13 = _mm256_setzero_ps();
+            for shared in 0..N {
+                let lhs_packet0 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row));
+                let lhs_packet1 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row + 8));
+                let rhs0 = _mm256_set1_ps(*rhs_values.as_ptr().add(column * N + shared));
+                let rhs1 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 1) * N + shared));
+                let rhs2 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 2) * N + shared));
+                let rhs3 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 3) * N + shared));
+                accumulator00 = _mm256_fmadd_ps(lhs_packet0, rhs0, accumulator00);
+                accumulator01 = _mm256_fmadd_ps(lhs_packet0, rhs1, accumulator01);
+                accumulator02 = _mm256_fmadd_ps(lhs_packet0, rhs2, accumulator02);
+                accumulator03 = _mm256_fmadd_ps(lhs_packet0, rhs3, accumulator03);
+                accumulator10 = _mm256_fmadd_ps(lhs_packet1, rhs0, accumulator10);
+                accumulator11 = _mm256_fmadd_ps(lhs_packet1, rhs1, accumulator11);
+                accumulator12 = _mm256_fmadd_ps(lhs_packet1, rhs2, accumulator12);
+                accumulator13 = _mm256_fmadd_ps(lhs_packet1, rhs3, accumulator13);
+            }
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add(column * M + row),
+                accumulator00,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 1) * M + row),
+                accumulator01,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 2) * M + row),
+                accumulator02,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 3) * M + row),
+                accumulator03,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add(column * M + row + 8),
+                accumulator10,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 1) * M + row + 8),
+                accumulator11,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 2) * M + row + 8),
+                accumulator12,
+            );
+            _mm256_storeu_ps(
+                output_values.as_mut_ptr().add((column + 3) * M + row + 8),
+                accumulator13,
+            );
+            row += 16;
+        }
         while row + 8 <= M {
             let mut accumulator0 = _mm256_setzero_ps();
             let mut accumulator1 = _mm256_setzero_ps();
@@ -1033,92 +1092,6 @@ unsafe fn matmul_f64<const M: usize, const N: usize, const P: usize>(
     let rhs_values = rhs.as_slice();
     let output_values = output.as_mut_slice();
     let mut column = 0;
-    while P >= 8 && P % 8 <= 2 && column + 8 <= P {
-        let rhs0 = rhs_values.as_ptr().add(column * N);
-        let rhs1 = rhs_values.as_ptr().add((column + 1) * N);
-        let rhs2 = rhs_values.as_ptr().add((column + 2) * N);
-        let rhs3 = rhs_values.as_ptr().add((column + 3) * N);
-        let rhs4 = rhs_values.as_ptr().add((column + 4) * N);
-        let rhs5 = rhs_values.as_ptr().add((column + 5) * N);
-        let rhs6 = rhs_values.as_ptr().add((column + 6) * N);
-        let rhs7 = rhs_values.as_ptr().add((column + 7) * N);
-        let mut row = 0;
-        while row + 4 <= M {
-            let mut accumulator0 = _mm256_setzero_pd();
-            let mut accumulator1 = _mm256_setzero_pd();
-            let mut accumulator2 = _mm256_setzero_pd();
-            let mut accumulator3 = _mm256_setzero_pd();
-            let mut accumulator4 = _mm256_setzero_pd();
-            let mut accumulator5 = _mm256_setzero_pd();
-            let mut accumulator6 = _mm256_setzero_pd();
-            let mut accumulator7 = _mm256_setzero_pd();
-            for shared in 0..N {
-                let lhs_packet = _mm256_loadu_pd(lhs_values.as_ptr().add(shared * M + row));
-                accumulator0 =
-                    _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs0.add(shared)), accumulator0);
-                accumulator1 =
-                    _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs1.add(shared)), accumulator1);
-                accumulator2 =
-                    _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs2.add(shared)), accumulator2);
-                accumulator3 =
-                    _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs3.add(shared)), accumulator3);
-                accumulator4 =
-                    _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs4.add(shared)), accumulator4);
-                accumulator5 =
-                    _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs5.add(shared)), accumulator5);
-                accumulator6 =
-                    _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs6.add(shared)), accumulator6);
-                accumulator7 =
-                    _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs7.add(shared)), accumulator7);
-            }
-            _mm256_storeu_pd(
-                output_values.as_mut_ptr().add(column * M + row),
-                accumulator0,
-            );
-            _mm256_storeu_pd(
-                output_values.as_mut_ptr().add((column + 1) * M + row),
-                accumulator1,
-            );
-            _mm256_storeu_pd(
-                output_values.as_mut_ptr().add((column + 2) * M + row),
-                accumulator2,
-            );
-            _mm256_storeu_pd(
-                output_values.as_mut_ptr().add((column + 3) * M + row),
-                accumulator3,
-            );
-            _mm256_storeu_pd(
-                output_values.as_mut_ptr().add((column + 4) * M + row),
-                accumulator4,
-            );
-            _mm256_storeu_pd(
-                output_values.as_mut_ptr().add((column + 5) * M + row),
-                accumulator5,
-            );
-            _mm256_storeu_pd(
-                output_values.as_mut_ptr().add((column + 6) * M + row),
-                accumulator6,
-            );
-            _mm256_storeu_pd(
-                output_values.as_mut_ptr().add((column + 7) * M + row),
-                accumulator7,
-            );
-            row += 4;
-        }
-        while row < M {
-            for offset in 0..8 {
-                let current_column = column + offset;
-                let rhs_column = rhs_values.as_ptr().add(current_column * N);
-                let mut accumulator = 0.0_f64;
-                for shared in 0..N {
-                    accumulator += lhs_values[shared * M + row] * *rhs_column.add(shared);
-                }
-                output_values[current_column * M + row] = accumulator;
-            }
-            row += 1;
-        }
-        column += 8;
-    }
     while column + 4 <= P {
         let mut row = 0;
         while row + 8 <= M {
