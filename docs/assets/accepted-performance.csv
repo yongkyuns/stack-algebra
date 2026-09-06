@@ -1,0 +1,21 @@
+date,area,benchmark,scalar,lower_improvement_pct,upper_improvement_pct,source_pr,source_commit,notes
+2026-09-06,small-f32-dot,M=6,f32,40,42,20,4812e1f,Repeated hosted AVX2/FMA samples
+2026-09-06,small-f32-dot,M=8,f32,40,47,20,4812e1f,Repeated hosted AVX2/FMA samples
+2026-09-06,small-f32-dot,M=15,f32,37,37,20,4812e1f,Repeated hosted AVX2/FMA samples
+2026-09-06,small-f32-dot,M=16,f32,33,45,20,4812e1f,Repeated hosted AVX2/FMA samples
+2026-09-06,small-f32-dot,M=32,f32,22,39,20,4812e1f,Repeated hosted AVX2/FMA samples
+2026-09-06,ldlt-multi-rhs,D=8/16/32 P=1,f32/f64,2,6,16,5fb2755,Repeated hosted dense_multi_rhs samples
+2026-09-06,ldlt-multi-rhs,D=8/16/32 P=2,f32/f64,38,67,16,5fb2755,Repeated hosted dense_multi_rhs samples
+2026-09-06,ldlt-multi-rhs,D=8/16/32 P=4,f32/f64,52,76,16,5fb2755,Repeated hosted dense_multi_rhs samples
+2026-09-06,triangular-d32,lower P=1,f32,0,0,23,706ea80,Final same-runner confirmation; statistically unchanged
+2026-09-06,triangular-d32,lower P=1,f64,0,0,23,706ea80,Final same-runner confirmation; statistically unchanged
+2026-09-06,triangular-d32,lower P=2,f32,35,35,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,lower P=2,f64,34,34,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,lower P=4,f32,49,49,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,lower P=4,f64,46,46,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,upper P=1,f32,44,44,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,upper P=1,f64,43,43,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,upper P=2,f32,62,62,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,upper P=2,f64,63,63,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,upper P=4,f32,71,71,23,706ea80,Final same-runner confirmation
+2026-09-06,triangular-d32,upper P=4,f64,69,69,23,706ea80,Final same-runner confirmation
