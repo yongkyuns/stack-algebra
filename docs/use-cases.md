@@ -1,26 +1,34 @@
-# Robotics Use Cases
+# Common use cases
 
-`stack-algebra` is a standalone numerical library. These examples describe how
-robotics applications can use its APIs; they do not add a dependency on a
-robotics framework or code generator.
+`stack-algebra` is most useful when the numerical problem is structurally small,
+fixed, or bounded and the application benefits from explicit memory ownership.
+The examples below focus on how that shows up in real systems rather than on
+individual API methods.
 
 ## Quick selection guide
 
-| Workload | Recommended starting point | Why |
+| Workload | Useful starting point | Why it fits |
 | --- | --- | --- |
-| Rigid-body pose and frame transforms | `Quaternion`, `RotationMatrix`, `Isometry` | Validated fixed-size geometry with no heap allocation |
-| Small state propagation or covariance update | `Matrix`, `MatrixBuf`, Cholesky/LDLT | Predictable RAM and reusable factors |
-| Linearized measurement update | QR or SVD | Least-squares and rank-aware solves |
-| Dense short-horizon optimization | QR, pivoted QR, or Cholesky | Fixed horizon and explicit scratch |
-| Sparse pose-graph or batch normal equations | CSC pattern + sparse LLT/LDLT | Symbolic reuse and bounded fill |
-| Block-structured sparse matvec | Block CSC/CSR | Explicit block layout and no packing step |
-| Existing generated or DMA buffer | `Map` / `StridedMap` / `Block` | Factor without an intermediate input matrix |
-| MCU deployment | Fixed `Matrix`, `MatrixBuf`, `storage_bytes()` | Compile-time resource budgeting |
+| Rigid-body pose and frame transforms | `Quaternion`, `RotationMatrix`, `Isometry` | Small fixed geometry types with explicit scalar precision |
+| IMU/GNSS or other state estimation | `Matrix`, Cholesky/LDLT, `Block` | Fixed state sizes, reusable factors, covariance sub-blocks |
+| Calibration and linearized least squares | QR, pivoted QR, or SVD | Solver can follow rank/conditioning assumptions |
+| Fixed-horizon control or optimization | `Matrix`, `MatrixBuf`, QR/Cholesky | Bounded problem sizes and reusable scratch |
+| Fixed-topology sparse estimation | Static CSC + sparse LLT/LDLT | Symbolic structure can be retained across iterations |
+| Block-structured graph or normal equations | Block CSC/CSR | Dense state/pose blocks remain explicit |
+| Generated, FFI, or DMA-owned data | `Map`, `StridedMap`, `Block` | Work directly from external storage |
+| MCU control/estimation loop | Fixed/bounded storage + `storage_bytes()` | Predictable memory and no required heap |
 
-## Rigid transforms and kinematics
+## Coordinate frames and rigid transforms
 
-Use the geometry types for rotations and rigid transforms. Keep scalar precision
-consistent across a subsystem:
+For pose, calibration, and frame conversion, the geometry types avoid treating
+rotation as an unstructured matrix when the stronger representation is useful.
+
+- `Quaternion<T>` represents a 3D rotation compactly.
+- `AngleAxis<T>` is convenient at construction and conversion boundaries.
+- `RotationMatrix<T>` exposes the familiar 3x3 representation.
+- `Isometry<T>` combines rotation and translation for rigid transforms.
+- `AffineTransform<T>` covers the broader affine case when rigidity is not a
+  valid assumption.
 
 ```rust
 use stack_algebra::{AngleAxis, Isometry, Vector3f};
@@ -30,123 +38,148 @@ let rotation = AngleAxis::new(&axis, 0.25)
     .expect("nonzero axis")
     .to_rotation_matrix()
     .expect("valid axis-angle");
+
 let transform = Isometry::from_parts(rotation, axis);
 let point = Vector3f::from_columns([[1.0, 0.0, 0.0]]);
 let transformed = transform.apply_point(&point);
 ```
 
-Use `Matrix3f`/`Matrix3d` directly when a downstream algorithm needs a rotation
-matrix. Use `storage_bytes()` when a transform is embedded in a larger state
-workspace.
+A useful boundary is to keep a rotation-specific type while the value represents
+a physical rotation, then convert to a dense matrix only when the surrounding
+algebra actually requires matrix form.
 
-## State estimation and covariance solves
+## State estimation and covariance updates
 
-For a positive-definite covariance or innovation matrix, use Cholesky. For a
-symmetric matrix that can be indefinite during debugging or poor conditioning,
-use pivoted LDLT and inspect the typed error:
+Small fixed-state filters are a natural match for compile-time matrix sizes.
+For example, an estimator can keep state, covariance, Jacobian, innovation, and
+workspace dimensions explicit in their Rust types.
+
+For a positive-definite innovation/covariance solve, start with Cholesky:
 
 ```rust
-use stack_algebra::DecompositionError;
-
-// Inside a function returning Result<_, DecompositionError>:
-let step = match innovation.try_cholesky() {
-    Ok(factor) => factor.solve(&residual),
-    Err(DecompositionError::NotPositiveDefinite) => {
-        innovation.try_ldlt()?.solve(&residual)
-    }
-    Err(error) => return Err(error),
-}
+let factor = innovation
+    .try_cholesky()
+    .expect("innovation covariance should be positive definite");
+let correction = factor.solve(&residual);
 ```
 
-In a repeated filter loop, retain the factor object and call `try_compute`.
-When the covariance lives in a larger workspace, call `try_compute_view` on a
-`Block` instead of copying the submatrix.
+If a symmetric intermediate is legitimately indefinite, LDLT is a better model
+of the mathematics than silently forcing a Cholesky path.
 
-## Linearized least squares
+In a high-rate loop:
 
-Use Householder QR when the Jacobian is expected to be full rank. Use
-column-pivoted QR when rank loss should be detected cheaply. Use SVD for a
-pseudoinverse or a configurable rank threshold:
+- retain factor and output storage when the shape is unchanged;
+- call `try_compute` rather than rebuilding surrounding workspaces;
+- use `Block` when the needed covariance/Jacobian region already lives inside a
+  larger matrix;
+- use `f32` or `f64` based on conditioning and target behavior, not habit alone.
+
+This makes the memory cost of the filter easier to account for and keeps
+failure of a numerical assumption visible to the caller.
+
+## Sensor calibration and least squares
+
+Calibration often produces a small tall Jacobian and a residual vector.
+Householder QR is a good default when the design is expected to be full rank.
+Column-pivoted QR is useful when rank loss should be detected, and SVD is useful
+when singular values or a pseudoinverse are part of the workflow.
 
 ```rust
 let qr = jacobian.col_piv_householder_qr();
-if qr.rank() == jacobian.cols() {
-    let step = qr.solve_least_squares(&residual).expect("full rank");
-}
+let rank = qr.rank();
 
-let svd = jacobian.svd().expect("SVD converges");
-let damped_or_rank_aware_step = svd.solve(&residual);
+if rank == jacobian.cols() {
+    let step = qr
+        .solve_least_squares(&residual)
+        .expect("full-rank design");
+}
 ```
 
-The matrix dimensions remain compile-time constants. For a changing active
-window, choose a maximum horizon and use `MatrixBuf` for assembly, then expose
-matching active dimensions with `as_view::<M, N>()` for zero-copy view-based
-factorization.
+This pattern applies to sensor mounting calibration, local linear regression,
+small bundle adjustments, and other problems where the number of parameters is
+known even if measurements are assembled repeatedly.
 
-## NMPC and trajectory optimization
+When conditioning is uncertain, prefer QR/SVD over forming normal equations
+just to reach a Cholesky solve. The stronger SPD assumption is valuable only
+when the application can justify it.
 
-A fixed horizon is a natural fit for `Matrix<M, N, T>`:
+## Fixed-horizon control and optimization
 
-1. Assemble the linearized dynamics and cost Jacobian into fixed-size storage.
-2. Use QR for a general least-squares step, or Cholesky for a known SPD normal
-   equation system.
-3. Reuse the factor and output matrices at every iteration.
-4. Use `storage_bytes()` to verify the state, Jacobian, factor, and RHS fit the
-   target stack/RAM budget.
+A fixed prediction horizon is often easier to express with bounded storage than
+with a general dynamic-matrix abstraction.
 
-Prefer QR over explicitly forming normal equations when numerical conditioning
-is uncertain. Prefer Cholesky when the SPD contract is guaranteed and the
-extra speed/RAM savings matter.
+A typical loop is:
 
-There is no NMPC-specific type in the crate. The application owns the horizon,
-state ordering, constraints, and iteration policy.
+1. assemble the current linearization into fixed or bounded matrices;
+2. expose the active region through a view if `MatrixBuf` is used;
+3. choose QR for a general least-squares step or Cholesky for a known SPD
+   system;
+4. reuse factor/output storage on the next iteration;
+5. account for the complete workspace before placing it on an MCU stack.
 
-## SLAM and pose-graph systems
+`stack-algebra` deliberately does not provide an NMPC framework. The application
+still owns horizon layout, constraints, linearization, globalization, and solver
+policy. The library is the numerical building block underneath those choices.
 
-For a fixed graph topology, represent the scalar sparsity pattern with
-`StaticCscPattern` and numeric values with `StaticCscMatrix`:
+## Sparse estimation and fixed-topology graphs
 
-1. Build the symbolic pattern once.
-2. Analyze LLT or LDLT once, optionally applying minimum-degree ordering.
-3. Update numeric values for each linearization.
-4. Call `recompute` or `recompute_ordered` and solve multiple RHS columns.
+When a graph or normal-equation pattern is fixed for many iterations, symbolic
+reuse can matter more than a one-shot factorization API.
 
-For block-structured Jacobian products, use `StaticBlockCscMatrix` or
-`StaticBlockCsrMatrix`. Native block Cholesky and LDLᵀ are available for square
-blocks and grids; `StaticBlockCscMatrix::cholesky` remains a scalar-expansion
-reference path. Use native block factors when dense block arithmetic and
-block-level fill control matter, and use block matvec directly when
-factorization is not needed.
+With scalar CSC storage:
 
-## Generated code and external buffers
+1. build and validate the sparse pattern once;
+2. analyze the factor structure once;
+3. update numeric values for each new linearization;
+4. recompute the numeric factor;
+5. solve one or more right-hand sides.
 
-Generated code can keep its own arrays and expose them through `Map` or
-`StridedMap`:
+This fits fixed-topology pose graphs, repeated sparse normal equations, and
+bounded batch estimators where the maximum structure is known in advance.
+
+Use block CSC/CSR when the problem naturally consists of repeated dense state or
+pose blocks. Block storage is most useful when those blocks are meaningful to
+assembly and factorization—not simply as a way to make a scalar sparse matrix
+look more complicated.
+
+## External, generated, and DMA-owned buffers
+
+Many embedded and robotics systems do not want the algebra library to own the
+source data. A driver, code generator, FFI boundary, or shared workspace may
+already define the layout.
+
+For contiguous column-major data, borrow it with `Map`. For padded, interleaved,
+or row-major data, use `StridedMap`. For a region inside an existing matrix,
+use `Block`.
 
 ```rust
 let jacobian = stack_algebra::Map::<6, 3, f32>::from_slice(jacobian_data)
     .expect("generated buffer has the expected size");
-let factor = jacobian
-    .col_piv_householder_qr();
+
+let factor = jacobian.col_piv_householder_qr();
 let step = factor.solve_least_squares(&rhs);
 ```
 
-This is an ordinary Rust API boundary. The library does not know whether the
-values came from generated code, a sensor driver, or a hand-written model.
+The important property here is ownership: the source remains owned by the
+surrounding subsystem, while the numerical operation borrows it for as long as
+needed.
 
-## Embedded MCU deployment
+## Embedded control and estimation loops
 
-Recommended sequence:
+For MCU code, the main advantage is not that every matrix value literally lives
+on the stack. It is that storage is **fixed or bounded and visible in the type**.
+The owner decides whether that value belongs in a local frame, static memory, a
+long-lived application state object, or a caller-owned buffer.
 
-1. Select `f32` unless `f64` is available and numerically justified.
-2. Keep dimensions fixed or bounded by `MatrixBuf`.
-3. Query `storage_bytes()` for every long-lived factor and workspace.
-4. Use `*_into` and `solve_in_place` to avoid temporary outputs in loops.
-5. Run the scalar QEMU harness for Cortex-M and RISC-V targets.
-6. Measure real hardware timing separately; QEMU does not model peripheral or
-   MCU floating-point timing accurately.
+A practical sequence is:
 
-Example resource declaration:
+1. choose fixed `Matrix` dimensions where possible;
+2. use `MatrixBuf` only where the active size genuinely varies;
+3. start with `f32` unless the numerical problem or target justifies `f64`;
+4. use `storage_bytes()` to estimate long-lived matrix/factor/workspace costs;
+5. reuse `*_into` or in-place outputs in high-rate loops when useful;
+6. test the complete workload on the actual MCU before making cycle or stack
+   claims.
 
 ```rust
 use stack_algebra::{Matrix, MatrixBuf};
@@ -156,15 +189,22 @@ const COVARIANCE_BYTES: usize = Matrix::<15, 15, f32>::storage_bytes();
 const WORK_BYTES: usize = MatrixBuf::<32, 32, f32>::storage_bytes();
 ```
 
-## What is not currently covered
+QEMU and cross-compilation are useful portability checks, but they do not model
+your board's cache, FPU throughput, linker layout, interrupts, or real stack
+budget. See [Platforms and embedded use](targets.md) for the current test matrix.
 
-- Heap-backed dynamic matrices and runtime-sized decompositions.
-- Native scalar pivots that cross block boundaries; use the explicit
-  `try_dense_ldlt` fallback for those cases.
-- Scalar Bunch–Kaufman 1x1/2x2 LDLT pivots are supported for dense fixed-size
-  systems and inside native block-sparse diagonal blocks.
-- Automatic mixed-precision expressions.
-- Framework-specific adapters or code-generation integrations.
+## Where this design is not a fit
 
-These boundaries are intentional. They keep the current core standalone,
-`no_std`, allocation-free, and suitable for compile-time resource analysis.
+`stack-algebra` is centered on fixed and bounded workloads. It is not a direct
+fit when:
+
+- matrix dimensions are large and genuinely unpredictable at runtime;
+- the workload is dominated by large freely resized dense matrices;
+- the application depends on a broad dynamic sparse ecosystem or backend
+  integrations outside this crate's scope;
+- allocating and resizing matrices freely is more important than static memory
+  accounting.
+
+Those are simply outside the current operating model. The [Performance](benchmarking.md)
+page provides representative measurements for the workloads the library does
+serve so users can get a practical sense of runtime cost.
