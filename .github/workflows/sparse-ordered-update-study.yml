@@ -76,21 +76,21 @@ jobs:
 
               let prefix = format!("sparse-ordered-study/{scalar}/star/{N}");
 
-              c.bench_function(format!("{prefix}/ordering-analysis"), |bench| {
+              c.bench_function(&format!("{prefix}/ordering-analysis"), |bench| {
                   bench.iter(|| black_box(StaticCscOrdering::minimum_degree(black_box(&source))));
               });
-              c.bench_function(format!("{prefix}/permutation-map"), |bench| {
+              c.bench_function(&format!("{prefix}/permutation-map"), |bench| {
                   bench.iter(|| {
                       black_box(ordering.permutation_for_pattern(black_box(source.pattern()))).unwrap()
                   });
               });
-              c.bench_function(format!("{prefix}/permutation-apply-into"), |bench| {
+              c.bench_function(&format!("{prefix}/permutation-apply-into"), |bench| {
                   bench.iter(|| {
                       permutation.apply_into(black_box(&source), black_box(&mut permute_target));
                       black_box(&permute_target);
                   });
               });
-              c.bench_function(format!("{prefix}/direct-ordered-value-update"), |bench| {
+              c.bench_function(&format!("{prefix}/direct-ordered-value-update"), |bench| {
                   bench.iter(|| {
                       let nnz = direct_ordered.nnz();
                       direct_ordered.values_mut()[..nnz]
@@ -98,7 +98,7 @@ jobs:
                       black_box(&direct_ordered);
                   });
               });
-              c.bench_function(format!("{prefix}/factor-reuse-with-permutation"), |bench| {
+              c.bench_function(&format!("{prefix}/factor-reuse-with-permutation"), |bench| {
                   bench.iter(|| {
                       factor_with_permutation
                           .recompute_with_pattern(black_box(&symbolic), black_box(&source))
@@ -106,7 +106,7 @@ jobs:
                       black_box(&factor_with_permutation);
                   });
               });
-              c.bench_function(format!("{prefix}/factor-ordered-only"), |bench| {
+              c.bench_function(&format!("{prefix}/factor-ordered-only"), |bench| {
                   bench.iter(|| {
                       ordered_factor
                           .recompute_ordered_with_pattern(
@@ -117,7 +117,7 @@ jobs:
                       black_box(&ordered_factor);
                   });
               });
-              c.bench_function(format!("{prefix}/natural-update-permute-factor"), |bench| {
+              c.bench_function(&format!("{prefix}/natural-update-permute-factor"), |bench| {
                   bench.iter(|| {
                       let nnz = natural_update.nnz();
                       natural_update.values_mut()[..nnz]
@@ -135,7 +135,7 @@ jobs:
                       black_box(&natural_factor);
                   });
               });
-              c.bench_function(format!("{prefix}/direct-ordered-update-factor"), |bench| {
+              c.bench_function(&format!("{prefix}/direct-ordered-update-factor"), |bench| {
                   bench.iter(|| {
                       let nnz = direct_ordered.nnz();
                       direct_ordered.values_mut()[..nnz]
@@ -149,7 +149,7 @@ jobs:
                       black_box(&direct_factor);
                   });
               });
-              c.bench_function(format!("{prefix}/solve-only"), |bench| {
+              c.bench_function(&format!("{prefix}/solve-only"), |bench| {
                   bench.iter(|| {
                       ordered_factor.solve_into(black_box(&b), black_box(&mut x));
                       black_box(&x);
