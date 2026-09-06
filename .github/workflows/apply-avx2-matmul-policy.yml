@@ -36,7 +36,7 @@ jobs:
 
           f32 = f32.replace(
               old_eight,
-              'while M % 16 != 0 && P >= 8 && P % 8 <= 2 && column + 8 <= P {',
+              'while !M.is_multiple_of(16) && P >= 8 && P % 8 <= 2 && column + 8 <= P {',
               1,
           )
 
