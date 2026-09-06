@@ -166,7 +166,7 @@ jobs:
               );
               row += 16;
           }
-'''
+          '''
           f32 = f32[:row8] + block16 + f32[row8:]
           text = text[:f32_start] + f32 + text[f64_start:]
           path.write_text(text)
