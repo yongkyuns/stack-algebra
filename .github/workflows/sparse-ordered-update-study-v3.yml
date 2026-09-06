@@ -1,0 +1,55 @@
+name: Sparse ordered update study v3
+
+on:
+  push:
+    branches:
+      - agent/sparse-ordered-update-overhead
+    paths:
+      - .github/workflows/sparse-ordered-update-study-v3.yml
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/sparse-ordered-update-overhead
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Reuse focused benchmark with SPD N32 fixture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/sparse-ordered-update-study.yml').read_text()
+          start = text.index("          cat > benches/sparse_ordered_study.rs <<'RS'\n")
+          start += len("          cat > benches/sparse_ordered_study.rs <<'RS'\n")
+          end = text.index("\n          RS\n", start)
+          source = '\n'.join(line[10:] if line.startswith('          ') else line for line in text[start:end].splitlines()) + '\n'
+          source = source.replace('matrix.insert(column, column, cast(4.0)).unwrap();', 'matrix.insert(column, column, cast((N + 1) as f64)).unwrap();')
+          Path('benches/sparse_ordered_study.rs').write_text(source)
+          PY
+          cat >> Cargo.toml <<'TOML'
+
+          [[bench]]
+          name = "sparse_ordered_study"
+          harness = false
+          TOML
+      - name: Run focused study
+        env:
+          RUSTFLAGS: -C target-cpu=native
+        run: cargo bench --bench sparse_ordered_study -- --noplot
+      - name: Print median summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('target/criterion/sparse-ordered-study')
+          for p in sorted(root.rglob('new/estimates.json')):
+              data = json.loads(p.read_text())
+              ns = data['median']['point_estimate']
+              name = '/'.join(p.parts[len(Path('target/criterion').parts):-2])
+              print(f'{name}: {ns:.3f} ns')
+          PY
