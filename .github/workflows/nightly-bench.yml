@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bench: [comparison, dense_solvers, sparse, block_sparse, fused]
+        bench: [comparison, dense_solvers, sparse, block_sparse, fixed_size, small_fixed, fused]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -89,6 +89,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - name: Capture source cleanliness
+        run: |
+          if test -n "$(git status --porcelain --untracked-files=all)"; then
+            echo "SOURCE_GIT_DIRTY=true" >> "$GITHUB_ENV"
+          else
+            echo "SOURCE_GIT_DIRTY=false" >> "$GITHUB_ENV"
+          fi
       - name: Download Criterion measurements
         uses: actions/download-artifact@v4
         with:
@@ -112,7 +119,7 @@ jobs:
             printf 'kernel=%s\n' "$(uname -sr)"
             printf 'rustc=%s\n' "$(rustc --version 2>/dev/null || echo unavailable)"
             printf 'cargo=%s\n' "$(cargo --version 2>/dev/null || echo unavailable)"
-            printf 'git_dirty=%s\n' "$(if test -n "$(git status --porcelain)"; then echo true; else echo false; fi)"
+            printf 'git_dirty=%s\n' "${SOURCE_GIT_DIRTY:-unknown}"
           } > benchmark-report/provenance.txt
       - name: Generate report
         env:
