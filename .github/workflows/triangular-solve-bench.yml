@@ -26,7 +26,7 @@ jobs:
           RUSTFLAGS: -C target-cpu=native
         run: |
           candidate="$(git rev-parse HEAD)"
-          filter='dense-multi-rhs/triangular/(f32|f64)/stack-(lower|upper)/(15|16|32)x(1|2|4)'
+          filter='dense-multi-rhs/triangular/(f32|f64)/stack-(lower|upper)/(6|8|15|16|32)x(1|2|4)'
           git checkout 5fb2755e902da16873252cb7017c23c74364f3b8
           cargo bench --bench dense_multi_rhs -- "$filter" \
             --warm-up-time 0.02 --measurement-time 0.03 --sample-size 10 --noplot \
