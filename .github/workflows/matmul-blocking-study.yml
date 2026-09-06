@@ -1,0 +1,110 @@
+name: AVX2 matmul blocking study
+
+on:
+  push:
+    branches:
+      - agent/matmul-blocking-study
+    paths:
+      - .github/workflows/matmul-blocking-study.yml
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/matmul-blocking-study
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Create focused matmul benchmark
+        run: |
+          cat > benches/matmul_blocking_study.rs <<'RS'
+          use std::{hint::black_box, time::Duration};
+          use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+          use stack_algebra::{Matrix, MatrixScalar};
+
+          fn dense<const D: usize, T>() -> Matrix<D, D, T>
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              Matrix::from_fn(|r, c| T::from_f64((1 + r * D + 2 * c) as f64 / 17.0).unwrap())
+          }
+
+          fn case<const D: usize, T>(c: &mut Criterion, scalar: &str)
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              let a = dense::<D, T>();
+              let b = dense::<D, T>();
+              let mut out = Matrix::<D, D, T>::zeros();
+              let mut group = c.benchmark_group(format!("matmul-blocking/{scalar}"));
+              group.bench_function(BenchmarkId::new("stack", D), |bench| {
+                  bench.iter(|| black_box(&a).mul_into(black_box(&b), black_box(&mut out)))
+              });
+              group.finish();
+          }
+
+          fn run(c: &mut Criterion) {
+              case::<15, f32>(c, "f32");
+              case::<16, f32>(c, "f32");
+              case::<24, f32>(c, "f32");
+              case::<32, f32>(c, "f32");
+              case::<48, f32>(c, "f32");
+              case::<15, f64>(c, "f64");
+              case::<16, f64>(c, "f64");
+              case::<24, f64>(c, "f64");
+              case::<32, f64>(c, "f64");
+              case::<48, f64>(c, "f64");
+          }
+
+          fn config() -> Criterion {
+              Criterion::default()
+                  .warm_up_time(Duration::from_millis(30))
+                  .measurement_time(Duration::from_millis(50))
+                  .sample_size(12)
+          }
+
+          criterion_group! { name = benches; config = config(); targets = run }
+          criterion_main!(benches);
+          RS
+          cat >> Cargo.toml <<'TOML'
+
+          [[bench]]
+          name = "matmul_blocking_study"
+          harness = false
+          TOML
+
+      - name: Sweep eight-column activation threshold
+        env:
+          RUSTFLAGS: -C target-cpu=native
+        run: |
+          cp src/kernels/x86/avx2_fma.rs /tmp/avx2_fma.rs
+          patch_threshold () {
+            threshold="$1"
+            THRESHOLD="$threshold" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path('src/kernels/x86/avx2_fma.rs')
+          original = Path('/tmp/avx2_fma.rs').read_text()
+          old = 'while P >= 8 && P % 8 <= 2 && column + 8 <= P {'
+          count = original.count(old)
+          assert count == 2, count
+          threshold = os.environ['THRESHOLD']
+          path.write_text(original.replace(old, f'while P >= {threshold} && P % 8 <= 2 && column + 8 <= P {{'))
+          PY
+          }
+
+          patch_threshold 8
+          cargo bench --bench matmul_blocking_study -- --noplot --save-baseline block-8
+
+          for threshold in 17 25 33 49; do
+            patch_threshold "$threshold"
+            printf '\n===== eight-column threshold=%s =====\n' "$threshold"
+            cargo bench --bench matmul_blocking_study -- --noplot --baseline block-8
+          done
+
+      - name: Restore source
+        if: always()
+        run: git checkout -- src/kernels/x86/avx2_fma.rs Cargo.toml && rm -f benches/matmul_blocking_study.rs
