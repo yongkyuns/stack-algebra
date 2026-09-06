@@ -3,4 +3,6 @@
 /Cargo.lock
 /benchmark-report
 /release-artifacts
+docs/assets/accepted-performance-dense-solves.svg
+docs/assets/accepted-performance-small-dot.svg
 __pycache__/
