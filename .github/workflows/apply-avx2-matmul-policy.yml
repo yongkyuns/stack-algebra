@@ -34,15 +34,12 @@ jobs:
           f32 = text[f32_start:f64_start]
           f64 = text[f64_start:]
 
-          # f32: retain the 8-column block when a 16-row microblock cannot
-          # cover the full row dimension cleanly.
           f32 = f32.replace(
               old_eight,
               'while M % 16 != 0 && P >= 8 && P % 8 <= 2 && column + 8 <= P {',
               1,
           )
 
-          # f32: reuse each set of four RHS broadcasts across two AVX packets.
           four_start = f32.index('while column + 4 <= P {')
           row8 = f32.index('        while row + 8 <= M {', four_start)
           block16 = '''        while row + 16 <= M {
@@ -108,11 +105,9 @@ jobs:
               );
               row += 16;
           }
-'''
+          '''
           f32 = f32[:row8] + block16 + f32[row8:]
 
-          # f64: the existing 4-column kernel already reuses broadcasts across
-          # two row packets and was faster throughout the measured range.
           eight_start = f64.index('    ' + old_eight)
           four_start64 = f64.index('    while column + 4 <= P {', eight_start)
           f64 = f64[:eight_start] + f64[four_start64:]
