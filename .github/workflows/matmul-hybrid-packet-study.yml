@@ -1,0 +1,406 @@
+name: AVX2 matmul hybrid packet study
+
+on:
+  push:
+    branches:
+      - agent/matmul-blocking-study
+    paths:
+      - .github/workflows/matmul-hybrid-packet-study.yml
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-24.04
+    env:
+      RUSTFLAGS: -C target-cpu=native
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/matmul-blocking-study
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Create focused square and rectangular benchmark
+        run: |
+          cat > benches/matmul_hybrid_packet_study.rs <<'RS'
+          use std::{hint::black_box, time::Duration};
+          use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+          use stack_algebra::{Matrix, MatrixScalar};
+
+          fn matrix<const M: usize, const N: usize, T>() -> Matrix<M, N, T>
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              Matrix::from_fn(|r, c| T::from_f64((1 + r + 3 * c + M + N) as f64 / 29.0).unwrap())
+          }
+
+          fn case<const M: usize, const N: usize, const P: usize, T>(c: &mut Criterion, scalar: &str)
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              let a = matrix::<M, N, T>();
+              let b = matrix::<N, P, T>();
+              let mut out = Matrix::<M, P, T>::zeros();
+              let mut group = c.benchmark_group(format!("matmul-hybrid/{scalar}"));
+              let shape = format!("{M}x{N}x{P}");
+              group.bench_function(BenchmarkId::new("stack", shape), |bench| {
+                  bench.iter(|| black_box(&a).mul_into(black_box(&b), black_box(&mut out)))
+              });
+              group.finish();
+          }
+
+          macro_rules! cases {
+              ($c:expr, $t:ty, $name:literal) => {{
+                  case::<15, 15, 15, $t>($c, $name);
+                  case::<16, 16, 16, $t>($c, $name);
+                  case::<20, 20, 20, $t>($c, $name);
+                  case::<24, 24, 24, $t>($c, $name);
+                  case::<28, 28, 28, $t>($c, $name);
+                  case::<32, 32, 32, $t>($c, $name);
+                  case::<40, 40, 40, $t>($c, $name);
+                  case::<48, 48, 48, $t>($c, $name);
+                  case::<16, 32, 8, $t>($c, $name);
+                  case::<24, 32, 16, $t>($c, $name);
+                  case::<32, 8, 32, $t>($c, $name);
+                  case::<32, 16, 32, $t>($c, $name);
+                  case::<32, 48, 32, $t>($c, $name);
+                  case::<32, 32, 8, $t>($c, $name);
+                  case::<32, 32, 24, $t>($c, $name);
+                  case::<32, 32, 40, $t>($c, $name);
+                  case::<40, 16, 32, $t>($c, $name);
+                  case::<48, 24, 16, $t>($c, $name);
+              }};
+          }
+
+          fn run(c: &mut Criterion) {
+              cases!(c, f32, "f32");
+              cases!(c, f64, "f64");
+          }
+
+          fn config() -> Criterion {
+              Criterion::default()
+                  .warm_up_time(Duration::from_millis(60))
+                  .measurement_time(Duration::from_millis(120))
+                  .sample_size(25)
+          }
+
+          criterion_group! { name = benches; config = config(); targets = run }
+          criterion_main!(benches);
+          RS
+          cat >> Cargo.toml <<'TOML'
+
+          [[bench]]
+          name = "matmul_hybrid_packet_study"
+          harness = false
+          TOML
+          cp src/kernels/x86/avx2_fma.rs /tmp/avx2-base.rs
+
+      - name: Save baseline round 1
+        run: cargo bench --bench matmul_hybrid_packet_study -- --noplot --save-baseline base1
+
+      - name: Apply hybrid packet candidate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/kernels/x86/avx2_fma.rs')
+          text = path.read_text()
+          f32_start = text.index('unsafe fn matmul_f32')
+          f64_start = text.index('unsafe fn matmul_f64')
+          f32 = text[f32_start:f64_start]
+          f64 = text[f64_start:]
+          marker = '    while P >= 8 && P % 8 <= 2 && column + 8 <= P {'
+
+          def replace_outer(segment, block):
+              start = segment.index(marker)
+              end_marker = '        column += 8;\n    }'
+              end = segment.index(end_marker, start) + len(end_marker)
+              return segment[:start] + block + segment[end:]
+
+          f32_block = r'''    while P >= 8 && P % 8 <= 2 && column + 8 <= P {
+              let rhs0 = rhs_values.as_ptr().add(column * N);
+              let rhs1 = rhs_values.as_ptr().add((column + 1) * N);
+              let rhs2 = rhs_values.as_ptr().add((column + 2) * N);
+              let rhs3 = rhs_values.as_ptr().add((column + 3) * N);
+              let rhs4 = rhs_values.as_ptr().add((column + 4) * N);
+              let rhs5 = rhs_values.as_ptr().add((column + 5) * N);
+              let rhs6 = rhs_values.as_ptr().add((column + 6) * N);
+              let rhs7 = rhs_values.as_ptr().add((column + 7) * N);
+              let mut row = 0;
+
+              while row + 16 <= M {
+                  let mut a00 = _mm256_setzero_ps();
+                  let mut a01 = _mm256_setzero_ps();
+                  let mut a02 = _mm256_setzero_ps();
+                  let mut a03 = _mm256_setzero_ps();
+                  let mut a10 = _mm256_setzero_ps();
+                  let mut a11 = _mm256_setzero_ps();
+                  let mut a12 = _mm256_setzero_ps();
+                  let mut a13 = _mm256_setzero_ps();
+                  for shared in 0..N {
+                      let lhs0 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row));
+                      let lhs1 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row + 8));
+                      let b0 = _mm256_set1_ps(*rhs0.add(shared));
+                      let b1 = _mm256_set1_ps(*rhs1.add(shared));
+                      let b2 = _mm256_set1_ps(*rhs2.add(shared));
+                      let b3 = _mm256_set1_ps(*rhs3.add(shared));
+                      a00 = _mm256_fmadd_ps(lhs0, b0, a00);
+                      a01 = _mm256_fmadd_ps(lhs0, b1, a01);
+                      a02 = _mm256_fmadd_ps(lhs0, b2, a02);
+                      a03 = _mm256_fmadd_ps(lhs0, b3, a03);
+                      a10 = _mm256_fmadd_ps(lhs1, b0, a10);
+                      a11 = _mm256_fmadd_ps(lhs1, b1, a11);
+                      a12 = _mm256_fmadd_ps(lhs1, b2, a12);
+                      a13 = _mm256_fmadd_ps(lhs1, b3, a13);
+                  }
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row), a00);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row), a01);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row), a02);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row), a03);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row + 8), a10);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row + 8), a11);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row + 8), a12);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row + 8), a13);
+
+                  let mut a40 = _mm256_setzero_ps();
+                  let mut a41 = _mm256_setzero_ps();
+                  let mut a42 = _mm256_setzero_ps();
+                  let mut a43 = _mm256_setzero_ps();
+                  let mut a50 = _mm256_setzero_ps();
+                  let mut a51 = _mm256_setzero_ps();
+                  let mut a52 = _mm256_setzero_ps();
+                  let mut a53 = _mm256_setzero_ps();
+                  for shared in 0..N {
+                      let lhs0 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row));
+                      let lhs1 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row + 8));
+                      let b4 = _mm256_set1_ps(*rhs4.add(shared));
+                      let b5 = _mm256_set1_ps(*rhs5.add(shared));
+                      let b6 = _mm256_set1_ps(*rhs6.add(shared));
+                      let b7 = _mm256_set1_ps(*rhs7.add(shared));
+                      a40 = _mm256_fmadd_ps(lhs0, b4, a40);
+                      a41 = _mm256_fmadd_ps(lhs0, b5, a41);
+                      a42 = _mm256_fmadd_ps(lhs0, b6, a42);
+                      a43 = _mm256_fmadd_ps(lhs0, b7, a43);
+                      a50 = _mm256_fmadd_ps(lhs1, b4, a50);
+                      a51 = _mm256_fmadd_ps(lhs1, b5, a51);
+                      a52 = _mm256_fmadd_ps(lhs1, b6, a52);
+                      a53 = _mm256_fmadd_ps(lhs1, b7, a53);
+                  }
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 4) * M + row), a40);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 5) * M + row), a41);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 6) * M + row), a42);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 7) * M + row), a43);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 4) * M + row + 8), a50);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 5) * M + row + 8), a51);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 6) * M + row + 8), a52);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 7) * M + row + 8), a53);
+                  row += 16;
+              }
+
+              while row + 8 <= M {
+                  let mut a0 = _mm256_setzero_ps();
+                  let mut a1 = _mm256_setzero_ps();
+                  let mut a2 = _mm256_setzero_ps();
+                  let mut a3 = _mm256_setzero_ps();
+                  let mut a4 = _mm256_setzero_ps();
+                  let mut a5 = _mm256_setzero_ps();
+                  let mut a6 = _mm256_setzero_ps();
+                  let mut a7 = _mm256_setzero_ps();
+                  for shared in 0..N {
+                      let lhs_packet = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row));
+                      a0 = _mm256_fmadd_ps(lhs_packet, _mm256_set1_ps(*rhs0.add(shared)), a0);
+                      a1 = _mm256_fmadd_ps(lhs_packet, _mm256_set1_ps(*rhs1.add(shared)), a1);
+                      a2 = _mm256_fmadd_ps(lhs_packet, _mm256_set1_ps(*rhs2.add(shared)), a2);
+                      a3 = _mm256_fmadd_ps(lhs_packet, _mm256_set1_ps(*rhs3.add(shared)), a3);
+                      a4 = _mm256_fmadd_ps(lhs_packet, _mm256_set1_ps(*rhs4.add(shared)), a4);
+                      a5 = _mm256_fmadd_ps(lhs_packet, _mm256_set1_ps(*rhs5.add(shared)), a5);
+                      a6 = _mm256_fmadd_ps(lhs_packet, _mm256_set1_ps(*rhs6.add(shared)), a6);
+                      a7 = _mm256_fmadd_ps(lhs_packet, _mm256_set1_ps(*rhs7.add(shared)), a7);
+                  }
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row), a0);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row), a1);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row), a2);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row), a3);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 4) * M + row), a4);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 5) * M + row), a5);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 6) * M + row), a6);
+                  _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 7) * M + row), a7);
+                  row += 8;
+              }
+
+              while row < M {
+                  for offset in 0..8 {
+                      let current_column = column + offset;
+                      let rhs_column = rhs_values.as_ptr().add(current_column * N);
+                      let mut accumulator = 0.0_f32;
+                      for shared in 0..N {
+                          accumulator += lhs_values[shared * M + row] * *rhs_column.add(shared);
+                      }
+                      output_values[current_column * M + row] = accumulator;
+                  }
+                  row += 1;
+              }
+              column += 8;
+          }'''
+
+          f64_block = r'''    while P >= 8 && P % 8 <= 2 && column + 8 <= P {
+              let rhs0 = rhs_values.as_ptr().add(column * N);
+              let rhs1 = rhs_values.as_ptr().add((column + 1) * N);
+              let rhs2 = rhs_values.as_ptr().add((column + 2) * N);
+              let rhs3 = rhs_values.as_ptr().add((column + 3) * N);
+              let rhs4 = rhs_values.as_ptr().add((column + 4) * N);
+              let rhs5 = rhs_values.as_ptr().add((column + 5) * N);
+              let rhs6 = rhs_values.as_ptr().add((column + 6) * N);
+              let rhs7 = rhs_values.as_ptr().add((column + 7) * N);
+              let mut row = 0;
+
+              while row + 8 <= M {
+                  let mut a00 = _mm256_setzero_pd();
+                  let mut a01 = _mm256_setzero_pd();
+                  let mut a02 = _mm256_setzero_pd();
+                  let mut a03 = _mm256_setzero_pd();
+                  let mut a10 = _mm256_setzero_pd();
+                  let mut a11 = _mm256_setzero_pd();
+                  let mut a12 = _mm256_setzero_pd();
+                  let mut a13 = _mm256_setzero_pd();
+                  for shared in 0..N {
+                      let lhs0 = _mm256_loadu_pd(lhs_values.as_ptr().add(shared * M + row));
+                      let lhs1 = _mm256_loadu_pd(lhs_values.as_ptr().add(shared * M + row + 4));
+                      let b0 = _mm256_set1_pd(*rhs0.add(shared));
+                      let b1 = _mm256_set1_pd(*rhs1.add(shared));
+                      let b2 = _mm256_set1_pd(*rhs2.add(shared));
+                      let b3 = _mm256_set1_pd(*rhs3.add(shared));
+                      a00 = _mm256_fmadd_pd(lhs0, b0, a00);
+                      a01 = _mm256_fmadd_pd(lhs0, b1, a01);
+                      a02 = _mm256_fmadd_pd(lhs0, b2, a02);
+                      a03 = _mm256_fmadd_pd(lhs0, b3, a03);
+                      a10 = _mm256_fmadd_pd(lhs1, b0, a10);
+                      a11 = _mm256_fmadd_pd(lhs1, b1, a11);
+                      a12 = _mm256_fmadd_pd(lhs1, b2, a12);
+                      a13 = _mm256_fmadd_pd(lhs1, b3, a13);
+                  }
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add(column * M + row), a00);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 1) * M + row), a01);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 2) * M + row), a02);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 3) * M + row), a03);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add(column * M + row + 4), a10);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 1) * M + row + 4), a11);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 2) * M + row + 4), a12);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 3) * M + row + 4), a13);
+
+                  let mut a40 = _mm256_setzero_pd();
+                  let mut a41 = _mm256_setzero_pd();
+                  let mut a42 = _mm256_setzero_pd();
+                  let mut a43 = _mm256_setzero_pd();
+                  let mut a50 = _mm256_setzero_pd();
+                  let mut a51 = _mm256_setzero_pd();
+                  let mut a52 = _mm256_setzero_pd();
+                  let mut a53 = _mm256_setzero_pd();
+                  for shared in 0..N {
+                      let lhs0 = _mm256_loadu_pd(lhs_values.as_ptr().add(shared * M + row));
+                      let lhs1 = _mm256_loadu_pd(lhs_values.as_ptr().add(shared * M + row + 4));
+                      let b4 = _mm256_set1_pd(*rhs4.add(shared));
+                      let b5 = _mm256_set1_pd(*rhs5.add(shared));
+                      let b6 = _mm256_set1_pd(*rhs6.add(shared));
+                      let b7 = _mm256_set1_pd(*rhs7.add(shared));
+                      a40 = _mm256_fmadd_pd(lhs0, b4, a40);
+                      a41 = _mm256_fmadd_pd(lhs0, b5, a41);
+                      a42 = _mm256_fmadd_pd(lhs0, b6, a42);
+                      a43 = _mm256_fmadd_pd(lhs0, b7, a43);
+                      a50 = _mm256_fmadd_pd(lhs1, b4, a50);
+                      a51 = _mm256_fmadd_pd(lhs1, b5, a51);
+                      a52 = _mm256_fmadd_pd(lhs1, b6, a52);
+                      a53 = _mm256_fmadd_pd(lhs1, b7, a53);
+                  }
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 4) * M + row), a40);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 5) * M + row), a41);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 6) * M + row), a42);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 7) * M + row), a43);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 4) * M + row + 4), a50);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 5) * M + row + 4), a51);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 6) * M + row + 4), a52);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 7) * M + row + 4), a53);
+                  row += 8;
+              }
+
+              while row + 4 <= M {
+                  let mut a0 = _mm256_setzero_pd();
+                  let mut a1 = _mm256_setzero_pd();
+                  let mut a2 = _mm256_setzero_pd();
+                  let mut a3 = _mm256_setzero_pd();
+                  let mut a4 = _mm256_setzero_pd();
+                  let mut a5 = _mm256_setzero_pd();
+                  let mut a6 = _mm256_setzero_pd();
+                  let mut a7 = _mm256_setzero_pd();
+                  for shared in 0..N {
+                      let lhs_packet = _mm256_loadu_pd(lhs_values.as_ptr().add(shared * M + row));
+                      a0 = _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs0.add(shared)), a0);
+                      a1 = _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs1.add(shared)), a1);
+                      a2 = _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs2.add(shared)), a2);
+                      a3 = _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs3.add(shared)), a3);
+                      a4 = _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs4.add(shared)), a4);
+                      a5 = _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs5.add(shared)), a5);
+                      a6 = _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs6.add(shared)), a6);
+                      a7 = _mm256_fmadd_pd(lhs_packet, _mm256_set1_pd(*rhs7.add(shared)), a7);
+                  }
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add(column * M + row), a0);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 1) * M + row), a1);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 2) * M + row), a2);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 3) * M + row), a3);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 4) * M + row), a4);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 5) * M + row), a5);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 6) * M + row), a6);
+                  _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 7) * M + row), a7);
+                  row += 4;
+              }
+
+              while row < M {
+                  for offset in 0..8 {
+                      let current_column = column + offset;
+                      let rhs_column = rhs_values.as_ptr().add(current_column * N);
+                      let mut accumulator = 0.0_f64;
+                      for shared in 0..N {
+                          accumulator += lhs_values[shared * M + row] * *rhs_column.add(shared);
+                      }
+                      output_values[current_column * M + row] = accumulator;
+                  }
+                  row += 1;
+              }
+              column += 8;
+          }'''
+
+          f32 = replace_outer(f32, f32_block)
+          f64 = replace_outer(f64, f64_block)
+          path.write_text(text[:f32_start] + f32 + f64)
+          PY
+          cargo fmt -- src/kernels/x86/avx2_fma.rs
+          cargo test --lib
+          cp src/kernels/x86/avx2_fma.rs /tmp/avx2-candidate.rs
+
+      - name: Compare candidate round 1
+        run: cargo bench --bench matmul_hybrid_packet_study -- --noplot --baseline base1 2>&1 | tee /tmp/hybrid-round1.log
+
+      - name: Save baseline round 2
+        run: |
+          cp /tmp/avx2-base.rs src/kernels/x86/avx2_fma.rs
+          cargo bench --bench matmul_hybrid_packet_study -- --noplot --save-baseline base2
+
+      - name: Compare candidate round 2
+        run: |
+          cp /tmp/avx2-candidate.rs src/kernels/x86/avx2_fma.rs
+          cargo bench --bench matmul_hybrid_packet_study -- --noplot --baseline base2 2>&1 | tee /tmp/hybrid-round2.log
+
+      - name: Report both rounds
+        run: |
+          echo '=== hybrid candidate vs baseline, round 1 ==='
+          grep -E 'matmul-hybrid|change:|Performance has|No change' /tmp/hybrid-round1.log || true
+          echo '=== hybrid candidate vs baseline, round 2 ==='
+          grep -E 'matmul-hybrid|change:|Performance has|No change' /tmp/hybrid-round2.log || true
+
+      - name: Restore branch source
+        if: always()
+        run: |
+          cp /tmp/avx2-base.rs src/kernels/x86/avx2_fma.rs || true
+          git checkout -- Cargo.toml
+          rm -f benches/matmul_hybrid_packet_study.rs
