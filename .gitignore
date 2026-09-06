@@ -5,4 +5,7 @@
 /release-artifacts
 docs/assets/accepted-performance-dense-solves.svg
 docs/assets/accepted-performance-small-dot.svg
+docs/assets/benchmark-reference/*.svg
+docs/generated/benchmark-*.md
+docs/generated/benchmark-snapshot.csv
 __pycache__/
