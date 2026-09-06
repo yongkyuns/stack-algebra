@@ -3,30 +3,14 @@
 - [Home](index.md)
 - [Getting started](getting-started.md)
 
-## Overview
-
-- [Feature set](features.md)
-- [0.3 stabilization plan](stabilization-plan.md)
-- [Design review and improvement plan](design-review.md)
-- [Roadmap](roadmap.md)
-
 ## Guides
 
-- [Tutorials](tutorials.md)
-- [API usage](api-usage.md)
-- [Custom scalar extensions](scalar-extension.md)
-- [Fused operations and mapped-view fast paths](fused-operations.md)
-- [Use cases](use-cases.md)
+- [Choosing an API](api-usage.md)
+- [Common use cases](use-cases.md)
 
-## Validation and releases
+## Reference
 
-- [Solver invariant qualification](solver-qualification.md)
-- [Benchmarking](benchmarking.md)
-- [Release benchmark qualification](release-benchmarking.md)
-- [Release artifact qualification](release-artifacts.md)
-- [Release process](releasing.md)
-- [Native benchmark baseline](benchmark-baseline.md)
-- [Target support and evidence](targets.md)
-- [Target qualification](target-qualification.md)
-- [References](references.md)
+- [Capabilities and limits](features.md)
+- [Platforms and embedded use](targets.md)
+- [Performance](benchmarking.md)
 - [API reference](api-reference.md)

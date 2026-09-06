@@ -1,6 +1,6 @@
 [book]
 title = "stack-algebra"
-description = "Fixed-size Rust linear algebra with generated API documentation."
+description = "Fixed-size, no_std Rust linear algebra for predictable-memory systems."
 authors = ["stack-algebra contributors"]
 language = "en"
 src = "."
