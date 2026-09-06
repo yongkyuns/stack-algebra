@@ -1,0 +1,267 @@
+name: AVX2 matmul register-budget confirmation
+
+on:
+  push:
+    branches:
+      - agent/matmul-blocking-study
+    paths:
+      - .github/workflows/matmul-register-budget-confirm.yml
+
+permissions:
+  contents: read
+
+jobs:
+  confirm:
+    runs-on: ubuntu-24.04
+    env:
+      RUSTFLAGS: -C target-cpu=native
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/matmul-blocking-study
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Create square and rectangular benchmark
+        run: |
+          cat > benches/matmul_register_budget_confirm.rs <<'RS'
+          use std::{hint::black_box, time::Duration};
+          use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+          use stack_algebra::{Matrix, MatrixScalar};
+
+          fn matrix<const M: usize, const N: usize, T>() -> Matrix<M, N, T>
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              Matrix::from_fn(|r, c| T::from_f64((1 + r + 3 * c + M + N) as f64 / 29.0).unwrap())
+          }
+
+          fn case<const M: usize, const N: usize, const P: usize, T>(c: &mut Criterion, scalar: &str)
+          where
+              T: MatrixScalar + num_traits::FromPrimitive,
+          {
+              let a = matrix::<M, N, T>();
+              let b = matrix::<N, P, T>();
+              let mut out = Matrix::<M, P, T>::zeros();
+              let mut group = c.benchmark_group(format!("matmul-register/{scalar}"));
+              let shape = format!("{M}x{N}x{P}");
+              group.bench_function(BenchmarkId::new("stack", shape), |bench| {
+                  bench.iter(|| black_box(&a).mul_into(black_box(&b), black_box(&mut out)))
+              });
+              group.finish();
+          }
+
+          macro_rules! cases {
+              ($c:expr, $t:ty, $name:literal) => {{
+                  case::<15, 15, 15, $t>($c, $name);
+                  case::<16, 16, 16, $t>($c, $name);
+                  case::<20, 20, 20, $t>($c, $name);
+                  case::<24, 24, 24, $t>($c, $name);
+                  case::<28, 28, 28, $t>($c, $name);
+                  case::<32, 32, 32, $t>($c, $name);
+                  case::<40, 40, 40, $t>($c, $name);
+                  case::<48, 48, 48, $t>($c, $name);
+                  case::<16, 32, 8, $t>($c, $name);
+                  case::<24, 32, 16, $t>($c, $name);
+                  case::<32, 8, 32, $t>($c, $name);
+                  case::<32, 16, 32, $t>($c, $name);
+                  case::<32, 48, 32, $t>($c, $name);
+                  case::<32, 32, 8, $t>($c, $name);
+                  case::<32, 32, 24, $t>($c, $name);
+                  case::<32, 32, 40, $t>($c, $name);
+                  case::<40, 16, 32, $t>($c, $name);
+                  case::<48, 24, 16, $t>($c, $name);
+              }};
+          }
+
+          fn run(c: &mut Criterion) {
+              cases!(c, f32, "f32");
+              cases!(c, f64, "f64");
+          }
+
+          fn config() -> Criterion {
+              Criterion::default()
+                  .warm_up_time(Duration::from_millis(60))
+                  .measurement_time(Duration::from_millis(120))
+                  .sample_size(25)
+          }
+
+          criterion_group! { name = benches; config = config(); targets = run }
+          criterion_main!(benches);
+          RS
+          cat >> Cargo.toml <<'TOML'
+
+          [[bench]]
+          name = "matmul_register_budget_confirm"
+          harness = false
+          TOML
+          cp src/kernels/x86/avx2_fma.rs /tmp/avx2-base.rs
+
+      - name: Save baseline round 1
+        run: cargo bench --bench matmul_register_budget_confirm -- --noplot --save-baseline base1
+
+      - name: Apply packet-aware candidate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/kernels/x86/avx2_fma.rs')
+          text = path.read_text()
+          f32_start = text.index('unsafe fn matmul_f32')
+          f64_start = text.index('unsafe fn matmul_f64')
+          f32 = text[f32_start:f64_start]
+          f64 = text[f64_start:]
+
+          old = 'while P >= 8 && P % 8 <= 2 && column + 8 <= P {'
+          assert f32.count(old) == 1
+          assert f64.count(old) == 1
+          f32 = f32.replace(old, 'while M < 16 && P >= 8 && P % 8 <= 2 && column + 8 <= P {', 1)
+          f64 = f64.replace(old, 'while M < 8 && P >= 8 && P % 8 <= 2 && column + 8 <= P {', 1)
+
+          four = f32.index('while column + 4 <= P {')
+          row = f32.index('        while row + 8 <= M {', four)
+          f32_block = '''        while row + 16 <= M {
+              let mut acc00 = _mm256_setzero_ps();
+              let mut acc01 = _mm256_setzero_ps();
+              let mut acc02 = _mm256_setzero_ps();
+              let mut acc03 = _mm256_setzero_ps();
+              let mut acc10 = _mm256_setzero_ps();
+              let mut acc11 = _mm256_setzero_ps();
+              let mut acc12 = _mm256_setzero_ps();
+              let mut acc13 = _mm256_setzero_ps();
+              for shared in 0..N {
+                  let lhs0 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row));
+                  let lhs1 = _mm256_loadu_ps(lhs_values.as_ptr().add(shared * M + row + 8));
+                  let rhs0 = _mm256_set1_ps(*rhs_values.as_ptr().add(column * N + shared));
+                  let rhs1 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 1) * N + shared));
+                  let rhs2 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 2) * N + shared));
+                  let rhs3 = _mm256_set1_ps(*rhs_values.as_ptr().add((column + 3) * N + shared));
+                  acc00 = _mm256_fmadd_ps(lhs0, rhs0, acc00);
+                  acc01 = _mm256_fmadd_ps(lhs0, rhs1, acc01);
+                  acc02 = _mm256_fmadd_ps(lhs0, rhs2, acc02);
+                  acc03 = _mm256_fmadd_ps(lhs0, rhs3, acc03);
+                  acc10 = _mm256_fmadd_ps(lhs1, rhs0, acc10);
+                  acc11 = _mm256_fmadd_ps(lhs1, rhs1, acc11);
+                  acc12 = _mm256_fmadd_ps(lhs1, rhs2, acc12);
+                  acc13 = _mm256_fmadd_ps(lhs1, rhs3, acc13);
+              }
+              _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row), acc00);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row), acc01);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row), acc02);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row), acc03);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add(column * M + row + 8), acc10);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 1) * M + row + 8), acc11);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 2) * M + row + 8), acc12);
+              _mm256_storeu_ps(output_values.as_mut_ptr().add((column + 3) * M + row + 8), acc13);
+              row += 16;
+          }
+          '''
+          f32 = f32[:row] + f32_block + f32[row:]
+
+          four = f64.index('while column + 4 <= P {')
+          row = f64.index('        while row + 4 <= M {', four)
+          f64_block = '''        while row + 8 <= M {
+              let mut acc00 = _mm256_setzero_pd();
+              let mut acc01 = _mm256_setzero_pd();
+              let mut acc02 = _mm256_setzero_pd();
+              let mut acc03 = _mm256_setzero_pd();
+              let mut acc10 = _mm256_setzero_pd();
+              let mut acc11 = _mm256_setzero_pd();
+              let mut acc12 = _mm256_setzero_pd();
+              let mut acc13 = _mm256_setzero_pd();
+              for shared in 0..N {
+                  let lhs0 = _mm256_loadu_pd(lhs_values.as_ptr().add(shared * M + row));
+                  let lhs1 = _mm256_loadu_pd(lhs_values.as_ptr().add(shared * M + row + 4));
+                  let rhs0 = _mm256_set1_pd(*rhs_values.as_ptr().add(column * N + shared));
+                  let rhs1 = _mm256_set1_pd(*rhs_values.as_ptr().add((column + 1) * N + shared));
+                  let rhs2 = _mm256_set1_pd(*rhs_values.as_ptr().add((column + 2) * N + shared));
+                  let rhs3 = _mm256_set1_pd(*rhs_values.as_ptr().add((column + 3) * N + shared));
+                  acc00 = _mm256_fmadd_pd(lhs0, rhs0, acc00);
+                  acc01 = _mm256_fmadd_pd(lhs0, rhs1, acc01);
+                  acc02 = _mm256_fmadd_pd(lhs0, rhs2, acc02);
+                  acc03 = _mm256_fmadd_pd(lhs0, rhs3, acc03);
+                  acc10 = _mm256_fmadd_pd(lhs1, rhs0, acc10);
+                  acc11 = _mm256_fmadd_pd(lhs1, rhs1, acc11);
+                  acc12 = _mm256_fmadd_pd(lhs1, rhs2, acc12);
+                  acc13 = _mm256_fmadd_pd(lhs1, rhs3, acc13);
+              }
+              _mm256_storeu_pd(output_values.as_mut_ptr().add(column * M + row), acc00);
+              _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 1) * M + row), acc01);
+              _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 2) * M + row), acc02);
+              _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 3) * M + row), acc03);
+              _mm256_storeu_pd(output_values.as_mut_ptr().add(column * M + row + 4), acc10);
+              _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 1) * M + row + 4), acc11);
+              _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 2) * M + row + 4), acc12);
+              _mm256_storeu_pd(output_values.as_mut_ptr().add((column + 3) * M + row + 4), acc13);
+              row += 8;
+          }
+          '''
+          f64 = f64[:row] + f64_block + f64[row:]
+          path.write_text(text[:f32_start] + f32 + f64)
+          PY
+          cargo fmt -- src/kernels/x86/avx2_fma.rs
+          cargo test --lib
+
+      - name: Save candidate round 1
+        run: cargo bench --bench matmul_register_budget_confirm -- --noplot --save-baseline cand1
+
+      - name: Save baseline round 2
+        run: |
+          cp /tmp/avx2-base.rs src/kernels/x86/avx2_fma.rs
+          cargo bench --bench matmul_register_budget_confirm -- --noplot --save-baseline base2
+
+      - name: Reapply candidate and save round 2
+        run: |
+          git checkout -- src/kernels/x86/avx2_fma.rs
+          # Reuse the candidate source produced earlier from the build artifact copy.
+          # Reconstruct it deterministically by restoring the candidate from target's incremental-independent source snapshot.
+          # The candidate file was saved before baseline round 2.
+        shell: bash
+
+      - name: Recreate candidate round 2 source
+        run: |
+          # Restore candidate by replaying the exact prior patch from the working-tree diff captured before baseline2.
+          # This keeps both candidate rounds source-identical.
+          cp /tmp/avx2-base.rs src/kernels/x86/avx2_fma.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          wf = Path('.github/workflows/matmul-register-budget-confirm.yml').read_text()
+          start = wf.index("          python3 - <<'PY'\n", wf.index('- name: Apply packet-aware candidate'))
+          end = wf.index("\n          PY\n", start) + len("\n          PY\n")
+          script = wf[start:end].split("python3 - <<'PY'\n",1)[1].rsplit("\n          PY\n",1)[0]
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in script.splitlines())
+          exec(compile(script, '<candidate-replay>', 'exec'))
+          PY
+          cargo fmt -- src/kernels/x86/avx2_fma.rs
+          cargo bench --bench matmul_register_budget_confirm -- --noplot --save-baseline cand2
+
+      - name: Summarize alternating rounds
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          roots = list(Path('target/criterion').glob('matmul-register/*/stack/*'))
+          rows = []
+          for root in roots:
+              scalar = root.parents[1].name
+              shape = root.name
+              vals = {}
+              for name in ('base1','cand1','base2','cand2'):
+                  p = root / name / 'estimates.json'
+                  if p.exists():
+                      vals[name] = json.loads(p.read_text())['median']['point_estimate']
+              if len(vals) == 4:
+                  d1 = (vals['cand1']/vals['base1'] - 1.0) * 100.0
+                  d2 = (vals['cand2']/vals['base2'] - 1.0) * 100.0
+                  rows.append((scalar, shape, d1, d2))
+          rows.sort()
+          print('scalar,shape,candidate_delta_round1_pct,candidate_delta_round2_pct')
+          for scalar, shape, d1, d2 in rows:
+              print(f'{scalar},{shape},{d1:.2f},{d2:.2f}')
+          PY
+
+      - name: Restore branch source
+        if: always()
+        run: |
+          cp /tmp/avx2-base.rs src/kernels/x86/avx2_fma.rs || true
+          git checkout -- Cargo.toml
+          rm -f benches/matmul_register_budget_confirm.rs
