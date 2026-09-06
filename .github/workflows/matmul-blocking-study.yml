@@ -82,7 +82,7 @@ jobs:
           harness = false
           TOML
 
-      - name: Compare mixed blocking candidate
+      - name: Compare row-aligned blocking candidate
         env:
           RUSTFLAGS: -C target-cpu=native
         run: |
@@ -103,7 +103,7 @@ jobs:
 
           f32 = f32.replace(
               old_eight,
-              'while P >= 40 && P % 8 <= 2 && column + 8 <= P {',
+              'while M % 16 != 0 && P >= 8 && P % 8 <= 2 && column + 8 <= P {',
               1,
           )
           f64 = f64.replace(
