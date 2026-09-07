@@ -11,6 +11,23 @@ mod x86;
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 mod arm;
 
+// Safe scalar hooks are public even when hidden from rustdoc. Validate their
+// dynamic arguments before dispatching to unchecked architecture kernels.
+#[inline]
+fn check_slice_lengths(first: usize, second: usize) {
+    assert_eq!(first, second, "kernel slice lengths must match");
+}
+
+#[inline]
+fn check_block_range<const D: usize>(start: usize, end: usize) {
+    assert!(start <= end && end <= D, "kernel block range out of bounds");
+}
+
+#[inline]
+fn check_column<const D: usize>(column: usize) {
+    assert!(column < D, "kernel column index out of bounds");
+}
+
 #[allow(dead_code)]
 pub(crate) trait MatmulBackend<T> {
     /// Multiplies fixed-size matrices into caller-provided output storage.
@@ -187,8 +204,18 @@ pub(crate) use portable::ScalarReduction;
 /// factorization support with an empty implementation; the default methods use
 /// portable scalar loops. Built-in floating-point types override selected
 /// methods with target-specific kernels where that is profitable.
+///
+/// Slice hooks require equal lengths, block updates require
+/// `block_start <= block_end <= D`, and column updates require `column < D`.
+/// The default and built-in implementations panic on invalid arguments before
+/// mutation. Overrides must preserve safe access for every caller; hidden
+/// methods do not impose unchecked memory-safety obligations on callers.
 pub trait FactorizationScalar: Copy + Zero + Add<Output = Self> + Mul<Output = Self> {
     /// Applies the symmetric rank-k update used by LDLᵀ factorization.
+    ///
+    /// # Panics
+    ///
+    /// Panics before mutation unless `block_start <= block_end <= D`.
     #[doc(hidden)]
     #[inline]
     fn symmetric_rank_k_update<const D: usize>(
@@ -198,6 +225,7 @@ pub trait FactorizationScalar: Copy + Zero + Add<Output = Self> + Mul<Output = S
     ) where
         Self: Sub<Output = Self>,
     {
+        check_block_range::<D>(block_start, block_end);
         for row in block_end..D {
             for column in block_end..=row {
                 let mut value = matrix[(row, column)];
@@ -211,18 +239,27 @@ pub trait FactorizationScalar: Copy + Zero + Add<Output = Self> + Mul<Output = S
     }
 
     /// Subtracts `source * scale` from `target` elementwise.
+    ///
+    /// # Panics
+    ///
+    /// Panics before mutation if the slice lengths differ.
     #[doc(hidden)]
     #[inline]
     fn rank_update_sub(target: &mut [Self], source: &[Self], scale: Self)
     where
         Self: Sub<Output = Self>,
     {
+        check_slice_lengths(target.len(), source.len());
         for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
             *target_value = *target_value - *source_value * scale;
         }
     }
 
     /// Subtracts two scaled sources from `target` elementwise.
+    ///
+    /// # Panics
+    ///
+    /// Panics before mutation unless all three slice lengths are equal.
     #[doc(hidden)]
     #[inline]
     fn rank_update_two_sub(
@@ -234,6 +271,8 @@ pub trait FactorizationScalar: Copy + Zero + Add<Output = Self> + Mul<Output = S
     ) where
         Self: Sub<Output = Self>,
     {
+        check_slice_lengths(target.len(), source_first.len());
+        check_slice_lengths(target.len(), source_second.len());
         for ((target_value, first_value), second_value) in target
             .iter_mut()
             .zip(source_first.iter())
@@ -245,12 +284,17 @@ pub trait FactorizationScalar: Copy + Zero + Add<Output = Self> + Mul<Output = S
     }
 
     /// Rotates two columns in place using a two-by-two orthogonal transform.
+    ///
+    /// # Panics
+    ///
+    /// Panics before mutation if the column lengths differ.
     #[doc(hidden)]
     #[inline]
     fn rotate_columns(first: &mut [Self], second: &mut [Self], cosine: Self, sine: Self)
     where
         Self: Add<Output = Self> + Sub<Output = Self>,
     {
+        check_slice_lengths(first.len(), second.len());
         for (first_value, second_value) in first.iter_mut().zip(second.iter_mut()) {
             let left = *first_value;
             let right = *second_value;
@@ -272,6 +316,10 @@ pub trait FactorizationScalar: Copy + Zero + Add<Output = Self> + Mul<Output = S
     }
 
     /// Updates one Cholesky factor column after its diagonal is known.
+    ///
+    /// # Panics
+    ///
+    /// Panics before mutation if `column >= D`, including when `D == 0`.
     #[doc(hidden)]
     #[inline]
     fn cholesky_update_column<const D: usize>(
@@ -281,6 +329,7 @@ pub trait FactorizationScalar: Copy + Zero + Add<Output = Self> + Mul<Output = S
     ) where
         Self: Sub<Output = Self> + Div<Output = Self>,
     {
+        check_column::<D>(column);
         let data = matrix.as_mut_slice();
         for row in (column + 1)..D {
             let mut value = data[column * D + row];
@@ -322,9 +371,14 @@ pub trait MatrixScalar: FactorizationScalar {
     }
 
     /// Accumulates a dot product starting from `initial`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the slice lengths differ.
     #[doc(hidden)]
     #[inline]
     fn dot_accumulate(lhs: &[Self], rhs: &[Self], initial: Self) -> Self {
+        check_slice_lengths(lhs.len(), rhs.len());
         let mut result = initial;
         for (lhs_value, rhs_value) in lhs.iter().zip(rhs.iter()) {
             result = result + *lhs_value * *rhs_value;
@@ -332,9 +386,15 @@ pub trait MatrixScalar: FactorizationScalar {
         result
     }
 
+    /// Returns the two squared norms and dot product of equally sized slices.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the slice lengths differ.
     #[doc(hidden)]
     #[inline]
     fn symmetric_dot(lhs: &[Self], rhs: &[Self]) -> (Self, Self, Self) {
+        check_slice_lengths(lhs.len(), rhs.len());
         let mut lhs_squared = Self::zero();
         let mut rhs_squared = Self::zero();
         let mut product = Self::zero();

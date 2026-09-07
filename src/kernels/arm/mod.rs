@@ -24,6 +24,7 @@ macro_rules! impl_neon_scalar {
                 block_start: usize,
                 block_end: usize,
             ) {
+                super::check_block_range::<D>(block_start, block_end);
                 <NeonMatmul as MatmulBackend<$scalar>>::symmetric_rank_k_update(
                     matrix,
                     block_start,
@@ -33,6 +34,7 @@ macro_rules! impl_neon_scalar {
 
             #[inline]
             fn rank_update_sub(target: &mut [Self], source: &[Self], scale: Self) {
+                super::check_slice_lengths(target.len(), source.len());
                 <NeonMatmul as MatmulBackend<$scalar>>::rank_update_sub(target, source, scale);
             }
 
@@ -44,6 +46,8 @@ macro_rules! impl_neon_scalar {
                 source_second: &[Self],
                 scale_second: Self,
             ) {
+                super::check_slice_lengths(target.len(), source_first.len());
+                super::check_slice_lengths(target.len(), source_second.len());
                 <NeonMatmul as MatmulBackend<$scalar>>::rank_update_two_sub(
                     target,
                     source_first,
@@ -64,6 +68,7 @@ macro_rules! impl_neon_scalar {
                 column: usize,
                 diagonal: Self,
             ) {
+                super::check_column::<D>(column);
                 <NeonMatmul as MatmulBackend<$scalar>>::cholesky_update_column(
                     matrix, column, diagonal,
                 );
@@ -87,6 +92,7 @@ macro_rules! impl_neon_scalar {
 
             #[inline]
             fn dot_accumulate(lhs: &[Self], rhs: &[Self], initial: Self) -> Self {
+                super::check_slice_lengths(lhs.len(), rhs.len());
                 <NeonMatmul as MatmulBackend<$scalar>>::dot(lhs, rhs, initial)
             }
         }

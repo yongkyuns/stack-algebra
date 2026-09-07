@@ -12,6 +12,10 @@ All notable changes to `stack-algebra` are documented here. The project follows 
 - Reproducible Cortex-M code-size and stack regression budgets on the pinned qualification toolchain.
 - Generated benchmark reference pages and retained benchmark provenance for the hosted performance snapshot.
 
+### Fixed
+
+- Safe `FactorizationScalar` and `MatrixScalar` hooks now validate matching slice lengths, block ranges, and column indices before SIMD dispatch or mutation. This closes an out-of-bounds access path reachable through safe calls; portable defaults reject invalid inputs consistently. Valid numerical operations are unchanged.
+
 ### Changed
 
 - `Matrix::swap_rows` and `Matrix::swap_columns` now panic before mutation when either index is out of bounds, instead of silently ignoring invalid indices. Valid swaps, including self-swaps and swaps across an empty counterpart dimension, are unchanged. Callers that previously relied on the silent no-op must validate indices explicitly.

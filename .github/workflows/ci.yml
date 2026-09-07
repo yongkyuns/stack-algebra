@@ -58,6 +58,10 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo test --no-default-features --lib --tests
+      - name: Check safe scalar hooks with release assertions
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo test --release --no-default-features --test scalar_hook_contracts
 
   msrv:
     name: MSRV 1.87
@@ -174,6 +178,7 @@ jobs:
       - run: cargo miri setup
       - run: >-
           cargo miri test --no-default-features
+          --test scalar_hook_contracts
           --test view_ops
           --test fused_view_paths
           --test sparse

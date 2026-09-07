@@ -34,6 +34,7 @@ macro_rules! impl_kernel_scalar {
                 block_start: usize,
                 block_end: usize,
             ) {
+                super::check_block_range::<D>(block_start, block_end);
                 <$matmul as MatmulBackend<$scalar>>::symmetric_rank_k_update(
                     matrix,
                     block_start,
@@ -43,6 +44,7 @@ macro_rules! impl_kernel_scalar {
 
             #[inline]
             fn rank_update_sub(target: &mut [Self], source: &[Self], scale: Self) {
+                super::check_slice_lengths(target.len(), source.len());
                 <$matmul as MatmulBackend<$scalar>>::rank_update_sub(target, source, scale);
             }
 
@@ -54,6 +56,8 @@ macro_rules! impl_kernel_scalar {
                 source_second: &[Self],
                 scale_second: Self,
             ) {
+                super::check_slice_lengths(target.len(), source_first.len());
+                super::check_slice_lengths(target.len(), source_second.len());
                 <$matmul as MatmulBackend<$scalar>>::rank_update_two_sub(
                     target,
                     source_first,
@@ -65,6 +69,7 @@ macro_rules! impl_kernel_scalar {
 
             #[inline]
             fn rotate_columns(first: &mut [Self], second: &mut [Self], cosine: Self, sine: Self) {
+                super::check_slice_lengths(first.len(), second.len());
                 <$matmul as MatmulBackend<$scalar>>::rotate_columns(first, second, cosine, sine);
             }
 
@@ -79,6 +84,7 @@ macro_rules! impl_kernel_scalar {
                 column: usize,
                 diagonal: Self,
             ) {
+                super::check_column::<D>(column);
                 <$matmul as MatmulBackend<$scalar>>::cholesky_update_column(
                     matrix, column, diagonal,
                 );
@@ -102,11 +108,13 @@ macro_rules! impl_kernel_scalar {
 
             #[inline]
             fn dot_accumulate(lhs: &[Self], rhs: &[Self], initial: Self) -> Self {
+                super::check_slice_lengths(lhs.len(), rhs.len());
                 <$matmul as MatmulBackend<$scalar>>::dot(lhs, rhs, initial)
             }
 
             #[inline]
             fn symmetric_dot(lhs: &[Self], rhs: &[Self]) -> (Self, Self, Self) {
+                super::check_slice_lengths(lhs.len(), rhs.len());
                 <$matmul as MatmulBackend<$scalar>>::symmetric_dot(lhs, rhs)
             }
         }
