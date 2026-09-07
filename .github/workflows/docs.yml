@@ -28,8 +28,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Test documentation examples
-        run: cargo test --doc
+      - name: Test documentation examples with all features
+        run: cargo test --doc --all-features
+
+      - name: Check all-feature API documentation
+        run: cargo doc --no-deps --all-features
 
       - name: Build combined guide and API site
         run: ./scripts/build_docs.sh
