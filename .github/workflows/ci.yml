@@ -87,13 +87,13 @@ jobs:
         env:
           EIGEN3_INCLUDE_DIR: /usr/include/eigen3
         run: cargo test --manifest-path tools/eigen-harness/Cargo.toml
-      - name: Compile isolated Eigen-linked Criterion benchmark
+      - name: Compile isolated Eigen-linked Criterion benchmarks
         env:
           EIGEN3_INCLUDE_DIR: /usr/include/eigen3
         run: >-
           CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
           cargo bench --manifest-path tools/eigen-harness/Cargo.toml
-          --bench dense_solvers --no-run
+          --benches --no-run
       - name: Compile native Eigen benchmark
         run: >-
           c++ -std=c++17 -O2 -DNDEBUG -I/usr/include/eigen3
