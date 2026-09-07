@@ -17,7 +17,6 @@ jobs:
     timeout-minutes: 120
     env:
       EIGEN3_INCLUDE_DIR: /usr/include/eigen3
-      BENCH_MACHINE_ID: ${{ runner.name }}
       BENCH_WARMUP_TIME: 1
       BENCH_MEASUREMENT_TIME: 3
       BENCH_SAMPLE_SIZE: 30
@@ -35,6 +34,8 @@ jobs:
           command -v sha256sum
           test -z "$(git status --porcelain)"
       - name: Run release benchmark qualification
+        env:
+          BENCH_MACHINE_ID: ${{ runner.name }}
         run: sh scripts/run_release_benchmarks.sh
       - name: Add provenance to job summary
         run: |
