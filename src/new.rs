@@ -45,16 +45,38 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Creates a new matrix by evaluating `f` for each `(row, column)` pair.
     ///
     /// The closure is called exactly `M * N` times and the result is fully
-    /// initialized without an intermediate heap allocation.
+    /// initialized without an intermediate heap allocation. If `f` panics,
+    /// every value produced by earlier calls is dropped before unwinding.
     #[inline]
     pub fn from_fn(mut f: impl FnMut(usize, usize) -> T) -> Self {
-        let mut matrix = Matrix::<M, N, MaybeUninit<T>>::uninit();
-        for column in 0..N {
-            for row in 0..M {
-                matrix[(row, column)].write(f(row, column));
+        struct Guard<'a, T, const M: usize, const N: usize> {
+            matrix: &'a mut Matrix<M, N, MaybeUninit<T>>,
+            init: usize,
+        }
+
+        impl<T, const M: usize, const N: usize> Drop for Guard<'_, T, M, N> {
+            fn drop(&mut self) {
+                for elem in &mut self.matrix.as_mut_slice()[..self.init] {
+                    // SAFETY: only the initialized prefix is visited.
+                    unsafe { ptr::drop_in_place(elem.as_mut_ptr()) };
+                }
             }
         }
 
+        let mut matrix = Matrix::<M, N, MaybeUninit<T>>::uninit();
+        let mut guard = Guard {
+            matrix: &mut matrix,
+            init: 0,
+        };
+        for column in 0..N {
+            for row in 0..M {
+                let value = f(row, column);
+                guard.matrix[(row, column)].write(value);
+                guard.init += 1;
+            }
+        }
+
+        mem::forget(guard);
         // SAFETY: every matrix element is initialized exactly once above.
         unsafe { matrix.assume_init() }
     }
