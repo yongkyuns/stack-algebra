@@ -11,5 +11,13 @@ eigen-compare = []
 [dependencies]
 stack-algebra = { path = "../..", default-features = false }
 
+[dev-dependencies]
+criterion = "0.8"
+faer = "0.24"
+
 [build-dependencies]
 cc = "1.4"
+
+[[bench]]
+name = "dense_solvers"
+harness = false
