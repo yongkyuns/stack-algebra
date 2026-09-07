@@ -8,7 +8,7 @@ out_dir=${RELEASE_ARTIFACT_DIR:-release-artifacts}
 nightly=${PUBLIC_API_NIGHTLY:-nightly-2026-08-20}
 public_api_version=${PUBLIC_API_TOOL_VERSION:-0.51.0}
 
-for command in cargo rustc rustup git sha256sum; do
+for command in cargo rustc rustup git sha256sum tar; do
     command -v "$command" >/dev/null 2>&1 || {
         echo "$command is required" >&2
         exit 2
@@ -49,6 +49,7 @@ cp target/doc/stack_algebra.json "$out_dir/rustdoc-public-api.json"
 
 cargo metadata --locked --format-version 1 > "$out_dir/cargo-metadata.json"
 cargo tree --locked --edges normal,build > "$out_dir/dependency-tree.txt"
+cargo package --locked --list > "$out_dir/package-files.txt"
 
 cargo package --locked
 package=$(find target/package -maxdepth 1 -type f -name 'stack-algebra-*.crate' | sort | tail -n 1)
@@ -57,6 +58,42 @@ if [ -z "$package" ]; then
     exit 1
 fi
 cp "$package" "$out_dir/"
+
+# Verify the packaged archive from the perspective of an external consumer,
+# rather than relying only on in-repository examples. This catches accidental
+# package omissions and README/API drift in the advertised 0.3 quick start.
+consumer_root=$(mktemp -d)
+trap 'rm -rf "$consumer_root"' EXIT HUP INT TERM
+tar -xzf "$package" -C "$consumer_root"
+package_source=$(find "$consumer_root" -mindepth 1 -maxdepth 1 -type d -name 'stack-algebra-*' | sort | head -n 1)
+if [ -z "$package_source" ]; then
+    echo "could not extract packaged stack-algebra source" >&2
+    exit 1
+fi
+consumer_dir="$consumer_root/consumer"
+mkdir -p "$consumer_dir/src"
+cat > "$consumer_dir/Cargo.toml" <<EOF
+[package]
+name = "stack-algebra-package-smoke"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+stack-algebra = { path = "$package_source" }
+EOF
+cat > "$consumer_dir/src/main.rs" <<'EOF'
+use stack_algebra::{matrix, vector, Cholesky};
+
+fn main() {
+    let a = matrix![4.0_f64, 1.0; 1.0, 3.0];
+    let b = vector![1.0_f64; 2.0];
+    let factor = Cholesky::try_decompose(&a).expect("positive definite");
+    let x = factor.solve(&b);
+    assert!((a * x - b).norm() < 1.0e-12);
+}
+EOF
+cargo check --manifest-path "$consumer_dir/Cargo.toml"
 
 {
     printf 'source_commit=%s\n' "$source_commit"
@@ -70,6 +107,7 @@ cp "$package" "$out_dir/"
     printf 'cargo_public_api=%s\n' "$(cargo public-api --version)"
     printf 'package_file=%s\n' "$(basename "$package")"
     printf 'package_sha256=%s\n' "$(sha256sum "$package" | awk '{print $1}')"
+    printf 'package_consumer_smoke=passed\n'
     printf 'public_api_sha256=%s\n' "$(sha256sum "$out_dir/public-api.txt" | awk '{print $1}')"
     printf 'rustdoc_json_sha256=%s\n' "$(sha256sum "$out_dir/rustdoc-public-api.json" | awk '{print $1}')"
 } > "$out_dir/provenance.txt"
