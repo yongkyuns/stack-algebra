@@ -148,7 +148,7 @@ pub(crate) trait ReductionBackend<T> {
         T: crate::Real,
     {
         let squared = Self::squared_norm(matrix);
-        if squared.is_finite() && squared != T::zero() {
+        if squared.is_finite() && squared >= T::min_positive_value() {
             return squared.sqrt();
         }
 
