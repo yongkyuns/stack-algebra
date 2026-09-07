@@ -49,36 +49,9 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// every value produced by earlier calls is dropped before unwinding.
     #[inline]
     pub fn from_fn(mut f: impl FnMut(usize, usize) -> T) -> Self {
-        struct Guard<'a, T, const M: usize, const N: usize> {
-            matrix: &'a mut Matrix<M, N, MaybeUninit<T>>,
-            init: usize,
-        }
-
-        impl<T, const M: usize, const N: usize> Drop for Guard<'_, T, M, N> {
-            fn drop(&mut self) {
-                for elem in &mut self.matrix.as_mut_slice()[..self.init] {
-                    // SAFETY: only the initialized prefix is visited.
-                    unsafe { ptr::drop_in_place(elem.as_mut_ptr()) };
-                }
-            }
-        }
-
-        let mut matrix = Matrix::<M, N, MaybeUninit<T>>::uninit();
-        let mut guard = Guard {
-            matrix: &mut matrix,
-            init: 0,
-        };
-        for column in 0..N {
-            for row in 0..M {
-                let value = f(row, column);
-                guard.matrix[(row, column)].write(value);
-                guard.init += 1;
-            }
-        }
-
-        mem::forget(guard);
-        // SAFETY: every matrix element is initialized exactly once above.
-        unsafe { matrix.assume_init() }
+        Self::from_columns(core::array::from_fn(|column| {
+            core::array::from_fn(|row| f(row, column))
+        }))
     }
 
     /// Creates a new matrix from rows in row-major order.
