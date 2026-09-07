@@ -22,8 +22,10 @@ jobs:
           cargo run --example ekf_measurement_update --no-default-features
           cargo run --example mapped_least_squares --no-default-features
           cargo run --example embedded_resource_budget --no-default-features
-      - name: Check release benchmark script syntax
-        run: sh -n scripts/run_release_benchmarks.sh
+      - name: Check benchmark script syntax
+        run: |
+          sh -n scripts/run_release_benchmarks.sh
+          bash -n tools/eigen-harness/eigen/run_native_bench.sh
 
   x86-kernels:
     name: x86 kernel correctness (${{ matrix.name }})
@@ -85,6 +87,18 @@ jobs:
         env:
           EIGEN3_INCLUDE_DIR: /usr/include/eigen3
         run: cargo test --manifest-path tools/eigen-harness/Cargo.toml
+      - name: Compile isolated Eigen-linked Criterion benchmark
+        env:
+          EIGEN3_INCLUDE_DIR: /usr/include/eigen3
+        run: >-
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
+          cargo bench --manifest-path tools/eigen-harness/Cargo.toml
+          --bench dense_solvers --no-run
+      - name: Compile native Eigen benchmark
+        run: >-
+          c++ -std=c++17 -O2 -DNDEBUG -I/usr/include/eigen3
+          tools/eigen-harness/eigen/native_bench.cpp
+          -o /tmp/stack-algebra-eigen-native-bench
       - run: cargo test --no-default-features --lib --tests
 
   docs:
