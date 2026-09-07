@@ -22,6 +22,30 @@ The required review questions are:
 
 Safety depends on exact element count, compatible alignment, initialized storage, the `repr(C)` matrix representation, and the returned reference never outliving the borrowed slice. These paths must reject incompatible strided layouts rather than reinterpret them.
 
+Owning `Matrix::as_slice` and `Matrix::as_mut_slice` use the safe
+`as_flattened` / `as_flattened_mut` APIs on the nested arrays, rather than
+constructing slices from raw pointers. These APIs are available below the
+Rust 1.87 MSRV, preserve column-major borrowing without `Copy` or `Clone`
+bounds, and reject overflowing zero-sized slice lengths in release builds too.
+
+### Dense matrix initialization
+
+`Matrix<MaybeUninit<T>>::uninit` uses the existing safe `Matrix::from_fn`
+constructor, which builds nested arrays with `core::array::from_fn`. Creating
+uninitialized slots no longer requires an `assume_init` boundary or any trait
+bound on `T`.
+
+The subsequent conversion from initialized slots into `Matrix<T>` remains an
+unsafe operation: every slot must contain a valid `T`, and ownership must be
+transferred exactly once. Iterator collection retains its initialized-prefix
+guard so short or panicking iterators drop all produced values without reading
+uninitialized slots or double-dropping them.
+
+`tests/matrix_storage.rs` covers column-major shared/mutable borrowing, empty
+shapes, non-`Copy` values, over-aligned zero-sized elements, slice-length
+overflow, and collection/drop behavior on success, shortage, and panic. This
+suite runs with the normal tests, in a focused release check, and under Miri.
+
 ### Unchecked indexing
 
 Public `unsafe` unchecked-access methods expose the usual caller obligation that indices are in bounds. Internal unchecked indexing must only be used after bounds have been established by compile-time dimensions or an explicit preceding check.
@@ -50,7 +74,7 @@ Sparse storage occasionally uses lower-level initialization techniques to avoid 
 
 The repository currently uses several complementary checks rather than treating `unsafe` review as sufficient by itself:
 
-- Miri runs mapped-view and sparse safety suites;
+- Miri runs matrix-storage, mapped-view, and sparse safety suites;
 - x86/SSE2 and native ARM64 jobs exercise architecture-specific dispatch;
 - Cortex-M, RISC-V, AArch64, and WASM `no_std` builds cover portability;
 - QEMU executes representative embedded workloads;
