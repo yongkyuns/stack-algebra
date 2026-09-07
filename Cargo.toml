@@ -12,7 +12,15 @@ rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 categories = ["mathematics", "science", "no-std"]
 keywords = ["robotics", "math", "matrix", "vector", "linear-algebra"]
-exclude = ["tools/**"]
+include = [
+    "src/**",
+    "examples/**",
+    "README.md",
+    "CHANGELOG.md",
+    "UNSAFE.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
