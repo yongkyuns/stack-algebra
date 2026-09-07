@@ -12,13 +12,13 @@ rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 categories = ["mathematics", "science", "no-std"]
 keywords = ["robotics", "math", "matrix", "vector", "linear-algebra"]
+exclude = ["tools/**"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 default = []
 std = ["num-traits/std"]
-eigen-compare = ["dep:cc"]
 
 [dependencies]
 approx = "0.5"
@@ -30,12 +30,7 @@ stride = { version = "0.3.0"}
 criterion = "0.8"
 dyn-stack = "0.13"
 faer = "0.24"
-faer-traits = "0.24"
 nalgebra = { version = "0.33", default-features = false, features = ["std"] }
-
-[build-dependencies]
-# Reference-comparison tooling is not part of ordinary library builds.
-cc = { version = "1.4", optional = true }
 
 [[bench]]
 name = "fixed_size"
@@ -46,15 +41,7 @@ name = "small_fixed"
 harness = false
 
 [[bench]]
-name = "sparse"
-harness = false
-
-[[bench]]
 name = "block_sparse"
-harness = false
-
-[[bench]]
-name = "dense_solvers"
 harness = false
 
 [[bench]]

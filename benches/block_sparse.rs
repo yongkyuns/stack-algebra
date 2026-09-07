@@ -5,17 +5,6 @@ use faer::linalg::solvers::Solve;
 use faer::{Mat, Side};
 use stack_algebra::{Matrix, StaticBlockCscLdlt, StaticBlockCscMatrix, StaticCscLdlt};
 
-#[cfg(feature = "eigen-compare")]
-unsafe extern "C" {
-    fn sa_eigen_ldlt_solve_f64(
-        input: *const f64,
-        rhs: *const f64,
-        dimension: usize,
-        columns: usize,
-        output: *mut f64,
-    ) -> i32;
-}
-
 type Blocks = StaticBlockCscMatrix<2, 2, 2, 2, 4, f64>;
 type NativeLdlt = StaticBlockCscLdlt<2, 2, 2, 2, 4, f64>;
 
@@ -159,23 +148,6 @@ fn criterion_benchmark(criterion: &mut Criterion) {
             faer_output.copy_from(&faer_rhs);
             faer_factor.solve_in_place(black_box(&mut faer_output));
             black_box(&faer_output);
-        });
-    });
-    #[cfg(feature = "eigen-compare")]
-    group.bench_function("eigen-solve", |bench| {
-        let mut output = [0.0_f64; 2];
-        bench.iter(|| {
-            let status = unsafe {
-                sa_eigen_ldlt_solve_f64(
-                    cross_dense.as_slice().as_ptr(),
-                    cross_rhs.as_slice().as_ptr(),
-                    2,
-                    1,
-                    output.as_mut_ptr(),
-                )
-            };
-            assert_eq!(status, 1);
-            black_box(output);
         });
     });
     group.finish();
