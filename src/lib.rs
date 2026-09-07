@@ -337,33 +337,47 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         self.as_mut_slice().iter_mut()
     }
 
-    /// Swap the two given rows of this matrix
+    /// Swaps two rows of this matrix.
+    ///
+    /// Swapping a valid row with itself leaves the matrix unchanged. Valid row
+    /// indices are also accepted when the matrix has zero columns.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `r1 >= M` or `r2 >= M`, even when there are zero columns.
+    /// Both indices are checked before any element is modified.
     #[inline]
     pub fn swap_rows(&mut self, r1: usize, r2: usize)
     where
         T: Copy,
     {
-        if r1 < M && r2 < M {
-            for i in 0..N {
-                let tmp = self[(r1, i)];
-                self[(r1, i)] = self[(r2, i)];
-                self[(r2, i)] = tmp;
-            }
+        assert!(r1 < M && r2 < M, "row index out of bounds");
+        for i in 0..N {
+            let tmp = self[(r1, i)];
+            self[(r1, i)] = self[(r2, i)];
+            self[(r2, i)] = tmp;
         }
     }
 
-    /// Swap the two given columns of this matrix
+    /// Swaps two columns of this matrix.
+    ///
+    /// Swapping a valid column with itself leaves the matrix unchanged. Valid
+    /// column indices are also accepted when the matrix has zero rows.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `c1 >= N` or `c2 >= N`, even when there are zero rows.
+    /// Both indices are checked before any element is modified.
     #[inline]
     pub fn swap_columns(&mut self, c1: usize, c2: usize)
     where
         T: Copy,
     {
-        if c1 < N && c2 < N {
-            for i in 0..M {
-                let tmp = self[(i, c1)];
-                self[(i, c1)] = self[(i, c2)];
-                self[(i, c2)] = tmp;
-            }
+        assert!(c1 < N && c2 < N, "column index out of bounds");
+        for i in 0..M {
+            let tmp = self[(i, c1)];
+            self[(i, c1)] = self[(i, c2)];
+            self[(i, c2)] = tmp;
         }
     }
 

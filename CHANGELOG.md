@@ -14,6 +14,7 @@ All notable changes to `stack-algebra` are documented here. The project follows 
 
 ### Changed
 
+- `Matrix::swap_rows` and `Matrix::swap_columns` now panic before mutation when either index is out of bounds, instead of silently ignoring invalid indices. Valid swaps, including self-swaps and swaps across an empty counterpart dimension, are unchanged. Callers that previously relied on the silent no-op must validate indices explicitly.
 - Dense LDLT reusable multi-RHS solves reduce temporary storage and reuse factor traversal across RHS columns.
 - Dense triangular multi-RHS solves use column-update traversal for measured larger-dimension cases while preserving small-size paths.
 - x86 AVX2/FMA `f32` dot reduction uses shorter packet paths and in-register reduction for small and medium vectors.
