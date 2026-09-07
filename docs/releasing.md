@@ -22,13 +22,15 @@ The floor is evidence-based: Rust 1.85 exposed the library's use of `usize::is_m
 
 ## Exact-commit package qualification
 
-Release artifact qualification runs on relevant pull requests and pushes to `main` when the source, manifest, README/licenses, examples, contract tests, or qualification tooling changes. It can also be run manually. The workflow explicitly checks out the pull request's head commit or the pushed commit, and the script rejects a requested source SHA that differs from the checkout. A pull-request snapshot does not replace qualification of the eventual merged release commit.
+Release artifact qualification runs on relevant pull requests and pushes to `main` when the source, manifest, README/licenses, changelog, safety notes, examples, contract tests, or qualification tooling changes. It can also be run manually. The workflow explicitly checks out the pull request's head commit or the pushed commit, and the script rejects a requested source SHA that differs from the checkout. A pull-request snapshot does not replace qualification of the eventual merged release commit.
+
+The Cargo package uses an explicit consumer-facing allowlist: library source, runnable examples, README, changelog, `UNSAFE.md`, and the two license files. Repository-only infrastructure such as GitHub workflows, benchmark sources, guide sources, QEMU harnesses, scripts, tests, and development tools is intentionally excluded from the `.crate`. Qualification fails if any of those repository-only paths reappear in the package inventory.
 
 The artifact retains the `.crate` archive, package file inventory, public API listing, rustdoc JSON, dependency metadata, and source/toolchain/checksum provenance. It also extracts that archive and uses it as the dependency of a separate temporary consumer, rather than building against the repository's working copy.
 
 The external-consumer checks execute the Cholesky quick start both with the library's default `no_std` configuration and with `std` enabled. They also run the matrix swap and safe scalar-hook contract suites against the packaged library in debug/default, debug/`std`, and release/default configurations. This verifies both index-failure behavior and pre-SIMD validation through the actual packaged API, including optimized builds where debug assertions are absent. The consumer itself is a host executable; embedded portability remains covered by the separate target CI.
 
-Consumer execution logs, both contract-test sources, lockfile, dependency tree, and metadata are retained with the package evidence. Any compile, link, runtime, or test failure fails qualification. The workflow has read-only repository permissions and never publishes, tags, or changes the version. A successful development snapshot is preparation for a release candidate, not a claim that a new release version has been published.
+Consumer execution logs, both contract-test sources, lockfile, dependency tree, and metadata are retained with the package evidence. Any compile, link, runtime, package-boundary, or test failure fails qualification. The workflow has read-only repository permissions and never publishes, tags, or changes the version. A successful development snapshot is preparation for a release candidate, not a claim that a new release version has been published.
 
 ## Release workflow safety
 
