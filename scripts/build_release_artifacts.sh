@@ -64,7 +64,7 @@ fi
 cp "$package" "$out_dir/"
 
 # Exercise the actual archive as a dependency of a separate consumer. Copying
-# the public contract tests does not give the consumer a path to the repo crate.
+# public contract tests into this consumer gives them no path to the repo crate.
 consumer_root=$(mktemp -d)
 trap 'rm -rf "$consumer_root"' EXIT HUP INT TERM
 tar -xzf "$package" -C "$consumer_root"
@@ -101,6 +101,7 @@ fn main() {
 }
 EOF
 cp tests/matrix_swap_contracts.rs "$consumer_dir/tests/matrix_swap_contracts.rs"
+cp tests/scalar_hook_contracts.rs "$consumer_dir/tests/scalar_hook_contracts.rs"
 cargo generate-lockfile --manifest-path "$consumer_dir/Cargo.toml"
 
 # Retain logs and fail immediately on any compile, link, runtime, or test error.
@@ -120,15 +121,16 @@ run_consumer_check package-consumer-default.log \
 run_consumer_check package-consumer-std.log \
     cargo run --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --features std
 run_consumer_check package-consumer-tests.log \
-    cargo test --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --test matrix_swap_contracts
+    cargo test --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --tests
 run_consumer_check package-consumer-tests-std.log \
-    cargo test --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --features std --test matrix_swap_contracts
+    cargo test --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --features std --tests
 run_consumer_check package-consumer-tests-release.log \
-    cargo test --release --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --test matrix_swap_contracts
+    cargo test --release --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --tests
 
 cp "$consumer_dir/Cargo.lock" "$out_dir/package-consumer-Cargo.lock"
 cp "$consumer_dir/src/main.rs" "$out_dir/package-consumer-main.rs"
-cp "$consumer_dir/tests/matrix_swap_contracts.rs" "$out_dir/package-consumer-tests.rs"
+cp "$consumer_dir/tests/matrix_swap_contracts.rs" "$out_dir/package-consumer-matrix-swap-contracts.rs"
+cp "$consumer_dir/tests/scalar_hook_contracts.rs" "$out_dir/package-consumer-scalar-hook-contracts.rs"
 cargo metadata --locked --manifest-path "$consumer_dir/Cargo.toml" --format-version 1 > "$out_dir/package-consumer-metadata.json"
 cargo tree --locked --manifest-path "$consumer_dir/Cargo.toml" --edges normal,build > "$out_dir/package-consumer-dependency-tree.txt"
 
@@ -146,7 +148,7 @@ cargo tree --locked --manifest-path "$consumer_dir/Cargo.toml" --edges normal,bu
     printf 'package_sha256=%s\n' "$(sha256sum "$package" | awk '{print $1}')"
     printf 'package_consumer_smoke=passed\n'
     printf 'package_consumer_smoke_mode=executed-default-and-std\n'
-    printf 'package_consumer_contracts=passed-debug-default-debug-std-release-default\n'
+    printf 'package_consumer_contracts=swap-and-scalar-hooks-passed-debug-default-debug-std-release-default\n'
     printf 'package_consumer_lock_sha256=%s\n' "$(sha256sum "$out_dir/package-consumer-Cargo.lock" | awk '{print $1}')"
     printf 'public_api_sha256=%s\n' "$(sha256sum "$out_dir/public-api.txt" | awk '{print $1}')"
     printf 'rustdoc_json_sha256=%s\n' "$(sha256sum "$out_dir/rustdoc-public-api.json" | awk '{print $1}')"

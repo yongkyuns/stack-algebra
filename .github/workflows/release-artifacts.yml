@@ -5,18 +5,22 @@ on:
   pull_request:
     paths:
       - "Cargo.toml"
-      - "build.rs"
+      - "README.md"
+      - "LICENSE-*"
       - "src/**"
-      - "tests/matrix_swap_contracts.rs"
+      - "examples/**"
+      - "tests/**"
       - ".github/workflows/release-artifacts.yml"
       - "scripts/build_release_artifacts.sh"
   push:
     branches: [main]
     paths:
       - "Cargo.toml"
-      - "build.rs"
+      - "README.md"
+      - "LICENSE-*"
       - "src/**"
-      - "tests/matrix_swap_contracts.rs"
+      - "examples/**"
+      - "tests/**"
       - ".github/workflows/release-artifacts.yml"
       - "scripts/build_release_artifacts.sh"
 
