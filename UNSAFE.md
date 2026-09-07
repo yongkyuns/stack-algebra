@@ -30,6 +30,18 @@ Public `unsafe` unchecked-access methods expose the usual caller obligation that
 
 Architecture-specific kernels may use unsafe intrinsics, pointer loads/stores, or target-feature entry points. Safety depends on valid matrix storage ranges, appropriate target-feature dispatch, and respecting alignment/load requirements of the selected intrinsic. Portable scalar fallbacks remain the reference behavior.
 
+The safe, publicly callable `FactorizationScalar` and `MatrixScalar` hooks
+validate dynamic slice lengths, block ranges, and column indices before entering
+unchecked kernels. These checks are unconditional, including in release builds,
+and reject invalid arguments before any output mutation. The portable defaults
+use the same checks so behavior does not change with the selected ISA. Hiding a
+method from rustdoc does not make it an unsafe API.
+
+`tests/scalar_hook_contracts.rs` exercises these boundaries for f32, f64, and the
+portable i32 defaults, including short/long/empty slices, packet tails, invalid
+ranges, and `usize::MAX`. The x86 matrix runs this suite in debug and release;
+Miri and native ARM64 include it alongside the existing numerical contracts.
+
 ### Sparse fixed-capacity storage initialization
 
 Sparse storage occasionally uses lower-level initialization techniques to avoid heap allocation while constructing fixed-capacity buffers. Every element must be initialized before it is observed, and capacity/length bookkeeping must prevent reads beyond the initialized prefix. Sparse and mapped-view suites are included in Miri CI specifically to exercise these invariants.
