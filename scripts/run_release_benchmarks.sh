@@ -13,6 +13,7 @@ machine_id=${BENCH_MACHINE_ID:-}
 report_dir=${BENCH_REPORT_DIR:-benchmark-report/release}
 raw_dir="$report_dir/raw"
 criterion_dir=target/criterion
+harness_lock=tools/eigen-harness/Cargo.lock
 
 if [ -z "$machine_id" ]; then
     echo "BENCH_MACHINE_ID is required for release benchmark provenance" >&2
@@ -78,6 +79,11 @@ CARGO_TARGET_DIR="$repo_root/target" \
     --sample-size "$sample_size" \
     --noplot
 
+if [ ! -f "$harness_lock" ]; then
+    echo "Eigen harness Cargo.lock was not generated" >&2
+    exit 2
+fi
+
 EIGEN_BENCH_SAMPLES="$eigen_samples" \
 EIGEN_BENCH_MIN_SAMPLE_MS="$eigen_min_sample_ms" \
 EIGEN_BENCH_CSV="$raw_dir/eigen-f32.csv" \
@@ -93,6 +99,7 @@ commit=$(git rev-parse HEAD)
 ref=$(git symbolic-ref --short -q HEAD || git describe --always --exact-match 2>/dev/null || printf detached)
 cpu=$(lscpu 2>/dev/null | awk -F: '/Model name/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' || true)
 lock_sha=$(sha256sum Cargo.lock | awk '{print $1}')
+harness_lock_sha=$(sha256sum "$harness_lock" | awk '{print $1}')
 
 {
     printf 'evidence_level=release-candidate\n'
@@ -108,6 +115,7 @@ lock_sha=$(sha256sum Cargo.lock | awk '{print $1}')
     printf 'rustc=%s\n' "$(rustc --version)"
     printf 'cargo=%s\n' "$(cargo --version)"
     printf 'cargo_lock_sha256=%s\n' "$lock_sha"
+    printf 'eigen_harness_cargo_lock_sha256=%s\n' "$harness_lock_sha"
     printf 'eigen_include=%s\n' "$EIGEN3_INCLUDE_DIR"
     printf 'rustflags=%s\n' "$RUSTFLAGS"
     printf 'cxxflags=%s\n' "$CXXFLAGS"
@@ -129,5 +137,6 @@ python3 scripts/generate_benchmark_report.py \
 
 cp -R "$criterion_dir" "$raw_dir/criterion"
 cp Cargo.lock "$report_dir/Cargo.lock"
+cp "$harness_lock" "$report_dir/eigen-harness-Cargo.lock"
 printf '%s\n' "$commit" > "$report_dir/commit.txt"
 printf 'Release benchmark report: %s\n' "$report_dir"
