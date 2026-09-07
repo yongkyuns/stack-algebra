@@ -50,10 +50,6 @@ name = "block_sparse"
 harness = false
 
 [[bench]]
-name = "dense_solvers"
-harness = false
-
-[[bench]]
 name = "comparison"
 harness = false
 
