@@ -42,10 +42,6 @@ name = "small_fixed"
 harness = false
 
 [[bench]]
-name = "sparse"
-harness = false
-
-[[bench]]
 name = "block_sparse"
 harness = false
 
