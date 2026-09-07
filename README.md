@@ -60,11 +60,7 @@ let x = factor.solve(&b);
 assert!((a * x - b).norm() < 1.0e-12);
 ```
 
-The optional `eigen-compare` feature is for repository reference tests and
-benchmarks. Ordinary default/`std` consumers do not build the `cc` helper or
-perform Eigen discovery. Enabling `eigen-compare` explicitly requires Eigen
-headers and a C++ compiler; the Rust toolchain's usual host/target linker
-requirements are unchanged. CI verifies this boundary with a separate consumer.
+Eigen differential tests live in the non-published `tools/eigen-harness` package. The core crate has no Eigen feature, C++ build script, or `cc` build dependency. Repository CI installs Eigen only for that harness; ordinary default/`std` consumers never perform Eigen discovery or compile the bridge.
 
 ## Common API patterns
 
