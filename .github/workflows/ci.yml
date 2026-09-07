@@ -107,7 +107,7 @@ jobs:
           --benches --no-run
       - name: Compile native Eigen benchmark
         run: >-
-          c++ -std=c++17 -O2 -DNDEBUG -I/usr/include/eigen3
+          c++ -std=c++17 -O0 -I/usr/include/eigen3
           tools/eigen-harness/eigen/native_bench.cpp
           -o /tmp/stack-algebra-eigen-native-bench
 
