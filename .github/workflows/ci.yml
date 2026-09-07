@@ -65,10 +65,12 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo test --no-default-features --lib --tests
-      - name: Check safe scalar hooks with release assertions
+      - name: Check scalar hooks and matrix storage with release assertions
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo test --release --no-default-features --test scalar_hook_contracts
+        run: >-
+          cargo test --release --no-default-features
+          --test scalar_hook_contracts --test matrix_storage
 
   msrv:
     name: MSRV 1.87
@@ -86,8 +88,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --no-default-features --lib --tests
-      - name: Check matrix storage contracts in release mode
-        run: cargo test --release --no-default-features --test matrix_storage
 
   eigen-oracle:
     name: Eigen oracle
