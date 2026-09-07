@@ -38,9 +38,7 @@ fn mutable_slices_update_matrix_and_iterators() {
 
 #[test]
 fn slices_support_non_copy_values() {
-    let mut matrix = Matrix::<2, 2, String>::from_fn(|row, column| {
-        format!("r{row}c{column}")
-    });
+    let mut matrix = Matrix::<2, 2, String>::from_fn(|row, column| format!("r{row}c{column}"));
     assert_eq!(matrix.as_slice()[1], "r1c0");
     matrix.as_mut_slice()[1].push('!');
     assert_eq!(matrix[(1, 0)], "r1c0!");
@@ -95,8 +93,7 @@ fn shared_slices_reject_overflowing_zero_sized_lengths() {
 #[test]
 #[should_panic]
 fn mutable_slices_reject_overflowing_zero_sized_lengths() {
-    let mut matrix =
-        Matrix::<{ usize::MAX }, 2, ()>::from_columns([[(); usize::MAX]; 2]);
+    let mut matrix = Matrix::<{ usize::MAX }, 2, ()>::from_columns([[(); usize::MAX]; 2]);
     let _ = matrix.as_mut_slice();
 }
 
@@ -138,8 +135,7 @@ fn collecting_non_copy_values_preserves_order_and_drops_once() {
 fn short_iterators_drop_the_initialized_prefix() {
     let drops = core::array::from_fn(|_| Cell::new(0));
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let _: Matrix<2, 3, Tracked<'_>> =
-            (0..3).map(|id| Tracked { id, drops: &drops }).collect();
+        let _: Matrix<2, 3, Tracked<'_>> = (0..3).map(|id| Tracked { id, drops: &drops }).collect();
     }));
     assert!(result.is_err());
     check_drops(&drops, [1, 1, 1, 0, 0, 0]);
@@ -161,11 +157,10 @@ fn panicking_iterators_drop_the_initialized_prefix() {
 }
 
 fn check_empty_collection<const M: usize, const N: usize>() {
-    let mut matrix: Matrix<M, N, String> =
-        core::iter::from_fn(|| -> Option<String> {
-            panic!("an empty matrix must not poll its iterator")
-        })
-        .collect();
+    let mut matrix: Matrix<M, N, String> = core::iter::from_fn(|| -> Option<String> {
+        panic!("an empty matrix must not poll its iterator")
+    })
+    .collect();
     assert!(matrix.as_slice().is_empty());
     assert!(matrix.as_mut_slice().is_empty());
 }
