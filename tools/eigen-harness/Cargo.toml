@@ -1,0 +1,15 @@
+[package]
+name = "stack-algebra-eigen-harness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+default = ["eigen-compare"]
+eigen-compare = []
+
+[dependencies]
+stack-algebra = { path = "../..", default-features = false }
+
+[build-dependencies]
+cc = "1.4"
