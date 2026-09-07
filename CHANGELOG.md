@@ -18,6 +18,7 @@ All notable changes to `stack-algebra` are documented here. The project follows 
 
 ### Changed
 
+- Eigen differential testing now lives in the non-published `tools/eigen-harness` package. The core crate no longer exposes an Eigen feature or carries a C++ build script/`cc` build dependency; comparison coverage remains in CI.
 - `Matrix::swap_rows` and `Matrix::swap_columns` now panic before mutation when either index is out of bounds, instead of silently ignoring invalid indices. Valid swaps, including self-swaps and swaps across an empty counterpart dimension, are unchanged. Callers that previously relied on the silent no-op must validate indices explicitly.
 - Dense LDLT reusable multi-RHS solves reduce temporary storage and reuse factor traversal across RHS columns.
 - Dense triangular multi-RHS solves use column-update traversal for measured larger-dimension cases while preserving small-size paths.
