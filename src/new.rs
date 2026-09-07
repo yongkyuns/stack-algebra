@@ -45,18 +45,13 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Creates a new matrix by evaluating `f` for each `(row, column)` pair.
     ///
     /// The closure is called exactly `M * N` times and the result is fully
-    /// initialized without an intermediate heap allocation.
+    /// initialized without an intermediate heap allocation. If `f` panics,
+    /// every value produced by earlier calls is dropped before unwinding.
     #[inline]
     pub fn from_fn(mut f: impl FnMut(usize, usize) -> T) -> Self {
-        let mut matrix = Matrix::<M, N, MaybeUninit<T>>::uninit();
-        for column in 0..N {
-            for row in 0..M {
-                matrix[(row, column)].write(f(row, column));
-            }
-        }
-
-        // SAFETY: every matrix element is initialized exactly once above.
-        unsafe { matrix.assume_init() }
+        Self::from_columns(core::array::from_fn(|column| {
+            core::array::from_fn(|row| f(row, column))
+        }))
     }
 
     /// Creates a new matrix from rows in row-major order.

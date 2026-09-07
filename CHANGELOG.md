@@ -14,6 +14,7 @@ All notable changes to `stack-algebra` are documented here. The project follows 
 
 ### Fixed
 
+- `Matrix::from_fn` now drops every value already produced if the callback panics, matching the panic-safety guarantee of iterator collection instead of leaking partially initialized elements.
 - Safe `FactorizationScalar` and `MatrixScalar` hooks now validate matching slice lengths, block ranges, and column indices before SIMD dispatch or mutation. This closes an out-of-bounds access path reachable through safe calls; portable defaults reject invalid inputs consistently. Valid numerical operations are unchanged.
 
 ### Changed
