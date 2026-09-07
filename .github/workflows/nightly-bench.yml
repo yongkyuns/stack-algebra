@@ -33,8 +33,8 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-cargo-
-      - name: Install Eigen for the dense solver harness
-        if: ${{ matrix.bench == 'dense_solvers' }}
+      - name: Install Eigen for the isolated harness
+        if: ${{ matrix.bench == 'dense_solvers' || matrix.bench == 'sparse' }}
         run: sudo apt-get update && sudo apt-get install --yes libeigen3-dev
       - name: Capture measurement provenance
         shell: bash
@@ -67,9 +67,9 @@ jobs:
           if [ "${{ matrix.bench }}" = comparison ]; then
             cargo bench --bench comparison -- \
               --warm-up-time 0.02 --measurement-time 0.02 --sample-size 10 --noplot
-          elif [ "${{ matrix.bench }}" = dense_solvers ]; then
+          elif [ "${{ matrix.bench }}" = dense_solvers ] || [ "${{ matrix.bench }}" = sparse ]; then
             CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" \
-              cargo bench --manifest-path tools/eigen-harness/Cargo.toml --bench dense_solvers -- \
+              cargo bench --manifest-path tools/eigen-harness/Cargo.toml --bench "${{ matrix.bench }}" -- \
               --warm-up-time 0.02 --measurement-time 0.02 --sample-size 10 --noplot
           else
             cargo bench --all-features --bench "${{ matrix.bench }}" -- \
