@@ -20,6 +20,14 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 2
 fi
 
+checkout_commit=$(git rev-parse HEAD)
+source_commit=${QUALIFICATION_SOURCE_SHA:-$checkout_commit}
+if [ "$source_commit" != "$checkout_commit" ]; then
+    echo "qualification source must match the exact checked-out commit" >&2
+    exit 2
+fi
+ref=$(git symbolic-ref --short -q HEAD || git describe --always --exact-match 2>/dev/null || printf detached)
+
 if ! rustc +"$nightly" --version >/dev/null 2>&1; then
     echo "Rust toolchain $nightly is required" >&2
     exit 2
@@ -39,10 +47,6 @@ lock_sha=$(sha256sum Cargo.lock | awk '{print $1}')
 rm -rf "$out_dir" target/package
 mkdir -p "$out_dir"
 
-checkout_commit=$(git rev-parse HEAD)
-source_commit=${QUALIFICATION_SOURCE_SHA:-$checkout_commit}
-ref=$(git symbolic-ref --short -q HEAD || git describe --always --exact-match 2>/dev/null || printf detached)
-
 cargo +"$nightly" public-api -sss > "$out_dir/public-api.txt"
 cargo +"$nightly" rustdoc --lib -- -Z unstable-options --output-format json
 cp target/doc/stack_algebra.json "$out_dir/rustdoc-public-api.json"
@@ -59,9 +63,8 @@ if [ -z "$package" ]; then
 fi
 cp "$package" "$out_dir/"
 
-# Verify the packaged archive from the perspective of an external consumer,
-# rather than relying only on in-repository examples. This catches accidental
-# package omissions and README/API drift in the advertised 0.3 quick start.
+# Exercise the actual archive as a dependency of a separate consumer. Copying
+# the public contract tests does not give the consumer a path to the repo crate.
 consumer_root=$(mktemp -d)
 trap 'rm -rf "$consumer_root"' EXIT HUP INT TERM
 tar -xzf "$package" -C "$consumer_root"
@@ -71,7 +74,7 @@ if [ -z "$package_source" ]; then
     exit 1
 fi
 consumer_dir="$consumer_root/consumer"
-mkdir -p "$consumer_dir/src"
+mkdir -p "$consumer_dir/src" "$consumer_dir/tests"
 cat > "$consumer_dir/Cargo.toml" <<EOF
 [package]
 name = "stack-algebra-package-smoke"
@@ -79,8 +82,12 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
+[features]
+default = []
+std = ["stack-algebra/std"]
+
 [dependencies]
-stack-algebra = { path = "$package_source" }
+stack-algebra = { path = "$package_source", default-features = false }
 EOF
 cat > "$consumer_dir/src/main.rs" <<'EOF'
 use stack_algebra::{matrix, vector, Cholesky};
@@ -93,7 +100,37 @@ fn main() {
     assert!((a * x - b).norm() < 1.0e-12);
 }
 EOF
-cargo check --manifest-path "$consumer_dir/Cargo.toml"
+cp tests/matrix_swap_contracts.rs "$consumer_dir/tests/matrix_swap_contracts.rs"
+cargo generate-lockfile --manifest-path "$consumer_dir/Cargo.toml"
+
+# Retain logs and fail immediately on any compile, link, runtime, or test error.
+run_consumer_check() {
+    log_name=$1
+    shift
+    if "$@" > "$out_dir/$log_name" 2>&1; then
+        cat "$out_dir/$log_name"
+    else
+        cat "$out_dir/$log_name" >&2
+        return 1
+    fi
+}
+
+run_consumer_check package-consumer-default.log \
+    cargo run --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features
+run_consumer_check package-consumer-std.log \
+    cargo run --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --features std
+run_consumer_check package-consumer-tests.log \
+    cargo test --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --test matrix_swap_contracts
+run_consumer_check package-consumer-tests-std.log \
+    cargo test --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --features std --test matrix_swap_contracts
+run_consumer_check package-consumer-tests-release.log \
+    cargo test --release --locked --manifest-path "$consumer_dir/Cargo.toml" --no-default-features --test matrix_swap_contracts
+
+cp "$consumer_dir/Cargo.lock" "$out_dir/package-consumer-Cargo.lock"
+cp "$consumer_dir/src/main.rs" "$out_dir/package-consumer-main.rs"
+cp "$consumer_dir/tests/matrix_swap_contracts.rs" "$out_dir/package-consumer-tests.rs"
+cargo metadata --locked --manifest-path "$consumer_dir/Cargo.toml" --format-version 1 > "$out_dir/package-consumer-metadata.json"
+cargo tree --locked --manifest-path "$consumer_dir/Cargo.toml" --edges normal,build > "$out_dir/package-consumer-dependency-tree.txt"
 
 {
     printf 'source_commit=%s\n' "$source_commit"
@@ -108,6 +145,9 @@ cargo check --manifest-path "$consumer_dir/Cargo.toml"
     printf 'package_file=%s\n' "$(basename "$package")"
     printf 'package_sha256=%s\n' "$(sha256sum "$package" | awk '{print $1}')"
     printf 'package_consumer_smoke=passed\n'
+    printf 'package_consumer_smoke_mode=executed-default-and-std\n'
+    printf 'package_consumer_contracts=passed-debug-default-debug-std-release-default\n'
+    printf 'package_consumer_lock_sha256=%s\n' "$(sha256sum "$out_dir/package-consumer-Cargo.lock" | awk '{print $1}')"
     printf 'public_api_sha256=%s\n' "$(sha256sum "$out_dir/public-api.txt" | awk '{print $1}')"
     printf 'rustdoc_json_sha256=%s\n' "$(sha256sum "$out_dir/rustdoc-public-api.json" | awk '{print $1}')"
 } > "$out_dir/provenance.txt"

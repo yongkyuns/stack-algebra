@@ -20,6 +20,16 @@ The floor is evidence-based: Rust 1.85 exposed the library's use of `usize::is_m
 8. After review, rerun **Release** with `publish=true`. Publication requires a `CRATES_IO_TOKEN` repository secret.
 9. Tag the exact published commit and publish/update the combined documentation site from `main`.
 
+## Exact-commit package qualification
+
+Release artifact qualification runs on relevant pull requests and pushes to `main` when the source, manifest, build script, swap-contract tests, or qualification tooling changes. It can also be run manually. The workflow explicitly checks out the pull request's head commit or the pushed commit, and the script rejects a requested source SHA that differs from the checkout. A pull-request snapshot does not replace qualification of the eventual merged release commit.
+
+The artifact retains the `.crate` archive, package file inventory, public API listing, rustdoc JSON, dependency metadata, and source/toolchain/checksum provenance. It also extracts that archive and uses it as the dependency of a separate temporary consumer, rather than building against the repository's working copy.
+
+The external-consumer checks execute the Cholesky quick start both with the library's default `no_std` configuration and with `std` enabled. They also run the matrix swap contract suite against the packaged library in debug/default, debug/`std`, and release/default configurations, so bounds rejection cannot accidentally depend on debug assertions. The consumer itself is a host executable; embedded portability remains covered by the separate target CI.
+
+Consumer execution logs, test source, lockfile, dependency tree, and metadata are retained with the package evidence. Any compile, link, runtime, or test failure fails qualification. The workflow has read-only repository permissions and never publishes, tags, or changes the version. A successful development snapshot is preparation for a release candidate, not a claim that a new release version has been published.
+
 ## Release workflow safety
 
 The manual release workflow never publishes by default. It verifies that the requested version exactly matches `Cargo.toml`, checks formatting/Clippy/tests/docs/examples, and builds the Cargo package before the optional publish step. The publish path is enabled only by the explicit boolean workflow input and requires the crates.io token secret.
