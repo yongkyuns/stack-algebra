@@ -67,20 +67,27 @@ run_criterion() {
 }
 
 run_criterion comparison
-for bench in fixed_size small_fixed dense_solvers sparse block_sparse fused; do
+for bench in fixed_size small_fixed sparse block_sparse fused; do
     run_criterion "$bench" --all-features
 done
+
+CARGO_TARGET_DIR="$repo_root/target" \
+    cargo bench --manifest-path tools/eigen-harness/Cargo.toml --bench dense_solvers -- \
+    --warm-up-time "$warmup" \
+    --measurement-time "$measurement" \
+    --sample-size "$sample_size" \
+    --noplot
 
 EIGEN_BENCH_SAMPLES="$eigen_samples" \
 EIGEN_BENCH_MIN_SAMPLE_MS="$eigen_min_sample_ms" \
 EIGEN_BENCH_CSV="$raw_dir/eigen-f32.csv" \
-./eigen/run_native_bench.sh f32 > "$raw_dir/eigen-f32.txt"
+./tools/eigen-harness/eigen/run_native_bench.sh f32 > "$raw_dir/eigen-f32.txt"
 
 EIGEN_BENCH_SKIP_BUILD=1 \
 EIGEN_BENCH_SAMPLES="$eigen_samples" \
 EIGEN_BENCH_MIN_SAMPLE_MS="$eigen_min_sample_ms" \
 EIGEN_BENCH_CSV="$raw_dir/eigen-f64.csv" \
-./eigen/run_native_bench.sh f64 > "$raw_dir/eigen-f64.txt"
+./tools/eigen-harness/eigen/run_native_bench.sh f64 > "$raw_dir/eigen-f64.txt"
 
 commit=$(git rev-parse HEAD)
 ref=$(git symbolic-ref --short -q HEAD || git describe --always --exact-match 2>/dev/null || printf detached)
