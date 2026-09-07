@@ -1,12 +1,13 @@
-use std::env;
-use std::path::Path;
-use std::process::Command;
+#[cfg(feature = "eigen-compare")]
+use std::{env, path::Path, process::Command};
 
+// Compile out the bridge, rather than checking an environment variable after
+// its build dependencies have already been compiled.
+#[cfg(not(feature = "eigen-compare"))]
+fn main() {}
+
+#[cfg(feature = "eigen-compare")]
 fn main() {
-    if env::var_os("CARGO_FEATURE_EIGEN_COMPARE").is_none() {
-        return;
-    }
-
     println!("cargo:rerun-if-changed=eigen/eigen_bridge.cpp");
     println!("cargo:rerun-if-env-changed=EIGEN3_INCLUDE_DIR");
 
@@ -33,6 +34,7 @@ fn main() {
         .compile("stack_algebra_eigen");
 }
 
+#[cfg(feature = "eigen-compare")]
 fn include_dir_from_pkg_config() -> Option<String> {
     let output = Command::new("pkg-config")
         .args(["--cflags-only-I", "eigen3"])
