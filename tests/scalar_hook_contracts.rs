@@ -80,9 +80,8 @@ fn valid_packet_boundaries<T: TestScalar>() {
 }
 
 fn invalid_matrix_arguments<T: TestScalar>() {
-    let original = Matrix::<8, 8, T>::from_fn(|row, column| {
-        T::from(if row == column { 2 } else { 1 })
-    });
+    let original =
+        Matrix::<8, 8, T>::from_fn(|row, column| T::from(if row == column { 2 } else { 1 }));
     for (start, end) in [
         (0, 9),
         (9, 9),
