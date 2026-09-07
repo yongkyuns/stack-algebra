@@ -10,6 +10,8 @@ fn main() {
     const PERSISTENT_BUDGET: usize = 4096;
     const WORKSPACE_BUDGET: usize = 8192;
 
-    assert!(STATE_BYTES + COVARIANCE_BYTES <= PERSISTENT_BUDGET);
-    assert!(BOUNDED_WORK_BYTES <= WORKSPACE_BUDGET);
+    const {
+        assert!(STATE_BYTES + COVARIANCE_BYTES <= PERSISTENT_BUDGET);
+        assert!(BOUNDED_WORK_BYTES <= WORKSPACE_BUDGET);
+    }
 }
