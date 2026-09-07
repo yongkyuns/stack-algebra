@@ -10,10 +10,15 @@ All notable changes to `stack-algebra` are documented here. The project follows 
 - Executable estimation, mapped least-squares, and embedded resource-budget examples.
 - Guarded manual release workflow with version verification, package validation, and optional crates.io publication.
 - Reproducible Cortex-M code-size and stack regression budgets on the pinned qualification toolchain.
+- Generated benchmark reference pages and retained benchmark provenance for the hosted performance snapshot.
 
 ### Changed
 
-- `0.3` documentation now treats physical-device timing as optional evidence while prohibiting unmeasured hardware performance claims.
+- Dense LDLT reusable multi-RHS solves reduce temporary storage and reuse factor traversal across RHS columns.
+- Dense triangular multi-RHS solves use column-update traversal for measured larger-dimension cases while preserving small-size paths.
+- x86 AVX2/FMA `f32` dot reduction uses shorter packet paths and in-register reduction for small and medium vectors.
+- Performance documentation distinguishes accepted production improvements, hosted nightly snapshots, and pinned release qualification.
+- `0.3` documentation treats physical-device timing as optional evidence while prohibiting unmeasured hardware performance claims.
 - Release qualification distinguishes short hosted regression measurements, pinned-host release comparisons, and physical-target timing evidence.
 
 ## [0.3.0-alpha.1] - 2026-08-21
