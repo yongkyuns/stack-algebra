@@ -6,6 +6,8 @@ on:
     paths:
       - "Cargo.toml"
       - "README.md"
+      - "CHANGELOG.md"
+      - "UNSAFE.md"
       - "LICENSE-*"
       - "src/**"
       - "examples/**"
@@ -17,6 +19,8 @@ on:
     paths:
       - "Cargo.toml"
       - "README.md"
+      - "CHANGELOG.md"
+      - "UNSAFE.md"
       - "LICENSE-*"
       - "src/**"
       - "examples/**"
