@@ -13,7 +13,7 @@ Predictable linear algebra for embedded and robotics workloads: fixed-size and t
 The development branch is currently `0.3.0-alpha.1`. The published crates.io version may therefore lag the API documented on the development branch. The declared and CI-tested MSRV for the `0.3` line is **Rust 1.87**.
 
 - `cargo add stack-algebra` installs the current crates.io release.
-- For the current development API, use this repository/branch explicitly.
+- The examples below describe the current `0.3` development API unless noted otherwise.
 - The [0.3 stabilization plan](docs/stabilization-plan.md) records release gates and completed work.
 - The [release process](docs/releasing.md) documents MSRV, release qualification, and guarded publication.
 - The [feature set](docs/features.md) is the capability/limitation reference.
@@ -33,13 +33,22 @@ Inline storage describes representation, not physical placement. Values may live
 
 ## Install
 
-For the latest published release:
+For the latest published crates.io release:
 
 ```sh
 cargo add stack-algebra
 ```
 
-Then import the items you need:
+The current guide and examples track the unreleased `0.3` development API. To evaluate that API directly from `main`:
+
+```toml
+[dependencies]
+stack-algebra = { git = "https://github.com/yongkyuns/stack-algebra", branch = "main" }
+```
+
+For reproducible builds, replace `branch = "main"` with an exact `rev = "<commit>"` once you have selected the revision you want to consume.
+
+A minimal `0.3` solver example is:
 
 ```rust
 use stack_algebra::{matrix, vector, Cholesky};
@@ -49,13 +58,6 @@ let b = vector![1.0_f64; 2.0];
 let factor = Cholesky::try_decompose(&a).expect("positive definite");
 let x = factor.solve(&b);
 assert!((a * x - b).norm() < 1.0e-12);
-```
-
-For unreleased `0.3` development work, pin a Git revision rather than assuming crates.io exposes the same API:
-
-```toml
-[dependencies]
-stack-algebra = { git = "https://github.com/yongkyuns/stack-algebra", rev = "<commit>" }
 ```
 
 ## Common API patterns
@@ -99,7 +101,7 @@ See [Target support and evidence](docs/targets.md), [Target qualification](docs/
 
 ## Documentation
 
-The repository builds a combined mdBook guide and generated Rust API site. The documentation workflow tests examples, checks links/API coverage, and uploads the complete site artifact on pull requests. GitHub Pages publishing occurs from `main` when the repository variable `PUBLISH_DOCS=true` is configured.
+The repository builds a combined mdBook guide and generated Rust API site. The documentation workflow tests examples, checks links/API coverage, and uploads the complete site artifact on pull requests. Successful pushes to `main` publish that combined site to GitHub Pages automatically.
 
 Start at [docs/index.md](docs/index.md). The [roadmap](docs/roadmap.md) describes what is already established in the 0.3 line and what remains intentionally deferred.
 
