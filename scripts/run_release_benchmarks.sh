@@ -67,17 +67,22 @@ run_criterion() {
         --noplot
 }
 
+run_harness_criterion() {
+    bench=$1
+    CARGO_TARGET_DIR="$repo_root/target" \
+        cargo bench --manifest-path tools/eigen-harness/Cargo.toml --bench "$bench" -- \
+        --warm-up-time "$warmup" \
+        --measurement-time "$measurement" \
+        --sample-size "$sample_size" \
+        --noplot
+}
+
 run_criterion comparison
-for bench in fixed_size small_fixed sparse block_sparse fused; do
+for bench in fixed_size small_fixed block_sparse fused; do
     run_criterion "$bench" --all-features
 done
-
-CARGO_TARGET_DIR="$repo_root/target" \
-    cargo bench --manifest-path tools/eigen-harness/Cargo.toml --bench dense_solvers -- \
-    --warm-up-time "$warmup" \
-    --measurement-time "$measurement" \
-    --sample-size "$sample_size" \
-    --noplot
+run_harness_criterion dense_solvers
+run_harness_criterion sparse
 
 if [ ! -f "$harness_lock" ]; then
     echo "Eigen harness Cargo.lock was not generated" >&2
