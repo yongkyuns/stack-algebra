@@ -30,7 +30,6 @@ stride = { version = "0.3.0"}
 criterion = "0.8"
 dyn-stack = "0.13"
 faer = "0.24"
-faer-traits = "0.24"
 nalgebra = { version = "0.33", default-features = false, features = ["std"] }
 
 [[bench]]
