@@ -22,8 +22,42 @@ jobs:
           cargo run --example embedded_resource_budget --no-default-features
       - name: Check release benchmark script syntax
         run: sh -n scripts/run_release_benchmarks.sh
-      - name: Test SSE2 backend without AVX2
-        run: RUSTFLAGS="-C target-feature=-avx2,-fma" cargo test --lib
+
+  x86-kernels:
+    name: x86 kernel correctness (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: sse2
+            rustflags: "-C target-feature=-avx2,-fma"
+            requires_avx2: false
+            requires_fma: false
+          - name: avx2
+            rustflags: "-C target-feature=+avx2,-fma"
+            requires_avx2: true
+            requires_fma: false
+          - name: avx2-fma
+            rustflags: "-C target-feature=+avx2,+fma"
+            requires_avx2: true
+            requires_fma: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify runner exposes required ISA
+        if: ${{ matrix.requires_avx2 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qw avx2 /proc/cpuinfo
+          if [[ "${{ matrix.requires_fma }}" == "true" ]]; then
+            grep -qw fma /proc/cpuinfo
+          fi
+      - name: Run library and integration tests through selected backend
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo test --no-default-features --lib --tests
 
   msrv:
     name: MSRV 1.87
@@ -124,7 +158,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy -- -D warnings
+      - name: Lint library, tests, examples, and benchmarks
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Lint std library configuration
+        run: cargo clippy --lib --features std -- -D warnings
 
   miri:
     name: Miri view and sparse safety
