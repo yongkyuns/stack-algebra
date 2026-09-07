@@ -18,7 +18,7 @@ keywords = ["robotics", "math", "matrix", "vector", "linear-algebra"]
 [features]
 default = []
 std = ["num-traits/std"]
-eigen-compare = []
+eigen-compare = ["dep:cc"]
 
 [dependencies]
 approx = "0.5"
@@ -34,7 +34,8 @@ faer-traits = "0.24"
 nalgebra = { version = "0.33", default-features = false, features = ["std"] }
 
 [build-dependencies]
-cc = "1.4"
+# Reference-comparison tooling is not part of ordinary library builds.
+cc = { version = "1.4", optional = true }
 
 [[bench]]
 name = "fixed_size"
