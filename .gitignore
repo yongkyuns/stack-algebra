@@ -1,6 +1,7 @@
 /target
 /build
 /Cargo.lock
+/tools/eigen-harness/Cargo.lock
 /benchmark-report
 /release-artifacts
 docs/assets/accepted-performance-dense-solves.svg
