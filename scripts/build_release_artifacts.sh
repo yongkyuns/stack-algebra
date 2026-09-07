@@ -55,6 +55,15 @@ cargo metadata --locked --format-version 1 > "$out_dir/cargo-metadata.json"
 cargo tree --locked --edges normal,build > "$out_dir/dependency-tree.txt"
 cargo package --locked --list > "$out_dir/package-files.txt"
 
+# The published crate is a consumer artifact, not a repository snapshot.
+# Fail qualification if repository-only infrastructure re-enters the package.
+for forbidden in .github/ benches/ docs/ qemu-tests/ scripts/ tests/ tools/ .gitignore; do
+    if grep -Fq "$forbidden" "$out_dir/package-files.txt"; then
+        echo "package unexpectedly contains repository-only path: $forbidden" >&2
+        exit 1
+    fi
+done
+
 cargo package --locked
 package=$(find target/package -maxdepth 1 -type f -name 'stack-algebra-*.crate' | sort | tail -n 1)
 if [ -z "$package" ]; then
@@ -146,6 +155,7 @@ cargo tree --locked --manifest-path "$consumer_dir/Cargo.toml" --edges normal,bu
     printf 'cargo_public_api=%s\n' "$(cargo public-api --version)"
     printf 'package_file=%s\n' "$(basename "$package")"
     printf 'package_sha256=%s\n' "$(sha256sum "$package" | awk '{print $1}')"
+    printf 'package_surface=consumer-only-allowlist\n'
     printf 'package_consumer_smoke=passed\n'
     printf 'package_consumer_smoke_mode=executed-default-and-std\n'
     printf 'package_consumer_contracts=swap-and-scalar-hooks-passed-debug-default-debug-std-release-default\n'
