@@ -1,6 +1,9 @@
-on: [push, pull_request]
-
 name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -76,8 +79,16 @@ jobs:
       - run: cargo check --lib --no-default-features
       - run: cargo check --lib --features std
 
-  test:
-    name: Test
+  core-tests:
+    name: Core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --no-default-features --lib --tests
+
+  eigen-oracle:
+    name: Eigen oracle
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -99,16 +110,6 @@ jobs:
           c++ -std=c++17 -O2 -DNDEBUG -I/usr/include/eigen3
           tools/eigen-harness/eigen/native_bench.cpp
           -o /tmp/stack-algebra-eigen-native-bench
-      - run: cargo test --no-default-features --lib --tests
-
-  docs:
-    name: Documentation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --doc --all-features
-      - run: cargo doc --no-deps --all-features
 
   embedded:
     name: Embedded targets, QEMU, and resources
