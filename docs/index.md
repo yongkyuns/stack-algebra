@@ -52,6 +52,8 @@ a deliberate precision boundary.
 
 - [Getting started](getting-started.md) introduces the matrix model, storage,
   precision, and solver choices with small examples.
+- [Guided tutorials](tutorials.md) walk through a small Kalman filter and a
+  mapped line fit with source excerpts, numerical checkpoints, and exercises.
 - [Choosing an API](api-usage.md) is the practical decision guide for storage,
   views, decompositions, reuse, and sparse workflows.
 - [Common use cases](use-cases.md) maps the library to estimation, calibration,

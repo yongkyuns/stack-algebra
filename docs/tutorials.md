@@ -1,10 +1,48 @@
 # Tutorials
 
-These tutorials are organized by the data layout and numerical operation that
-drive a design. Start with the smallest matching path, then open the linked API
-reference for method signatures and trait bounds. Runnable examples use small
-models to teach library operations; they are not complete application frameworks
-or performance benchmarks.
+Learn the library through small, complete examples. Each guided walkthrough
+starts with a model, explains the Rust calls in order, checks intermediate
+numbers, and ends with the full runnable source and focused test commands.
+The examples teach library usage, not full application frameworks or
+performance benchmarks.
+
+| Walkthrough | What you will practice |
+| --- | --- |
+| [Two-state Kalman filter](tutorial-kalman-1d.md) | Fixed-size state and covariance, prediction, a scalar observation, and an in-place vector correction |
+| [Fit a line from a borrowed buffer](tutorial-mapped-least-squares.md) | Column-major layout, `Map`, QR, typed errors, output reuse, and residual interpretation |
+
+## Before you start
+
+Use Git and a stable Rust toolchain on a host computer. No microcontroller,
+sensor data, Python environment, or external C++ library is needed to run
+these examples. The published crate may lag the development API shown here;
+use the repository checkout rather than assuming a registry version matches.
+
+For a new checkout:
+
+```sh
+git clone https://github.com/yongkyuns/stack-algebra.git
+cd stack-algebra
+git rev-parse HEAD
+cargo run --example kalman_1d --no-default-features
+cargo run --example mapped_least_squares --no-default-features
+```
+
+Record the commit printed by `git rev-parse HEAD` when sharing results. In an
+existing checkout, run the Cargo commands from the directory containing the
+repository's `Cargo.toml`; there is no need to create a new application crate.
+See [Getting started](getting-started.md) for using the library in your own
+project and choosing an exact dependency revision.
+
+The example executables use `std` for printing while `--no-default-features`
+keeps the library in its `no_std` configuration. This is not a bare-metal
+executable or a browser-playground exercise.
+
+The walkthroughs include code from the example files in the **same source
+checkout** during the guide build. Their complete listings are not separately
+maintained implementations. GitHub source links point to `main`, which may
+advance after a particular copy of the guide was built. Partial excerpts need
+the surrounding program; use the complete listing or the Cargo command to run.
 
 ## Fixed-size dense algebra
 
@@ -19,65 +57,15 @@ See [Getting started](getting-started.md), [API usage](api-usage.md), and the
 
 ## A two-state Kalman filter
 
-The runnable `examples/kalman_1d.rs` example estimates position and velocity on
-one line using scalar position observations. It is a linear Kalman filter, not
-an EKF, ESKF, or navigation system. It teaches fixed-size construction,
-prediction, a scalar correction, and `axpy_in_place` for updating an existing
-state vector. The covariance expressions deliberately favor readable 2x2
-arithmetic over a hand-optimized implementation.
+[Follow the guided Kalman walkthrough](tutorial-kalman-1d.md) to build the
+position/velocity model, inspect its first prediction and scalar correction,
+and interpret the ten-sample output. It explains the discrete acceleration
+noise assumption, matrix shapes, `axpy_in_place`, and the readable 2x2 Joseph
+covariance expression. Exercises change one noise parameter at a time.
 
-The state is `[position (m), velocity (m/s)]`, initially `[0, 0]` with covariance
-`diag(1 m^2, 1 (m/s)^2)` and no initial correlation. Each one-second step first
-predicts and then incorporates that step's position observation:
-
-```text
-F = [[1, dt], [0, 1]]
-G = [dt^2 / 2, dt]^T
-Q = G G^T * acceleration_variance
-H = [1, 0]
-R = measurement_variance
-```
-
-Here acceleration is a zero-mean random value held constant over each interval
-and independent between intervals, with variance `0.04 (m/s^2)^2`. This is a
-discrete acceleration model, not a continuous white-noise spectral density.
-Position measurement noise has variance `0.25 m^2`, is independent between
-samples, and is independent of process noise. The sample values are a fixed
-illustration of motion near 1 m/s, not a random simulation or tuning guidance.
-
-Since `H = [1, 0]`, the innovation variance is the scalar `P[0,0] + R` and the
-gain comes from the first covariance column. No inverse or Cholesky solve is
-needed. The example uses the Joseph covariance formula with small matrix
-expressions rather than presenting a subtractive update as unconditionally
-safe in finite precision.
-
-From the repository root, run:
-
-```sh
-cargo run --example kalman_1d --no-default-features
-cargo test --no-default-features --test kalman_1d
-```
-
-The host executable uses `std` to print results while the library keeps its
-default `no_std` configuration. The final line, rounded to three decimals, is:
-
-```text
-time_s measured_m position_m velocity_m_s
-10 10.100 9.994 1.012
-```
-
-The program also prints the preceding nine updates. Its five integration tests
-import the actual example helpers and check hand-calculated prediction and
-correction, zero innovation, every sample against an independent scalar `f64`
-reference, and a longer constant-velocity sequence. Those checks are separate
-from the teaching code; they do not qualify a production navigation filter.
-
-For a matrix factorization, use the small Cholesky example in
-[Getting started](getting-started.md) instead of adding an unnecessary solver to
-this scalar observation model. See `examples/mapped_least_squares.rs` for QR on
-caller-owned storage and `examples/embedded_resource_budget.rs` for storage
-accounting. Real consumer workloads, not the size of this teaching model,
-should motivate future kernel/API optimization.
+[Runnable source](https://github.com/yongkyuns/stack-algebra/blob/main/examples/kalman_1d.rs)
+and [separate correctness tests](https://github.com/yongkyuns/stack-algebra/blob/main/tests/kalman_1d.rs)
+remain small. This is a linear filter, not an EKF, ESKF, or navigation system.
 
 ## Views and external buffers
 
@@ -91,63 +79,16 @@ See [API usage — external buffers and views](api-usage.md) and the generated
 
 ### Fit a line from a caller-owned buffer
 
-The runnable `examples/mapped_least_squares.rs` fits `y = a*x + b` to five
-samples. It treats `x` as known and gives every observation equal weight,
-minimizing `sum((y_i - (a*x_i + b))^2)`. The fixed observations have small
-perturbations; they are not generated from an exact solution or a random
-simulation. This is a library-usage example, not a general regression package.
+[Follow the guided line-fitting walkthrough](tutorial-mapped-least-squares.md)
+to represent `y = a*x + b` with a borrowed 5x2 design buffer, solve with
+column-pivoted QR, and calculate fitted values and residuals using the same
+map. It distinguishes borrowed input from the factor's own storage and
+explains both a successful fit and a rank-deficient failure.
 
-Each row of the 5x2 design matrix is `[x_i, 1]`, but its borrowed buffer is
-**column-major**, not interleaved `[x_i, 1]` pairs:
-
-```text
-storage = [0, 1, 2, 3, 4,  1, 1, 1, 1, 1]
-           ----- x ----   -- ones ------
-y       = [1.1, 2.9, 5.2, 6.8, 9.0]
-```
-
-`Map::<5, 2, f64>::from_slice` borrows that buffer. Column-pivoted QR reads it
-into the factor object's own inline storage, so no separate owning input
-matrix is needed and the caller's data is unchanged. This is not an in-place
-factorization of the caller's buffer or a claim that QR has no workspace.
-`try_solve_least_squares` returns `[a, b]` in the original column order.
-`Map::matvec_into` then evaluates the fitted values directly into an output
-vector, without materializing an owned design matrix or forming an inverse.
-
-The input must be finite and the design must have full column rank at the
-solver's numerical threshold. For example, if all `x` values are identical,
-slope and intercept cannot be determined separately and the helper propagates
-`DecompositionError::Singular`. Non-finite input propagates `NonFinite`.
-The executable uses `expect` only for its fixed, valid teaching data.
-
-Run from the repository root:
-
-```sh
-cargo run --example mapped_least_squares --no-default-features
-cargo test --no-default-features --test mapped_least_squares
-```
-
-The host program uses `std` for printing while the library remains in its
-`no_std` configuration. Expected output, rounded as shown:
-
-```text
-slope = 1.970, intercept = 1.060
-x observed_y fitted_y residual
-0.0 1.100 1.060 0.040
-1.0 2.900 3.030 -0.130
-2.0 5.200 5.000 0.200
-3.0 6.800 6.970 -0.170
-4.0 9.000 8.940 0.060
-residual norm = 0.302
-```
-
-Residual means **observed minus fitted**. A nonzero residual is expected:
-least squares minimizes its norm rather than requiring every sample to lie on
-the fitted line. Six separate integration tests import the actual fitting
-helper and check an independent scalar regression, hand-calculated fitted
-values/residuals, exact-line recovery, borrowed-storage preservation, rank
-failure, and non-finite input. No new production API or optimized kernel is
-needed for this example.
+[Runnable source](https://github.com/yongkyuns/stack-algebra/blob/main/examples/mapped_least_squares.rs)
+and [separate correctness tests](https://github.com/yongkyuns/stack-algebra/blob/main/tests/mapped_least_squares.rs)
+show an unweighted fit to fixed perturbed observations, not a general
+regression framework.
 
 ## Dense factorizations
 
