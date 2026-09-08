@@ -1,6 +1,6 @@
 # stack-algebra roadmap
 
-This roadmap reflects the current `0.3.0-alpha.1` development line. `stack-algebra` targets predictable linear algebra for embedded and robotics workloads rather than general large dynamic dense/sparse computing.
+This roadmap reflects the `0.3.0` source being prepared for release; publication remains pending. `stack-algebra` targets predictable linear algebra for embedded and robotics workloads rather than general large dynamic dense/sparse computing.
 
 ## Design commitments
 
