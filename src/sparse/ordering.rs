@@ -194,6 +194,14 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
     }
 
     /// Applies the precomputed coordinate map to a matrix's numeric values.
+    ///
+    /// The input must retain the CSC source pattern used to build this map,
+    /// including any stored upper-triangle entries. Rebuild the map when that
+    /// pattern changes; matching dimensions or entry counts are not sufficient.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a cached source index exceeds the input's active values.
     #[inline]
     pub fn apply<T: Copy + Zero>(
         &self,
@@ -205,15 +213,40 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
     }
 
     /// Applies the precomputed coordinate map into caller-provided storage.
+    ///
+    /// Replaces the destination's pattern and active values, accepting an empty
+    /// destination or any previous pattern of the same capacity. Inactive value
+    /// storage is left untouched. No temporary capacity-sized matrix is created.
+    ///
+    /// As with [`Self::apply`], the input must retain the source pattern used to
+    /// build this map. Cached-offset bounds are checked, but same-length source
+    /// coordinate changes are not detected. Rebuild the map for a changed input
+    /// pattern rather than reusing its old numeric offsets.
+    ///
+    /// # Panics
+    ///
+    /// Panics before changing the destination if any cached source index exceeds
+    /// the input's active values.
     #[inline]
     pub fn apply_into<T: Copy + Zero>(
         &self,
         matrix: &StaticCscMatrix<N, N, MAX_NNZ, T>,
         output: &mut StaticCscMatrix<N, N, MAX_NNZ, T>,
     ) {
-        for target_index in 0..self.nnz {
-            output.values_mut()[target_index] =
-                matrix.values()[self.source_indices[target_index] as usize];
+        let source_values = matrix.values();
+        let source_indices = &self.source_indices[..self.nnz];
+        assert!(
+            source_indices
+                .iter()
+                .all(|&index| (index as usize) < source_values.len()),
+            "sparse permutation source index out of bounds"
+        );
+
+        // All reads are in bounds before changing either destination field.
+        // Install the ordered pattern before borrowing its active value slice.
+        output.pattern = self.pattern;
+        for (value, &source_index) in output.values_mut().iter_mut().zip(source_indices) {
+            *value = source_values[source_index as usize];
         }
     }
 }

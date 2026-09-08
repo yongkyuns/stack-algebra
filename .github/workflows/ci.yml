@@ -71,7 +71,7 @@ jobs:
         run: >-
           cargo test --release --no-default-features
           --test scalar_hook_contracts --test matrix_storage --test sparse_reuse_contracts
-          --test sparse_empty
+          --test sparse_empty --test sparse_permutation_contracts
       - name: Check internal sparse pattern validation in release mode
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
@@ -218,6 +218,7 @@ jobs:
           --test sparse_ldlt
           --test sparse_reuse_contracts
           --test sparse_empty
+          --test sparse_permutation_contracts
           -- --test-threads=1
       - name: Check internal sparse pattern validation with Miri
         run: >-
