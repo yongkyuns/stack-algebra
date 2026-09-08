@@ -135,33 +135,42 @@ fn run<const N: usize, const A: usize, const L: usize, T: Real + Debug>(
         operations.reverse();
     }
     for operation in operations {
-        let (iterations, elapsed) = measure(
-            || match operation {
-                "apply" => {
+        let (iterations, elapsed) = match operation {
+            "apply" => measure(
+                || {
                     black_box(black_box(&map).apply(black_box(&input)));
-                }
-                "apply_into" => {
+                },
+                timed,
+            ),
+            "apply_into" => measure(
+                || {
                     black_box(&map).apply_into(black_box(&input), black_box(&mut output));
                     black_box(&output);
-                }
-                "permute_cholesky" => {
+                },
+                timed,
+            ),
+            "permute_cholesky" => measure(
+                || {
                     black_box(&map).apply_into(black_box(&input), black_box(&mut output));
                     black_box(&mut cholesky)
                         .recompute_ordered_with_pattern(black_box(&pattern), black_box(&output))
                         .unwrap();
                     black_box(&cholesky);
-                }
-                "permute_ldlt" => {
+                },
+                timed,
+            ),
+            "permute_ldlt" => measure(
+                || {
                     black_box(&map).apply_into(black_box(&input), black_box(&mut output));
                     black_box(&mut ldlt)
                         .recompute_ordered_with_pattern(black_box(&pattern), black_box(&output))
                         .unwrap();
                     black_box(&ldlt);
-                }
-                _ => unreachable!(),
-            },
-            timed,
-        );
+                },
+                timed,
+            ),
+            _ => unreachable!(),
+        };
         check_matrix(&output, &expected);
         check_matrix(&map.apply(&input), &expected);
         check_solution(&cholesky.solve(&rhs));
@@ -194,9 +203,15 @@ fn suite<T: Real + Debug>(sample: usize, timed: bool) {
 }
 
 fn main() {
-    let argument = std::env::args().nth(1).expect("pass --check or a sample number");
+    let argument = std::env::args()
+        .nth(1)
+        .expect("pass --check or a sample number");
     let timed = argument != "--check";
-    let sample = if timed { argument.parse().unwrap() } else { 0 };
+    let sample = if timed {
+        argument.parse().unwrap()
+    } else {
+        0
+    };
     println!("sample,n,scalar,capacity,layout,ordering,operation,input_capacity,factor_capacity,input_nnz,ordered_nnz,factor_nnz,iterations,elapsed_ns");
     suite::<f32>(sample, timed);
     suite::<f64>(sample, timed);
