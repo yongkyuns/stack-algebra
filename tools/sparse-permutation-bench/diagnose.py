@@ -45,6 +45,8 @@ def project_rows(rows, before, candidate):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", default="HEAD")
+    parser.add_argument("--before", default=BASELINE)
+    parser.add_argument("--target-cpu", choices=("native", "znver3"), default="native")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     tool = Path(__file__).resolve().parent
@@ -53,6 +55,9 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     candidate = shared.capture(["git", "rev-parse", "--verify", args.candidate + "^{commit}"], repo)
     subprocess.run(["git", "merge-base", "--is-ancestor", BASELINE, candidate], cwd=repo, check=True)
+    before = shared.capture(["git", "rev-parse", "--verify", args.before + "^{commit}"], repo)
+    subprocess.run(["git", "merge-base", "--is-ancestor", BASELINE, before], cwd=repo, check=True)
+    subprocess.run(["git", "merge-base", "--is-ancestor", before, candidate], cwd=repo, check=True)
     original = (tool / "src/main.rs").read_text()
     focused = focused_harness(original)
     # All dimensions other than N128 are omitted only in this diagnostic copy.
@@ -61,12 +66,12 @@ def main():
     assert len(shared.EXPECTED) == 96
     env = os.environ.copy()
     env.pop("CARGO_ENCODED_RUSTFLAGS", None)
-    env.update(CARGO_INCREMENTAL="0", RUSTFLAGS="-C target-cpu=native",
+    env.update(CARGO_INCREMENTAL="0", RUSTFLAGS=f"-C target-cpu={args.target_cpu}",
                CARGO_PROFILE_RELEASE_OPT_LEVEL="3", CARGO_PROFILE_RELEASE_CODEGEN_UNITS="1",
                CARGO_PROFILE_RELEASE_LTO="false")
     provenance = {
         "purpose": "Focused diagnostic only; unchanged full grid required for acceptance",
-        "revisions": {"before": BASELINE, "candidate": candidate, "control": candidate},
+        "revisions": {"before": before, "candidate": candidate, "control": candidate},
         "harness_checkout": shared.capture(["git", "rev-parse", "HEAD"], repo),
         "rustc": shared.capture(["rustc", "-Vv"], repo),
         "cargo": shared.capture(["cargo", "-V"], repo),
@@ -150,7 +155,7 @@ def main():
                 raw.flush()
                 print(f"Focused paired round {sample + 1}/12", flush=True)
         for name, first, second, description in [
-            ("summary.md", "before", "candidate", "Focused N128 diagnostic: repaired baseline vs candidate."),
+            ("summary.md", "before", "candidate", f"Focused N128 diagnostic: {before} vs {candidate}; target-cpu={args.target_cpu}."),
             ("control-summary.md", "candidate", "control", "Focused N128 same-source independent-build control."),
         ]:
             (out / name).write_text(shared.summarize(project_rows(rows, first, second), 12, description))
