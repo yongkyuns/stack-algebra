@@ -80,6 +80,10 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo test --release --no-default-features --lib sparse::cholesky::reuse_validation_tests
+      - name: Check cached permutation source bounds in release mode
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo test --release --no-default-features --lib sparse::ordering::permutation_extent_tests
 
   msrv:
     name: MSRV 1.87
@@ -229,3 +233,8 @@ jobs:
           cargo miri test --no-default-features --lib
           sparse::cholesky::reuse_validation_tests::exhaustive_2x2_layout_contracts
           -- --test-threads=1
+      - name: Check cached permutation source bounds with Miri
+        run: >-
+          cargo miri test --no-default-features --lib
+          sparse::ordering::permutation_extent_tests
+          -- --skip exhaustive_3x3_source_extent --test-threads=1

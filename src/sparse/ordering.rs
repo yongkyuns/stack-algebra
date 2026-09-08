@@ -48,7 +48,9 @@ fn sort_parallel_by_key(keys: &mut [u32], values: &mut [u32]) {
 pub struct StaticCscPermutation<const N: usize, const MAX_NNZ: usize> {
     pattern: StaticCscPattern<N, N, MAX_NNZ>,
     source_indices: [u32; MAX_NNZ],
-    nnz: usize,
+    // One past the largest active source index, or zero for an empty map.
+    // The ordered entry count is already stored in `pattern.nnz`.
+    required_source_len: usize,
 }
 
 impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
@@ -58,13 +60,14 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
         Self {
             pattern: StaticCscPattern::new(),
             source_indices: [0; MAX_NNZ],
-            nnz: 0,
+            required_source_len: 0,
         }
     }
 
     /// Initializes an empty permutation directly in caller-owned storage.
     pub fn new_into(output: &mut MaybeUninit<Self>) {
-        // SAFETY: all-zero values are valid for the pattern metadata, source indices, and nnz.
+        // SAFETY: all-zero values are valid for the pattern metadata, source indices,
+        // and required source length.
         unsafe {
             ptr::write_bytes(
                 output.as_mut_ptr().cast::<u8>(),
@@ -94,6 +97,7 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
     ) -> Result<(), CscError> {
         let mut column_counts = [0u32; N];
         let mut entry_count = 0;
+        let mut required_source_len = 0;
         for column in 0..N {
             let start = matrix_pattern.column_starts()[column] as usize;
             let end = matrix_pattern
@@ -114,6 +118,14 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
                 let lower_column =
                     u32::try_from(lower_column).map_err(|_| CscError::InvalidColumnPointers)?;
                 u32::try_from(lower_row).map_err(|_| CscError::InvalidRowIndices)?;
+                // Validate every fallible conversion before modifying the workspace.
+                u32::try_from(source_index).map_err(|_| CscError::CapacityExceeded {
+                    required: source_index.saturating_add(1),
+                    capacity: u32::MAX as usize,
+                })?;
+                // Source indices are visited in increasing CSC order. The index
+                // is below the active slice length, so adding one cannot overflow.
+                required_source_len = source_index + 1;
                 column_counts[lower_column as usize] += 1;
                 entry_count += 1;
             }
@@ -132,7 +144,7 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
                 core::mem::size_of_val(&self.source_indices),
             );
         }
-        self.nnz = entry_count;
+        self.required_source_len = required_source_len;
 
         let mut column_starts = [0u32; N];
         for column in 1..N {
@@ -158,11 +170,8 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
                 let lower_row = ordered_row.max(ordered_column);
                 let target = cursors[lower_column] as usize;
                 self.pattern.row_indices[target] = lower_row as u32;
-                self.source_indices[target] =
-                    u32::try_from(source_index).map_err(|_| CscError::CapacityExceeded {
-                        required: source_index.saturating_add(1),
-                        capacity: u32::MAX as usize,
-                    })?;
+                // The first pass checked this conversion before any mutation.
+                self.source_indices[target] = source_index as u32;
                 cursors[lower_column] += 1;
             }
         }
@@ -234,14 +243,15 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
         output: &mut StaticCscMatrix<N, N, MAX_NNZ, T>,
     ) {
         let source_values = matrix.values();
-        let source_indices = &self.source_indices[..self.nnz];
+        let source_indices = &self.source_indices[..self.pattern.nnz()];
         assert!(
-            source_indices
-                .iter()
-                .all(|&index| (index as usize) < source_values.len()),
+            self.required_source_len <= source_values.len(),
             "sparse permutation source index out of bounds"
         );
 
+        // Construction caches the exact maximum active source offset plus one;
+        // sorting preserves it. This one comparison is equivalent to checking
+        // every cached index, including for empty maps and full source storage.
         // All reads are in bounds before changing either destination field.
         // Install the ordered pattern before borrowing its active value slice.
         output.pattern = self.pattern;
@@ -307,9 +317,9 @@ impl<const N: usize> StaticCscOrdering<N> {
             if original >= N || seen[original] {
                 return Err(CscError::InvalidPermutation);
             }
-            seen[original] = true;
             output.permutation[ordered] = original;
             output.inverse[original] = ordered;
+            seen[original] = true;
         }
         Ok(output)
     }
@@ -424,5 +434,117 @@ impl<const N: usize> StaticCscOrdering<N> {
     #[inline]
     pub fn is_identity(&self) -> bool {
         self.permutation == Self::identity().permutation
+    }
+}
+
+#[cfg(test)]
+mod permutation_extent_tests {
+    use super::*;
+
+    fn check_patterns<const N: usize, const CAP: usize>(permutations: &[[usize; N]]) {
+        let mut reused = StaticCscPermutation::<N, CAP>::new();
+        for permutation in permutations {
+            let order = StaticCscOrdering::from_permutation(permutation).unwrap();
+            for mask in 0..(1usize << (N * N)) {
+                let mut input = StaticCscMatrix::<N, N, CAP, i32>::new();
+                for column in 0..N {
+                    for row in 0..N {
+                        if mask & (1 << (column * N + row)) != 0 {
+                            input.insert(row, column, 1).unwrap();
+                        }
+                    }
+                }
+                let map = order.permutation_for_pattern(input.pattern()).unwrap();
+                reused.from_ordering_into(input.pattern(), order).unwrap();
+                assert_eq!(reused, map);
+                let mut expected_len = 0;
+                for column in 0..N {
+                    for row in column..N {
+                        if let Some(index) = input.pattern().entry_index(row, column) {
+                            expected_len = expected_len.max(index + 1);
+                        }
+                    }
+                }
+                assert_eq!(map.required_source_len, expected_len);
+                for len in 0..=CAP {
+                    let old_scan = map.source_indices[..map.pattern.nnz()]
+                        .iter()
+                        .all(|&index| (index as usize) < len);
+                    assert_eq!(map.required_source_len <= len, old_scan);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn exhaustive_2x2_source_extent() {
+        check_patterns::<2, 4>(&[[0, 1], [1, 0]]);
+    }
+
+    #[test]
+    fn exhaustive_3x3_source_extent() {
+        check_patterns::<3, 9>(&[
+            [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0],
+        ]);
+    }
+
+    #[test]
+    fn trailing_upper_entries_and_empty_rebuilds_use_exact_extent() {
+        let input =
+            StaticCscMatrix::<3, 3, 9, i32>::from_pattern(&[7, 99], &[0, 0], &[0, 1, 2, 2])
+                .unwrap();
+        let mut map = StaticCscOrdering::identity()
+            .permutation_for_pattern(input.pattern())
+            .unwrap();
+        assert_eq!(map.required_source_len, 1);
+        assert_eq!(map.pattern.nnz(), 1);
+        let empty = StaticCscPattern::new();
+        map.from_ordering_into(&empty, StaticCscOrdering::identity())
+            .unwrap();
+        assert_eq!(map.required_source_len, 0);
+        assert_eq!(map, StaticCscPermutation::new());
+    }
+
+    #[test]
+    fn apply_preserves_inactive_values_and_installs_complete_pattern() {
+        let input =
+            StaticCscMatrix::<2, 2, 4, i32>::from_pattern(&[4, 3], &[0, 1], &[0, 1, 2]).unwrap();
+        let map = StaticCscOrdering::identity()
+            .permutation_for_pattern(input.pattern())
+            .unwrap();
+        let mut output =
+            StaticCscMatrix::from_pattern(&[100, 101, 102, 103], &[0, 1, 0, 1], &[0, 2, 4])
+                .unwrap();
+        map.apply_into(&input, &mut output);
+        assert_eq!(output.values, [4, 3, 102, 103]);
+        assert_eq!(output.pattern, map.pattern);
+        StaticCscPermutation::new().apply_into(&StaticCscMatrix::new(), &mut output);
+        assert_eq!(output.values, [4, 3, 102, 103]);
+        assert_eq!(output.pattern, StaticCscPattern::new());
+    }
+
+    #[test]
+    fn workspace_footprint_matches_previous_fields() {
+        #[allow(dead_code)]
+        struct Previous<const N: usize, const CAP: usize> {
+            pattern: StaticCscPattern<N, N, CAP>,
+            source_indices: [u32; CAP],
+            nnz: usize,
+        }
+        fn check<const N: usize, const CAP: usize>() {
+            assert_eq!(
+                core::mem::size_of::<StaticCscPermutation<N, CAP>>(),
+                core::mem::size_of::<Previous<N, CAP>>()
+            );
+            assert_eq!(
+                core::mem::align_of::<StaticCscPermutation<N, CAP>>(),
+                core::mem::align_of::<Previous<N, CAP>>()
+            );
+        }
+        check::<0, 0>();
+        check::<0, 4>();
+        check::<2, 3>();
+        check::<3, 9>();
+        check::<128, 2560>();
     }
 }

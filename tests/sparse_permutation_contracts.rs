@@ -268,3 +268,77 @@ fn exhaustive_2x2_destinations_match_coordinate_reference() {
     }
     assert_eq!(cases, 512);
 }
+
+#[test]
+#[allow(clippy::clone_on_copy)]
+fn initialized_workspaces_rebuild_and_clone_without_stale_bounds() {
+    let mut full = Sparse::new();
+    for column in 0..3 {
+        for row in 0..3 {
+            full.insert(row, column, (3 * column + row + 1) as f64)
+                .unwrap();
+        }
+    }
+    let mut storage = MaybeUninit::<StaticCscPermutation<3, 9>>::uninit();
+    StaticCscPermutation::new_into(&mut storage);
+    // SAFETY: new_into initializes every field of the permutation workspace.
+    let mut map = unsafe { storage.assume_init() };
+    let order = ordering();
+    let mut output = source();
+    for input in [full, Sparse::new(), source(), full, Sparse::new()] {
+        map.from_ordering_into(input.pattern(), order).unwrap();
+        let mut reference = Sparse::new();
+        for column in 0..3 {
+            for row in column..3 {
+                if let Some(&value) = input.get(row, column) {
+                    let a = order.inverse()[row];
+                    let b = order.inverse()[column];
+                    reference.insert(a.max(b), a.min(b), value).unwrap();
+                }
+            }
+        }
+        // Deliberately exercise the derived Clone as well as ordinary Copy.
+        for copied in [map, map.clone()] {
+            copied.apply_into(&input, &mut output);
+            assert_active(&output, &reference);
+        }
+    }
+    storage.write(map);
+    StaticCscPermutation::new_into(&mut storage);
+    // SAFETY: the second new_into call also initializes the entire workspace.
+    let reset = unsafe { storage.assume_init() };
+    assert_eq!(reset, StaticCscPermutation::new());
+}
+
+#[test]
+fn largest_source_offset_is_checked_after_reverse_sorting() {
+    let mut full = Sparse::new();
+    for column in 0..3 {
+        for row in 0..3 {
+            full.insert(row, column, (3 * column + row + 1) as f64)
+                .unwrap();
+        }
+    }
+    let order = StaticCscOrdering::from_permutation(&[2, 1, 0]).unwrap();
+    let map = order.permutation_for_pattern(full.pattern()).unwrap();
+    // The largest source offset maps to the FIRST ordered entry, not the last.
+    let short = Sparse::from_pattern(
+        &full.values()[..8],
+        &[0, 1, 2, 0, 1, 2, 0, 1],
+        &[0, 3, 6, 8],
+    )
+    .unwrap();
+    let mut output = source();
+    let before = output;
+    assert!(catch_unwind(AssertUnwindSafe(|| map.apply_into(&short, &mut output))).is_err());
+    assert_eq!(output, before);
+    assert!(catch_unwind(|| map.apply(&short)).is_err());
+    map.apply_into(&full, &mut output);
+    let reference = Sparse::from_pattern(
+        &[9.0, 6.0, 3.0, 5.0, 2.0, 1.0],
+        &[0, 1, 2, 1, 2, 2],
+        &[0, 3, 5, 6],
+    )
+    .unwrap();
+    assert_active(&output, &reference);
+}
