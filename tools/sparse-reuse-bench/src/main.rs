@@ -164,7 +164,7 @@ fn main() {
     let layouts: &[&str] = match mode.as_str() {
         "check" => &["matching", "repacked", "rebuilt"],
         "matching" => &["matching"],
-        "layouts" if sample % 2 == 0 => &["repacked", "rebuilt"],
+        "layouts" if sample.is_multiple_of(2) => &["repacked", "rebuilt"],
         "layouts" => &["rebuilt", "repacked"],
         _ => panic!("unknown benchmark mode"),
     };
