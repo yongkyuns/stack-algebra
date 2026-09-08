@@ -42,15 +42,15 @@ Manual dispatch still requires the expected version to exactly match `Cargo.toml
 
 Tag/release-note creation remains a separate deliberate GitHub action so crate publication cannot silently create or move source-control tags.
 
-## Runnable workload examples
+## Runnable teaching examples
 
-The repository keeps three examples compiling in normal CI:
+The repository keeps three examples executing in normal CI:
 
-- `ekf_measurement_update` — a Joseph-form covariance update using a Cholesky solve instead of an explicit inverse;
+- `kalman_1d` — a two-state position/velocity filter with scalar position observations and a readable 2x2 Joseph covariance update;
 - `mapped_least_squares` — column-pivoted QR directly from a caller-owned mapped Jacobian buffer;
 - `embedded_resource_budget` — compile-time storage budgeting for a 15-state estimator and bounded workspace.
 
-These examples are intended to become workload probes for future API/performance decisions. New GEMM-accumulate or broader mapped-layout kernels should be justified by measurements on these or similarly representative workloads rather than by API parity alone.
+These examples teach isolated library operations, not complete applications. The Kalman model assumptions and expected output are documented in [Tutorials](tutorials.md). Its integration tests remain separate from the example. New GEMM-accumulate or broader mapped-layout kernels require measurements on representative consumer workloads; teaching examples alone are not performance justification.
 
 ## Resource regression policy
 

@@ -22,9 +22,13 @@ jobs:
         run: sh scripts/check_core_dependency_boundary.sh
       - name: Run representative examples
         run: |
-          cargo run --example ekf_measurement_update --no-default-features
+          cargo run --example kalman_1d --no-default-features
           cargo run --example mapped_least_squares --no-default-features
           cargo run --example embedded_resource_budget --no-default-features
+      - name: Test teaching filter with std and optimized no_std library
+        run: |
+          cargo test --features std --test kalman_1d
+          cargo test --release --no-default-features --test kalman_1d
       - name: Check benchmark script syntax
         run: |
           sh -n scripts/run_release_benchmarks.sh
