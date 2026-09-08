@@ -46,9 +46,9 @@ The example starts at time zero with zero estimates and unit variances:
 {{#include ../examples/kalman_1d.rs:63:65}}
 ```
 
-[`Matrix::zeros`](api/stack_algebra/struct.Matrix.html#method.zeros) initializes
-both state entries. [`Matrix::eye`](api/stack_algebra/struct.Matrix.html#method.eye)
-creates the identity covariance, so the initial cross-covariances are zero.
+`Matrix::zeros` initializes both state entries, and `Matrix::eye` creates the
+identity covariance, so the initial cross-covariances are zero. See the
+[`Matrix` API](api/stack_algebra/struct.Matrix.html) for the type and operations.
 These values are assumptions for the demonstration, not tuning advice.
 
 The data and parameters are fixed:
