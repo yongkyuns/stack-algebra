@@ -830,6 +830,17 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         &self,
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
     ) -> bool {
+        // If analysis introduced no fill and every source diagonal starts its
+        // factor column, the analyzed input was exactly the lower factor CSC
+        // layout: all lower entries are present and no upper entries precede
+        // a diagonal. Compare the current layout directly in that common case.
+        // This proves source offsets as well as coordinates, not just coverage.
+        if self.lower.nnz() <= u32::MAX as usize
+            && self.lower.nnz().checked_sub(N) == Some(self.aggregate_update_nnz)
+            && self.input_diagonal_indices == *self.lower.column_starts()
+        {
+            return self.matches_factor_layout(matrix);
+        }
         let rows = matrix.row_indices();
         let matches_entry = |row: usize, column: usize, index: usize| {
             let start = matrix.column_starts()[column] as usize;
@@ -1169,10 +1180,26 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         Ok(())
     }
 
+    #[inline]
+    fn matches_factor_layout<const MAX_A_NNZ: usize, T: Copy + Zero>(
+        &self,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> bool {
+        matrix.nnz() == self.lower.nnz()
+            && matrix.column_starts() == self.lower.column_starts()
+            && matrix.row_indices() == self.lower.row_indices()
+    }
+
     fn validate_factor_pattern<const MAX_A_NNZ: usize, T: Copy + Zero>(
         &self,
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
+        // Exact equality is sufficient for coverage and avoids a separate
+        // per-entry search on fill-free lower input. Other layouts retain the
+        // full validator, including mirrored upper-triangle coverage checks.
+        if self.matches_factor_layout(matrix) {
+            return Ok(());
+        }
         for column in 0..N {
             let start = matrix.column_starts()[column] as usize;
             let end = matrix.column_end(column).unwrap_or(matrix.nnz());
@@ -1499,5 +1526,76 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod reuse_validation_tests {
+    use super::*;
+
+    fn matrix_from_mask<const N: usize>(mask: usize) -> StaticCscMatrix<N, N, 9, f64> {
+        let mut matrix = StaticCscMatrix::new();
+        for column in 0..N {
+            for row in 0..N {
+                if mask & (1 << (column * N + row)) != 0 {
+                    matrix.insert(row, column, 1.0).unwrap();
+                }
+            }
+        }
+        matrix
+    }
+
+    fn check_layout_contracts<const N: usize>(expected_pairs: usize) {
+        let mut pairs = 0;
+        for source_mask in 0..(1 << (N * N)) {
+            let source = matrix_from_mask::<N>(source_mask);
+            let pattern = match StaticCscCholeskyPattern::<N, 9>::analyze(&source) {
+                Ok(pattern) => pattern,
+                Err(SparseCholeskyError::NonSymmetric) => continue,
+                other => panic!("unexpected analysis result: {other:?}"),
+            };
+            for input_mask in 0..(1 << (N * N)) {
+                let input = matrix_from_mask::<N>(input_mask);
+                // Independent coordinate lookup reference: equal lower source
+                // offsets, including missing diagonals and upper-induced shifts.
+                let same_sources = (0..N).all(|column| {
+                    (column..N).all(|row| {
+                        source.pattern().entry_index(row, column)
+                            == input.pattern().entry_index(row, column)
+                    })
+                });
+                assert_eq!(
+                    pattern.matches_aggregate_input(&input),
+                    same_sources,
+                    "source mask {source_mask}, input mask {input_mask}"
+                );
+                let covered = (0..N).all(|column| {
+                    (0..N).all(|row| {
+                        input.get(row, column).is_none()
+                            || pattern
+                                .lower()
+                                .entry_index(row.max(column), row.min(column))
+                                .is_some()
+                    })
+                });
+                assert_eq!(
+                    pattern.validate_factor_pattern(&input).is_ok(),
+                    covered,
+                    "source mask {source_mask}, input mask {input_mask}"
+                );
+                pairs += 1;
+            }
+        }
+        assert_eq!(pairs, expected_pairs);
+    }
+
+    #[test]
+    fn exhaustive_2x2_layout_contracts() {
+        check_layout_contracts::<2>(192);
+    }
+
+    #[test]
+    fn exhaustive_3x3_layout_contracts() {
+        check_layout_contracts::<3>(110_592);
     }
 }
