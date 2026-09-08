@@ -204,3 +204,200 @@ fn cached_ldlt_handles_changed_source_layout_for_f32() {
     let dense = Matrix::from_rows([[5.0, 0.0], [0.0, 6.0]]);
     assert!((dense * factor.solve(&rhs) - rhs).norm() < 1.0e-5);
 }
+
+mod cholesky_reuse {
+    use super::{diagonal2, lower2, Matrix, Pattern2, SparseCholeskyError, StaticCscMatrix};
+    use stack_algebra::{StaticCscCholesky, StaticCscCholeskyPattern, StaticCscOrdering};
+
+    type Factor = StaticCscCholesky<2, 3, f64>;
+
+    fn assert_solves<const N: usize, const CAP: usize>(
+        factor: &StaticCscCholesky<N, CAP, f64>,
+        dense: Matrix<N, N, f64>,
+    ) {
+        let rhs = Matrix::<N, 2, f64>::from_fn(|row, column| (row + 2 * column + 1) as f64);
+        let residual = dense * factor.solve(&rhs) - rhs;
+        assert!(residual.norm() < 1.0e-11, "residual: {residual:?}");
+    }
+
+    #[test]
+    fn ordered_factor_rejects_uncovered_structure() {
+        let pattern = Pattern2::analyze(&diagonal2()).unwrap();
+        assert_eq!(
+            pattern.factor_ordered(&lower2()),
+            Err(SparseCholeskyError::PatternMismatch)
+        );
+    }
+
+    #[test]
+    fn all_recompute_entry_points_reject_structure_before_mutation() {
+        let diagonal = diagonal2();
+        let pattern = Pattern2::analyze(&diagonal).unwrap();
+        let input = lower2();
+        let original = pattern.factor(&diagonal).unwrap();
+        for mode in 0..4 {
+            let mut factor = original;
+            let result = match mode {
+                0 => factor.recompute(&input),
+                1 => factor.recompute_with_pattern(&pattern, &input),
+                2 => factor.recompute_ordered(&input),
+                _ => factor.recompute_ordered_with_pattern(&pattern, &input),
+            };
+            assert_eq!(result, Err(SparseCholeskyError::PatternMismatch));
+            assert_eq!(factor, original);
+        }
+    }
+
+    #[test]
+    fn ordered_recompute_installs_larger_factor_pattern() {
+        let input = lower2();
+        let pattern = Pattern2::analyze(&input).unwrap();
+        let mut factor = Factor::decompose(&diagonal2()).unwrap();
+        factor
+            .recompute_ordered_with_pattern(&pattern, &input)
+            .unwrap();
+        assert_eq!(factor.lower().pattern(), pattern.lower());
+        assert_solves(&factor, Matrix::from_rows([[4.0, 1.0], [1.0, 3.0]]));
+    }
+
+    #[test]
+    fn ordered_recompute_installs_smaller_factor_pattern() {
+        let input = diagonal2();
+        let pattern = Pattern2::analyze(&input).unwrap();
+        let mut factor = Factor::decompose(&lower2()).unwrap();
+        factor
+            .recompute_ordered_with_pattern(&pattern, &input)
+            .unwrap();
+        assert_eq!(factor.lower().pattern(), pattern.lower());
+        assert_solves(&factor, Matrix::from_rows([[5.0, 0.0], [0.0, 6.0]]));
+    }
+
+    #[test]
+    fn structural_rejection_preserves_a_different_destination_pattern() {
+        let input = lower2();
+        let pattern = Pattern2::analyze(&diagonal2()).unwrap();
+        let original = Factor::decompose(&input).unwrap();
+        for ordered in [false, true] {
+            let mut factor = original;
+            let result = if ordered {
+                factor.recompute_ordered_with_pattern(&pattern, &input)
+            } else {
+                factor.recompute_with_pattern(&pattern, &input)
+            };
+            assert_eq!(result, Err(SparseCholeskyError::PatternMismatch));
+            assert_eq!(factor, original);
+        }
+    }
+
+    #[test]
+    fn reordered_calls_validate_structure_and_synchronize_output() {
+        let ordering = StaticCscOrdering::from_permutation(&[1, 0]).unwrap();
+        let diagonal = diagonal2();
+        let pattern = Pattern2::analyze_with_ordering(&diagonal, ordering).unwrap();
+        let original = pattern.factor(&diagonal).unwrap();
+        let mut factor = original;
+        assert_eq!(
+            factor.recompute_with_pattern(&pattern, &lower2()),
+            Err(SparseCholeskyError::PatternMismatch)
+        );
+        assert_eq!(factor, original);
+
+        let input = lower2();
+        let pattern = Pattern2::analyze_with_ordering(&input, ordering).unwrap();
+        let ordered = pattern.prepare_ordered(&input).unwrap();
+        factor
+            .recompute_ordered_with_pattern(&pattern, &ordered)
+            .unwrap();
+        assert_eq!(factor.pattern().ordering(), ordering);
+        assert_eq!(factor.lower().pattern(), pattern.lower());
+        assert_solves(&factor, Matrix::from_rows([[4.0, 1.0], [1.0, 3.0]]));
+    }
+
+    #[test]
+    fn compatible_full_lower_and_smaller_layouts_still_solve() {
+        let full = StaticCscMatrix::<2, 2, 4, f64>::from_pattern(
+            &[4.0, 1.0, 1.0, 3.0],
+            &[0, 1, 0, 1],
+            &[0, 2, 4],
+        )
+        .unwrap();
+        let pattern = Pattern2::analyze(&full).unwrap();
+        let mut factor = pattern.factor_ordered(&lower2()).unwrap();
+        assert_solves(&factor, Matrix::from_rows([[4.0, 1.0], [1.0, 3.0]]));
+        factor.recompute_with_pattern(&pattern, &diagonal2()).unwrap();
+        assert_solves(&factor, Matrix::from_rows([[5.0, 0.0], [0.0, 6.0]]));
+        factor
+            .recompute_ordered_with_pattern(&pattern, &full)
+            .unwrap();
+        assert_solves(&factor, Matrix::from_rows([[4.0, 1.0], [1.0, 3.0]]));
+    }
+
+    #[test]
+    fn factor_fill_covers_changed_input_coordinates() {
+        let star = StaticCscMatrix::<3, 3, 5, f64>::from_pattern(
+            &[8.0, 1.0, 2.0, 9.0, 10.0],
+            &[0, 1, 2, 1, 2],
+            &[0, 3, 4, 5],
+        )
+        .unwrap();
+        let chain = StaticCscMatrix::<3, 3, 5, f64>::from_pattern(
+            &[8.0, 1.0, 9.0, 2.0, 10.0],
+            &[0, 1, 1, 2, 2],
+            &[0, 2, 4, 5],
+        )
+        .unwrap();
+        let pattern = StaticCscCholeskyPattern::<3, 6>::analyze(&star).unwrap();
+        let dense = Matrix::from_rows([[8.0, 1.0, 0.0], [1.0, 9.0, 2.0], [0.0, 2.0, 10.0]]);
+        let mut factor = pattern.factor_ordered(&chain).unwrap();
+        assert_solves(&factor, dense);
+        factor.recompute_with_pattern(&pattern, &chain).unwrap();
+        assert_solves(&factor, dense);
+    }
+
+    #[test]
+    fn f32_reuse_validates_structure_and_updates_destination() {
+        let diagonal =
+            StaticCscMatrix::<2, 2, 2, f32>::from_pattern(&[5.0, 6.0], &[0, 1], &[0, 1, 2])
+                .unwrap();
+        let input = StaticCscMatrix::<2, 2, 3, f32>::from_pattern(
+            &[4.0, 1.0, 3.0],
+            &[0, 1, 1],
+            &[0, 2, 3],
+        )
+        .unwrap();
+        let diagonal_pattern = Pattern2::analyze(&diagonal).unwrap();
+        assert_eq!(
+            diagonal_pattern.factor_ordered(&input),
+            Err(SparseCholeskyError::PatternMismatch)
+        );
+        let pattern = Pattern2::analyze(&input).unwrap();
+        let mut factor = diagonal_pattern.factor(&diagonal).unwrap();
+        factor
+            .recompute_ordered_with_pattern(&pattern, &input)
+            .unwrap();
+        assert_eq!(factor.lower().pattern(), pattern.lower());
+        let rhs = Matrix::<2, 2, f32>::from_rows([[1.0, 2.0], [3.0, 4.0]]);
+        let dense = Matrix::from_rows([[4.0, 1.0], [1.0, 3.0]]);
+        assert!((dense * factor.solve(&rhs) - rhs).norm() < 1.0e-5);
+    }
+
+    #[test]
+    fn empty_shapes_and_missing_pivots_keep_existing_errors() {
+        let empty = StaticCscMatrix::<0, 0, 0, f64>::from_pattern(&[], &[], &[0]).unwrap();
+        let pattern = StaticCscCholeskyPattern::<0, 0>::analyze(&empty).unwrap();
+        let mut factor = pattern.factor_ordered(&empty).unwrap();
+        factor.recompute_with_pattern(&pattern, &empty).unwrap();
+        factor
+            .recompute_ordered_with_pattern(&pattern, &empty)
+            .unwrap();
+        let rhs = Matrix::<0, 2, f64>::from_columns([[], []]);
+        assert_eq!(factor.solve(&rhs), rhs);
+
+        let pattern = Pattern2::analyze(&lower2()).unwrap();
+        let missing = StaticCscMatrix::<2, 2, 0, f64>::from_pattern(&[], &[], &[0, 0, 0]).unwrap();
+        assert_eq!(
+            pattern.factor_ordered(&missing),
+            Err(SparseCholeskyError::NotPositiveDefinite)
+        );
+    }
+}
