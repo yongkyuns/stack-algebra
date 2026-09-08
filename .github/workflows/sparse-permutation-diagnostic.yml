@@ -1,0 +1,55 @@
+name: Sparse permutation focused diagnostic
+
+on:
+  push:
+    branches:
+      - diag/sparse-permutation-n128
+    paths:
+      - 'src/sparse/**'
+      - 'tools/sparse-permutation-bench/**'
+      - '.github/workflows/sparse-permutation-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    name: N128 diagnostic (${{ matrix.arch }})
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Check diagnostic and measurement validators
+        run: python3 -m unittest discover -s tools/sparse-permutation-bench -v
+      - name: Compare focused baseline, candidate and independent same-source build
+        run: >-
+          python3 tools/sparse-permutation-bench/diagnose.py
+          --candidate HEAD --output permutation-focused
+      - name: Add diagnostic reports
+        run: |
+          cat permutation-focused/summary.md >> "$GITHUB_STEP_SUMMARY"
+          cat permutation-focused/control-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain focused measurements and exact generated code
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: permutation-focused-${{ matrix.arch }}-${{ github.sha }}
+          path: permutation-focused/
+          if-no-files-found: error
