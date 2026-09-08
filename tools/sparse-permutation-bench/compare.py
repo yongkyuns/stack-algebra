@@ -83,7 +83,7 @@ def read_samples(text, sample, timed=True):
     return rows
 
 
-def summarize(rows, rounds):
+def summarize(rows, rounds, comparison="Before is #50; candidate includes #51."):
     cases = {}
     for row in rows:
         key = tuple(row[k] for k in KEYS)
@@ -96,7 +96,7 @@ def summarize(rows, rounds):
     if set(cases) != EXPECTED:
         raise ValueError("incomplete fixture coverage")
     lines = ["# Sparse permutation repair measurements", "",
-             "Nanoseconds per call, warm-cache synthetic banded fixtures. Before is #50; candidate includes #51.",
+             "Nanoseconds per call, warm-cache synthetic banded fixtures. " + comparison,
              "All source layouts and destination patterns are valid on both revisions.",
              "Ratios are paired-round medians with observed min/max, not confidence intervals or timing gates.",
              "Cached map construction, symbolic analysis, allocation and verification are outside timing.",
@@ -119,6 +119,7 @@ def summarize(rows, rounds):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", default="HEAD")
+    parser.add_argument("--before", default=BEFORE)
     parser.add_argument("--rounds", type=int, default=12)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -130,13 +131,15 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     candidate = capture(["git", "rev-parse", "--verify", args.candidate + "^{commit}"], repo)
     subprocess.run(["git", "merge-base", "--is-ancestor", REPAIRED, candidate], cwd=repo, check=True)
+    before = capture(["git", "rev-parse", "--verify", args.before + "^{commit}"], repo)
+    subprocess.run(["git", "merge-base", "--is-ancestor", before, candidate], cwd=repo, check=True)
     env = os.environ.copy()
     env.pop("CARGO_ENCODED_RUSTFLAGS", None)
     env.update(CARGO_INCREMENTAL="0", RUSTFLAGS="-C target-cpu=native",
                CARGO_PROFILE_RELEASE_OPT_LEVEL="3", CARGO_PROFILE_RELEASE_CODEGEN_UNITS="1",
                CARGO_PROFILE_RELEASE_LTO="false")
     provenance = {
-        "revisions": {"before": BEFORE, "candidate": candidate},
+        "revisions": {"before": before, "candidate": candidate},
         "harness_checkout": capture(["git", "rev-parse", "HEAD"], repo),
         "rustc": capture(["rustc", "-Vv"], repo), "cargo": capture(["cargo", "-V"], repo),
         "rustflags": env["RUSTFLAGS"], "rounds": args.rounds,
@@ -204,7 +207,8 @@ def main():
                         rows.append(row)
                 raw.flush()
                 print(f"Completed paired round {sample + 1}/{args.rounds}", flush=True)
-        (out / "summary.md").write_text(summarize(rows, args.rounds))
+        (out / "summary.md").write_text(summarize(
+            rows, args.rounds, f"Before: {before}; candidate: {candidate}."))
         provenance["sample_rows"] = len(rows)
         provenance["samples_sha256"] = digest((out / "samples.csv").read_bytes())
         (out / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")

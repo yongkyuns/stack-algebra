@@ -1,0 +1,58 @@
+name: Sparse permutation optimization
+
+on:
+  pull_request:
+    paths:
+      - 'src/sparse/**'
+      - 'tools/sparse-permutation-bench/**'
+      - '.github/workflows/sparse-permutation-optimization.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Repaired permutation baseline (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Test measurement validators
+        run: python3 -m unittest discover -s tools/sparse-permutation-bench -v
+      - name: Profile unchanged repaired components
+        run: python3 tools/sparse-permutation-bench/profile.py --output permutation-profile
+      - name: Retain component evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: permutation-profile-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: permutation-profile/
+          if-no-files-found: error
+      - name: Compare unchanged public fixtures against the repaired baseline
+        run: >-
+          python3 tools/sparse-permutation-bench/compare.py
+          --before d1cd847ec4ef307dab7a91518d2bf1a2a11f90dc
+          --candidate HEAD --output permutation-optimization
+      - name: Add paired report
+        run: cat permutation-optimization/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain paired evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: permutation-optimization-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: permutation-optimization/
+          if-no-files-found: error
