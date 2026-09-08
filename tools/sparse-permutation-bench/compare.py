@@ -211,6 +211,22 @@ def main():
             rows, args.rounds, f"Before: {before}; candidate: {candidate}."))
         provenance["sample_rows"] = len(rows)
         provenance["samples_sha256"] = digest((out / "samples.csv").read_bytes())
+        # Retain the exact measured executables and their generated code only
+        # after timing. This does not alter source, compiler flags or fixtures.
+        provenance["diagnostics"] = {}
+        for label, binary in binaries.items():
+            retained = out / f"{label}.elf"
+            shutil.copyfile(binary, retained)
+            if digest(retained.read_bytes()) != provenance["binaries"][label]:
+                raise ValueError("retained executable differs from measured binary")
+            for suffix, command in [
+                ("objdump.txt", ["objdump", "-Cd", str(binary)]),
+                ("symbols.txt", ["nm", "-S", "--size-sort", "--demangle", str(binary)]),
+            ]:
+                path = out / f"{label}.{suffix}"
+                with path.open("w") as report:
+                    subprocess.run(command, cwd=repo, stdout=report, check=True)
+                provenance["diagnostics"][path.name] = digest(path.read_bytes())
         (out / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
 
 
