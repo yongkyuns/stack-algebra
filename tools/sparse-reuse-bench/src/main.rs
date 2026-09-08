@@ -67,8 +67,8 @@ fn measure(mut update: impl FnMut(), timed: bool) -> (u64, u128) {
         }
         count += 64;
     }
-    let iterations = ((count as f64 * 0.030 / warmup.elapsed().as_secs_f64()) as u64)
-        .clamp(64, 5_000_000);
+    let iterations =
+        ((count as f64 * 0.030 / warmup.elapsed().as_secs_f64()) as u64).clamp(64, 5_000_000);
     let start = Instant::now();
     for _ in 0..iterations {
         update();
