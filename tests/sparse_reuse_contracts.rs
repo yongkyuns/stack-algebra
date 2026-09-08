@@ -1,5 +1,8 @@
 use core::mem::MaybeUninit;
-use stack_algebra::{Matrix, SparseCholeskyError, StaticCscLdlt, StaticCscLdltPattern, StaticCscMatrix};
+use stack_algebra::{
+    Matrix, SparseCholeskyError, StaticCscLdlt, StaticCscLdltPattern, StaticCscMatrix,
+    StaticCscOrdering,
+};
 
 type Pattern2 = StaticCscLdltPattern<2, 3>;
 type Factor2 = StaticCscLdlt<2, 3, f64>;
@@ -143,12 +146,9 @@ fn uncovered_structure_is_rejected_before_reusable_output_changes() {
 fn cached_ldlt_preserves_matching_numeric_updates() {
     let original = lower2();
     let pattern = Pattern2::analyze(&original).unwrap();
-    let next = StaticCscMatrix::<2, 2, 5, f64>::from_pattern(
-        &[5.0, 2.0, 6.0],
-        &[0, 1, 1],
-        &[0, 2, 3],
-    )
-    .unwrap();
+    let next =
+        StaticCscMatrix::<2, 2, 5, f64>::from_pattern(&[5.0, 2.0, 6.0], &[0, 1, 1], &[0, 2, 3])
+            .unwrap();
     let dense = Matrix::from_rows([[5.0, 2.0], [2.0, 6.0]]);
     assert_solves(&pattern.factor_ldlt(&next).unwrap(), dense);
     let mut factor = pattern.factor_ldlt(&original).unwrap();
@@ -160,9 +160,47 @@ fn cached_ldlt_preserves_matching_numeric_updates() {
 fn cached_ldlt_handles_empty_replacement_without_reading_stale_indices() {
     let pattern = Pattern2::analyze(&lower2()).unwrap();
     let empty = StaticCscMatrix::<2, 2, 0, f64>::from_pattern(&[], &[], &[0, 0, 0]).unwrap();
-    assert_eq!(pattern.factor_ldlt(&empty), Err(SparseCholeskyError::ZeroPivot));
+    assert_eq!(
+        pattern.factor_ldlt(&empty),
+        Err(SparseCholeskyError::ZeroPivot)
+    );
     assert_eq!(
         pattern.factor_ldlt_ordered(&empty),
         Err(SparseCholeskyError::ZeroPivot)
     );
+}
+
+#[test]
+fn reordered_ldlt_handles_changed_source_layout() {
+    let original = lower2();
+    let ordering = StaticCscOrdering::from_permutation(&[1, 0]).unwrap();
+    let pattern = Pattern2::analyze_with_ordering(&original, ordering).unwrap();
+    let diagonal = diagonal2();
+    let ordered = pattern.prepare_ordered(&diagonal).unwrap();
+    let dense = Matrix::from_rows([[5.0, 0.0], [0.0, 6.0]]);
+    assert_solves(&pattern.factor_ldlt(&diagonal).unwrap(), dense);
+    assert_solves(&pattern.factor_ldlt_ordered(&ordered).unwrap(), dense);
+    let mut factor = pattern.factor_ldlt(&original).unwrap();
+    factor.recompute_with_pattern(&pattern, &diagonal).unwrap();
+    assert_eq!(factor.ordering(), ordering);
+    assert_solves(&factor, dense);
+    factor
+        .recompute_ordered_with_pattern(&pattern, &ordered)
+        .unwrap();
+    assert_eq!(factor.ordering(), ordering);
+    assert_solves(&factor, dense);
+}
+
+#[test]
+fn cached_ldlt_handles_changed_source_layout_for_f32() {
+    let original =
+        StaticCscMatrix::<2, 2, 3, f32>::from_pattern(&[4.0, 1.0, 3.0], &[0, 1, 1], &[0, 2, 3])
+            .unwrap();
+    let diagonal =
+        StaticCscMatrix::<2, 2, 2, f32>::from_pattern(&[5.0, 6.0], &[0, 1], &[0, 1, 2]).unwrap();
+    let pattern = Pattern2::analyze(&original).unwrap();
+    let factor = pattern.factor_ldlt(&diagonal).unwrap();
+    let rhs = Matrix::<2, 2, f32>::from_rows([[1.0, 2.0], [3.0, 4.0]]);
+    let dense = Matrix::from_rows([[5.0, 0.0], [0.0, 6.0]]);
+    assert!((dense * factor.solve(&rhs) - rhs).norm() < 1.0e-5);
 }
