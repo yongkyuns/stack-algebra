@@ -255,7 +255,10 @@ impl<const N: usize, const MAX_NNZ: usize> StaticCscPermutation<N, MAX_NNZ> {
         // All reads are in bounds before changing either destination field.
         // Install the ordered pattern before borrowing its active value slice.
         output.pattern = self.pattern;
-        for (value, &source_index) in output.values_mut().iter_mut().zip(source_indices) {
+        // The source-index slice already checked this exact active length
+        // against MAX_NNZ. Do not reload the copied destination count here.
+        let output_values = &mut output.values[..source_indices.len()];
+        for (value, &source_index) in output_values.iter_mut().zip(source_indices) {
             *value = source_values[source_index as usize];
         }
     }
