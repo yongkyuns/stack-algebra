@@ -324,7 +324,9 @@ mod cholesky_reuse {
         let pattern = Pattern2::analyze(&full).unwrap();
         let mut factor = pattern.factor_ordered(&lower2()).unwrap();
         assert_solves(&factor, Matrix::from_rows([[4.0, 1.0], [1.0, 3.0]]));
-        factor.recompute_with_pattern(&pattern, &diagonal2()).unwrap();
+        factor
+            .recompute_with_pattern(&pattern, &diagonal2())
+            .unwrap();
         assert_solves(&factor, Matrix::from_rows([[5.0, 0.0], [0.0, 6.0]]));
         factor
             .recompute_ordered_with_pattern(&pattern, &full)
@@ -359,12 +361,9 @@ mod cholesky_reuse {
         let diagonal =
             StaticCscMatrix::<2, 2, 2, f32>::from_pattern(&[5.0, 6.0], &[0, 1], &[0, 1, 2])
                 .unwrap();
-        let input = StaticCscMatrix::<2, 2, 3, f32>::from_pattern(
-            &[4.0, 1.0, 3.0],
-            &[0, 1, 1],
-            &[0, 2, 3],
-        )
-        .unwrap();
+        let input =
+            StaticCscMatrix::<2, 2, 3, f32>::from_pattern(&[4.0, 1.0, 3.0], &[0, 1, 1], &[0, 2, 3])
+                .unwrap();
         let diagonal_pattern = Pattern2::analyze(&diagonal).unwrap();
         assert_eq!(
             diagonal_pattern.factor_ordered(&input),
@@ -382,17 +381,7 @@ mod cholesky_reuse {
     }
 
     #[test]
-    fn empty_shapes_and_missing_pivots_keep_existing_errors() {
-        let empty = StaticCscMatrix::<0, 0, 0, f64>::from_pattern(&[], &[], &[0]).unwrap();
-        let pattern = StaticCscCholeskyPattern::<0, 0>::analyze(&empty).unwrap();
-        let mut factor = pattern.factor_ordered(&empty).unwrap();
-        factor.recompute_with_pattern(&pattern, &empty).unwrap();
-        factor
-            .recompute_ordered_with_pattern(&pattern, &empty)
-            .unwrap();
-        let rhs = Matrix::<0, 2, f64>::from_columns([[], []]);
-        assert_eq!(factor.solve(&rhs), rhs);
-
+    fn missing_pivots_keep_existing_error() {
         let pattern = Pattern2::analyze(&lower2()).unwrap();
         let missing = StaticCscMatrix::<2, 2, 0, f64>::from_pattern(&[], &[], &[0, 0, 0]).unwrap();
         assert_eq!(

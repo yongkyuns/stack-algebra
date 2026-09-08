@@ -637,10 +637,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         self.factor_natural_into(matrix, true, false, output)
     }
 
-    /// Refactors an analyzed matrix into reusable storage without repeating
-    /// symmetry or pattern validation. The matrix must retain its analyzed
-    /// sparsity pattern; use [`Self::factor`] when that cannot be
-    /// guaranteed.
+    /// Refactors an analyzed matrix without repeating symmetry validation.
+    /// Factor coverage is checked before reusable output is changed.
     #[inline]
     fn refactorize<const MAX_A_NNZ: usize, T: Real + Zero>(
         &self,
@@ -649,18 +647,18 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
     ) -> Result<(), SparseCholeskyError> {
         if !self.ordering.is_identity() {
             let permuted = self.ordering.permute(matrix)?;
-            self.factor_natural_into(&permuted, false, true, output)?;
+            self.factor_natural_into(&permuted, true, true, output)?;
             output.ordering = self.ordering;
             return Ok(());
         }
-        self.factor_natural_into(matrix, false, true, output)
+        self.factor_natural_into(matrix, true, true, output)
     }
 
     /// Factors a matrix that has already been transformed into this pattern's
     /// ordered coordinates. This avoids repeating the symmetric permutation
-    /// and structural validation when numeric values are updated under a
-    /// reused symbolic pattern. The matrix must retain the analyzed ordered
-    /// sparsity pattern; use [`Self::factor`] when that cannot be guaranteed.
+    /// and symmetry validation. The input must use this pattern's coordinate
+    /// ordering; its entries must fit the analyzed factor pattern, otherwise
+    /// [`SparseCholeskyError::PatternMismatch`] is returned.
     #[inline]
     pub fn factor_ordered<const MAX_A_NNZ: usize, T: Real + Zero>(
         &self,
@@ -684,7 +682,9 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
         output: &mut StaticCscCholesky<N, MAX_L_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
-        self.factor_natural_into(matrix, false, false, output)?;
+        // Validate before replacing the destination pattern or numeric values.
+        // A caller-retained schedule may differ from the destination's old factor.
+        self.factor_natural_into(matrix, true, true, output)?;
         output.ordering = self.ordering;
         Ok(())
     }
@@ -1347,6 +1347,9 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
     }
 
     /// Recomputes numeric values using this factor's analyzed sparsity pattern.
+    ///
+    /// Structural mismatches return [`SparseCholeskyError::PatternMismatch`]
+    /// before modifying the factor. Numeric errors may leave partial updates.
     #[inline]
     pub fn recompute<const MAX_A_NNZ: usize>(
         &mut self,
@@ -1360,7 +1363,9 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
     ///
     /// This avoids rebuilding the update schedule on every iteration. Retain
     /// the [`StaticCscCholeskyPattern`] returned by symbolic analysis when a
-    /// factor is updated repeatedly.
+    /// factor is updated repeatedly. Structural mismatches are rejected before
+    /// the destination pattern or values are changed; numeric errors may leave
+    /// partial updates.
     #[inline]
     pub fn recompute_with_pattern<const MAX_A_NNZ: usize>(
         &mut self,
@@ -1372,6 +1377,9 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
 
     /// Recomputes numeric values from coordinates already transformed by
     /// [`StaticCscCholeskyPattern::prepare_ordered`].
+    ///
+    /// Structural mismatches are rejected before modifying the factor;
+    /// numeric errors may leave partial updates.
     #[inline]
     pub fn recompute_ordered<const MAX_A_NNZ: usize>(
         &mut self,
@@ -1382,6 +1390,10 @@ impl<const N: usize, const MAX_L_NNZ: usize, T: Real> StaticCscCholesky<N, MAX_L
     }
 
     /// Recomputes ordered coordinates using caller-retained symbolic metadata.
+    ///
+    /// The supplied factor pattern replaces the destination's previous pattern.
+    /// Structural mismatches are rejected before changing either the pattern
+    /// or numeric values; numeric errors may leave partial updates.
     #[inline]
     pub fn recompute_ordered_with_pattern<const MAX_A_NNZ: usize>(
         &mut self,
