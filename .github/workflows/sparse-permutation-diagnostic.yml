@@ -36,20 +36,48 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.98.0
-      - name: Check diagnostic and measurement validators
-        run: python3 -m unittest discover -s tools/sparse-permutation-bench -v
-      - name: Compare focused baseline, candidate and independent same-source build
+      - name: Check formatting and diagnostic validators
+        run: |
+          cargo fmt --all -- --check
+          python3 -m unittest discover -s tools/sparse-permutation-bench -v
+      - name: Check permutation contracts in debug and release
+        run: |
+          cargo test --no-default-features --lib sparse::ordering::permutation_extent_tests
+          cargo test --no-default-features --test sparse_permutation_contracts
+          cargo test --release --no-default-features --lib sparse::ordering::permutation_extent_tests
+          cargo test --release --no-default-features --test sparse_permutation_contracts
+      - name: Compare original candidate and revision with independent same-source control
         run: >-
           python3 tools/sparse-permutation-bench/diagnose.py
+          --before 044301ed04fd64cc7a48cf2d07db41ad4ebc2aa1
           --candidate HEAD --output permutation-focused
-      - name: Add diagnostic reports
+      - name: Add native diagnostic reports
         run: |
           cat permutation-focused/summary.md >> "$GITHUB_STEP_SUMMARY"
           cat permutation-focused/control-summary.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Retain focused measurements and exact generated code
+      - name: Retain native measurements and exact generated code
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: permutation-focused-${{ matrix.arch }}-${{ github.sha }}
           path: permutation-focused/
+          if-no-files-found: error
+      - name: Compare Zen 3 code generation on the same x86 host
+        if: matrix.arch == 'x86_64'
+        run: >-
+          python3 tools/sparse-permutation-bench/diagnose.py
+          --before 044301ed04fd64cc7a48cf2d07db41ad4ebc2aa1
+          --candidate HEAD --target-cpu znver3 --output permutation-focused-znver3
+      - name: Add Zen 3 diagnostic reports
+        if: matrix.arch == 'x86_64'
+        run: |
+          echo 'Code-generation diagnostic only: target-cpu=znver3 does not emulate EPYC 7763 hardware.' >> "$GITHUB_STEP_SUMMARY"
+          cat permutation-focused-znver3/summary.md >> "$GITHUB_STEP_SUMMARY"
+          cat permutation-focused-znver3/control-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain Zen 3 code-generation diagnostic
+        if: always() && matrix.arch == 'x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: permutation-focused-znver3-${{ github.sha }}
+          path: permutation-focused-znver3/
           if-no-files-found: error
