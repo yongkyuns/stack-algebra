@@ -27,6 +27,8 @@ jobs:
         include:
           - arch: x86_64
             runner: ubuntu-24.04
+          - arch: x86_64-ubuntu22
+            runner: ubuntu-22.04
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
@@ -36,16 +38,29 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt
       - name: Check formatting and diagnostic validators
         run: |
-          cargo fmt --all -- --check
-          python3 -m unittest discover -s tools/sparse-permutation-bench -v
+          mkdir diagnostic-contracts
+          git rev-parse HEAD > diagnostic-contracts/source-commit.txt
+          rustc -Vv > diagnostic-contracts/rustc.txt
+          lscpu > diagnostic-contracts/cpu.txt
+          cargo fmt --all -- --check 2>&1 | tee diagnostic-contracts/format.log
+          python3 -m unittest discover -s tools/sparse-permutation-bench -v 2>&1 | tee diagnostic-contracts/validators.log
       - name: Check permutation contracts in debug and release
         run: |
-          cargo test --no-default-features --lib sparse::ordering::permutation_extent_tests
-          cargo test --no-default-features --test sparse_permutation_contracts
-          cargo test --release --no-default-features --lib sparse::ordering::permutation_extent_tests
-          cargo test --release --no-default-features --test sparse_permutation_contracts
+          cargo test --no-default-features --lib sparse::ordering::permutation_extent_tests 2>&1 | tee diagnostic-contracts/internal-debug.log
+          cargo test --no-default-features --test sparse_permutation_contracts 2>&1 | tee diagnostic-contracts/public-debug.log
+          cargo test --release --no-default-features --lib sparse::ordering::permutation_extent_tests 2>&1 | tee diagnostic-contracts/internal-release.log
+          cargo test --release --no-default-features --test sparse_permutation_contracts 2>&1 | tee diagnostic-contracts/public-release.log
+      - name: Retain contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: permutation-contracts-${{ matrix.arch }}-${{ github.sha }}
+          path: diagnostic-contracts/
+          if-no-files-found: error
       - name: Compare original candidate and revision with independent same-source control
         run: >-
           python3 tools/sparse-permutation-bench/diagnose.py
@@ -62,22 +77,36 @@ jobs:
           name: permutation-focused-${{ matrix.arch }}-${{ github.sha }}
           path: permutation-focused/
           if-no-files-found: error
+      - name: Compare unchanged full grid against the repaired baseline
+        run: >-
+          python3 tools/sparse-permutation-bench/compare.py
+          --before d1cd847ec4ef307dab7a91518d2bf1a2a11f90dc
+          --candidate HEAD --output permutation-full
+      - name: Add full-grid report
+        run: cat permutation-full/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain unchanged full-grid evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: permutation-full-${{ matrix.arch }}-${{ github.sha }}
+          path: permutation-full/
+          if-no-files-found: error
       - name: Compare Zen 3 code generation on the same x86 host
-        if: matrix.arch == 'x86_64'
+        if: startsWith(matrix.arch, 'x86_64')
         run: >-
           python3 tools/sparse-permutation-bench/diagnose.py
           --before 044301ed04fd64cc7a48cf2d07db41ad4ebc2aa1
           --candidate HEAD --target-cpu znver3 --output permutation-focused-znver3
       - name: Add Zen 3 diagnostic reports
-        if: matrix.arch == 'x86_64'
+        if: startsWith(matrix.arch, 'x86_64')
         run: |
           echo 'Code-generation diagnostic only: target-cpu=znver3 does not emulate EPYC 7763 hardware.' >> "$GITHUB_STEP_SUMMARY"
           cat permutation-focused-znver3/summary.md >> "$GITHUB_STEP_SUMMARY"
           cat permutation-focused-znver3/control-summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: Retain Zen 3 code-generation diagnostic
-        if: always() && matrix.arch == 'x86_64'
+        if: always() && startsWith(matrix.arch, 'x86_64')
         uses: actions/upload-artifact@v4
         with:
-          name: permutation-focused-znver3-${{ github.sha }}
+          name: permutation-focused-znver3-${{ matrix.arch }}-${{ github.sha }}
           path: permutation-focused-znver3/
           if-no-files-found: error
