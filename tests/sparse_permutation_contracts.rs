@@ -268,3 +268,114 @@ fn exhaustive_2x2_destinations_match_coordinate_reference() {
     }
     assert_eq!(cases, 512);
 }
+
+#[test]
+#[allow(clippy::clone_on_copy)]
+fn initialized_workspaces_rebuild_and_clone_across_patterns() {
+    let mut full = Sparse::new();
+    for column in 0..3 {
+        for row in 0..3 {
+            full.insert(row, column, (3 * column + row + 1) as f64)
+                .unwrap();
+        }
+    }
+    let mut storage = MaybeUninit::<StaticCscPermutation<3, 9>>::uninit();
+    StaticCscPermutation::new_into(&mut storage);
+    // SAFETY: new_into initializes every field of the permutation workspace.
+    let mut map = unsafe { storage.assume_init() };
+    let order = ordering();
+    let mut output = source();
+    for input in [full, Sparse::new(), source(), full, Sparse::new()] {
+        map.from_ordering_into(input.pattern(), order).unwrap();
+        let mut reference = Sparse::new();
+        for column in 0..3 {
+            for row in column..3 {
+                if let Some(&value) = input.get(row, column) {
+                    let a = order.inverse()[row];
+                    let b = order.inverse()[column];
+                    reference.insert(a.max(b), a.min(b), value).unwrap();
+                }
+            }
+        }
+        // Deliberately exercise the derived Clone as well as ordinary Copy.
+        for copied in [map, map.clone()] {
+            copied.apply_into(&input, &mut output);
+            assert_active(&output, &reference);
+        }
+    }
+    map.from_ordering_into(full.pattern(), order).unwrap();
+    storage.write(map);
+    StaticCscPermutation::new_into(&mut storage);
+    // SAFETY: the second new_into call also initializes the entire workspace.
+    let reset = unsafe { storage.assume_init() };
+    assert_eq!(reset, StaticCscPermutation::new());
+    let empty = Sparse::new();
+    let mut output = full;
+    reset.apply_into(&empty, &mut output);
+    assert_active(&output, &empty);
+}
+
+#[test]
+fn reverse_ordered_short_input_is_rejected_before_destination_changes() {
+    let mut full = Sparse::new();
+    for column in 0..3 {
+        for row in 0..3 {
+            full.insert(row, column, (3 * column + row + 1) as f64)
+                .unwrap();
+        }
+    }
+    let order = StaticCscOrdering::from_permutation(&[2, 1, 0]).unwrap();
+    let map = order.permutation_for_pattern(full.pattern()).unwrap();
+    // The largest source offset maps to the FIRST ordered entry, not the last.
+    let short = Sparse::from_pattern(
+        &full.values()[..8],
+        &[0, 1, 2, 0, 1, 2, 0, 1],
+        &[0, 3, 6, 8],
+    )
+    .unwrap();
+    let mut output = source();
+    let before = output;
+    assert!(catch_unwind(AssertUnwindSafe(|| map.apply_into(&short, &mut output))).is_err());
+    assert_eq!(output, before);
+    assert!(catch_unwind(|| map.apply(&short)).is_err());
+    map.apply_into(&full, &mut output);
+    let reference = Sparse::from_pattern(
+        &[9.0, 6.0, 3.0, 5.0, 2.0, 1.0],
+        &[0, 1, 2, 1, 2, 2],
+        &[0, 3, 5, 6],
+    )
+    .unwrap();
+    assert_active(&output, &reference);
+}
+
+#[test]
+fn shrinking_and_empty_permutations_preserve_inactive_values() {
+    type Small = StaticCscMatrix<2, 2, 4, i32>;
+    let input = Small::from_pattern(&[4, 3], &[0, 1], &[0, 1, 2]).unwrap();
+    let map = StaticCscOrdering::identity()
+        .permutation_for_pattern(input.pattern())
+        .unwrap();
+    let mut output = Small::from_pattern(&[100, 101, 102, 103], &[0, 1, 0, 1], &[0, 2, 4]).unwrap();
+
+    // Build the reference using public operations, not the permutation under
+    // test. clear resets the pattern; ordered insertions overwrite only the
+    // two active values, leaving the distinct trailing sentinels intact.
+    let mut reference = output;
+    reference.clear();
+    reference.insert(0, 0, 4).unwrap();
+    reference.insert(1, 1, 3).unwrap();
+    map.apply_into(&input, &mut output);
+    assert_active(&output, &input);
+    // Whole-matrix equality also observes inactive backing values, unlike
+    // values(), which exposes only the active entries.
+    assert_eq!(output, reference);
+
+    let empty = Small::new();
+    let empty_map = StaticCscOrdering::identity()
+        .permutation_for_pattern(empty.pattern())
+        .unwrap();
+    reference.clear();
+    empty_map.apply_into(&empty, &mut output);
+    assert_active(&output, &empty);
+    assert_eq!(output, reference);
+}
