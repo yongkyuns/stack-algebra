@@ -1,0 +1,49 @@
+name: Sparse reuse optimization
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/sparse/**"
+      - "tools/sparse-reuse-bench/**"
+      - ".github/workflows/sparse-reuse-optimization.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: Safe baseline comparison (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Profile checks and compare with the qualified safe baseline
+        run: python3 tools/sparse-reuse-bench/optimize.py --output optimization-evidence
+      - name: Add paired results to summary
+        run: cat optimization-evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain raw evidence and provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparse-optimization-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: optimization-evidence
+          if-no-files-found: error
+          retention-days: 90
