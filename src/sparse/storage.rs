@@ -588,10 +588,7 @@ mod empty_pattern_tests {
         assert_eq!(Empty::validate_parts(&[], &[], 0), Ok(()));
         assert_eq!(Empty::from_parts(&[], &[], 0), Ok(Empty::new()));
         assert_eq!(Rectangular::validate_parts(&[], &[], 0), Ok(()));
-        assert_eq!(
-            Rectangular::from_parts(&[], &[], 0),
-            Ok(Rectangular::new())
-        );
+        assert_eq!(Rectangular::from_parts(&[], &[], 0), Ok(Rectangular::new()));
     }
 
     #[test]
