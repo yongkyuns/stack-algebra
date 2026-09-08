@@ -89,6 +89,66 @@ lifetime; use `Matrix::from_view` only when an owned snapshot is intentional.
 See [API usage — external buffers and views](api-usage.md) and the generated
 [view APIs](api-reference.md).
 
+### Fit a line from a caller-owned buffer
+
+The runnable `examples/mapped_least_squares.rs` fits `y = a*x + b` to five
+samples. It treats `x` as known and gives every observation equal weight,
+minimizing `sum((y_i - (a*x_i + b))^2)`. The fixed observations have small
+perturbations; they are not generated from an exact solution or a random
+simulation. This is a library-usage example, not a general regression package.
+
+Each row of the 5x2 design matrix is `[x_i, 1]`, but its borrowed buffer is
+**column-major**, not interleaved `[x_i, 1]` pairs:
+
+```text
+storage = [0, 1, 2, 3, 4,  1, 1, 1, 1, 1]
+           ----- x ----   -- ones ------
+y       = [1.1, 2.9, 5.2, 6.8, 9.0]
+```
+
+`Map::<5, 2, f64>::from_slice` borrows that buffer. Column-pivoted QR reads it
+into the factor object's own inline storage, so no separate owning input
+matrix is needed and the caller's data is unchanged. This is not an in-place
+factorization of the caller's buffer or a claim that QR has no workspace.
+`try_solve_least_squares` returns `[a, b]` in the original column order.
+`Map::matvec_into` then evaluates the fitted values directly into an output
+vector, without materializing an owned design matrix or forming an inverse.
+
+The input must be finite and the design must have full column rank at the
+solver's numerical threshold. For example, if all `x` values are identical,
+slope and intercept cannot be determined separately and the helper propagates
+`DecompositionError::Singular`. Non-finite input propagates `NonFinite`.
+The executable uses `expect` only for its fixed, valid teaching data.
+
+Run from the repository root:
+
+```sh
+cargo run --example mapped_least_squares --no-default-features
+cargo test --no-default-features --test mapped_least_squares
+```
+
+The host program uses `std` for printing while the library remains in its
+`no_std` configuration. Expected output, rounded as shown:
+
+```text
+slope = 1.970, intercept = 1.060
+x observed_y fitted_y residual
+0.0 1.100 1.060 0.040
+1.0 2.900 3.030 -0.130
+2.0 5.200 5.000 0.200
+3.0 6.800 6.970 -0.170
+4.0 9.000 8.940 0.060
+residual norm = 0.302
+```
+
+Residual means **observed minus fitted**. A nonzero residual is expected:
+least squares minimizes its norm rather than requiring every sample to lie on
+the fitted line. Six separate integration tests import the actual fitting
+helper and check an independent scalar regression, hand-calculated fitted
+values/residuals, exact-line recovery, borrowed-storage preservation, rank
+failure, and non-finite input. No new production API or optimized kernel is
+needed for this example.
+
 ## Dense factorizations
 
 Select a factorization from the input assumptions:
