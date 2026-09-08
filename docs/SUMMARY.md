@@ -6,6 +6,7 @@
 ## Guides
 
 - [Choosing an API](api-usage.md)
+- [Tutorials](tutorials.md)
 - [Common use cases](use-cases.md)
 
 ## Reference
