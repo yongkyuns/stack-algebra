@@ -38,6 +38,7 @@ jobs:
       - name: Profile unchanged repaired components
         run: python3 tools/sparse-permutation-bench/profile.py --output permutation-profile
       - name: Retain component evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: permutation-profile-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
@@ -51,6 +52,7 @@ jobs:
       - name: Add paired report
         run: cat permutation-optimization/summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: Retain paired evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: permutation-optimization-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}

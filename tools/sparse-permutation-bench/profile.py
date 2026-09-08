@@ -54,7 +54,7 @@ fn profile<const N: usize, const A: usize, T: Real + Debug>(
 ) {
     let input = fixture::<N, A, T>(layout == "full");
     let map = ordering::<N>(kind).permutation_for_pattern(input.pattern()).unwrap();
-    let mut output = StaticCscMatrix::zero_with_pattern(map.pattern());
+    let mut output = StaticCscMatrix::<N, N, A, T>::zero_with_pattern(map.pattern());
     let required_len = input.nnz(); // These fixtures store the last diagonal.
     let mut components = ["bounds_scan", "bounds_length", "copy_pattern", "guarded_pattern"];
     if sample & 1 != 0 { components.reverse(); }
@@ -187,8 +187,11 @@ def main():
         shutil.copyfile(dest / "Cargo.lock", out / "Cargo.lock")
         provenance["lock_sha256"] = digest((out / "Cargo.lock").read_bytes())
         with (out / "build.log").open("w") as log:
-            subprocess.run(["cargo", "build", "--release", "--locked", "--manifest-path", str(dest / "Cargo.toml")],
-                           cwd=root, env=env, check=True, stdout=log, stderr=subprocess.STDOUT)
+            result = subprocess.run(["cargo", "build", "--release", "--locked", "--manifest-path", str(dest / "Cargo.toml")],
+                                    cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT)
+        if result.returncode:
+            print((out / "build.log").read_text(), flush=True)
+            result.check_returncode()
         binary = dest / "target/release/sparse-permutation-bench"
         provenance["binary_sha256"] = digest(binary.read_bytes())
         (out / "cpu.txt").write_text(capture(["lscpu"], repo) + "\n")
