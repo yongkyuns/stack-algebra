@@ -53,7 +53,11 @@ fn reference<const N: usize, const A: usize, T: Real>(
                 let first = order.inverse()[row];
                 let second = order.inverse()[column];
                 result
-                    .insert(first.max(second), first.min(second), T::from(value).unwrap())
+                    .insert(
+                        first.max(second),
+                        first.min(second),
+                        T::from(value).unwrap(),
+                    )
                     .unwrap();
             }
         }
@@ -207,11 +211,7 @@ fn main() {
         .nth(1)
         .expect("pass --check or a sample number");
     let timed = argument != "--check";
-    let sample = if timed {
-        argument.parse().unwrap()
-    } else {
-        0
-    };
+    let sample = if timed { argument.parse().unwrap() } else { 0 };
     println!("sample,n,scalar,capacity,layout,ordering,operation,input_capacity,factor_capacity,input_nnz,ordered_nnz,factor_nnz,iterations,elapsed_ns");
     suite::<f32>(sample, timed);
     suite::<f64>(sample, timed);
