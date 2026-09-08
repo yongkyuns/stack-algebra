@@ -1200,7 +1200,10 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         // Exact equality is sufficient for coverage and avoids a separate
         // per-entry search on fill-free lower input. Other layouts retain the
         // full validator, including mirrored upper-triangle coverage checks.
-        if self.matches_factor_layout(matrix) {
+        // Keep fill-capacity-heavy instantiations on the original validator
+        // without a speculative layout test. This compile-time selection is
+        // only a profitability heuristic; it does not change accepted inputs.
+        if MAX_A_NNZ >= MAX_L_NNZ && self.matches_factor_layout(matrix) {
             return Ok(());
         }
         for column in 0..N {
