@@ -6,8 +6,12 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 type Sparse = StaticCscMatrix<3, 3, 9, f64>;
 
 fn source() -> Sparse {
-    Sparse::from_pattern(&[10.0, 1.0, 20.0, 2.0, 30.0], &[0, 1, 1, 2, 2], &[0, 2, 4, 5])
-        .unwrap()
+    Sparse::from_pattern(
+        &[10.0, 1.0, 20.0, 2.0, 30.0],
+        &[0, 1, 1, 2, 2],
+        &[0, 2, 4, 5],
+    )
+    .unwrap()
 }
 
 fn ordering() -> StaticCscOrdering<3> {
@@ -15,8 +19,12 @@ fn ordering() -> StaticCscOrdering<3> {
 }
 
 fn expected() -> Sparse {
-    Sparse::from_pattern(&[30.0, 2.0, 10.0, 1.0, 20.0], &[0, 2, 1, 2, 2], &[0, 2, 4, 5])
-        .unwrap()
+    Sparse::from_pattern(
+        &[30.0, 2.0, 10.0, 1.0, 20.0],
+        &[0, 2, 1, 2, 2],
+        &[0, 2, 4, 5],
+    )
+    .unwrap()
 }
 
 fn assert_active<const N: usize, const CAP: usize, T>(
@@ -80,7 +88,9 @@ fn apply_into_replaces_larger_destination_pattern() {
 fn repeated_maps_can_grow_and_shrink_destination() {
     let input = source();
     let diagonal = Sparse::from_pattern(&[4.0, 5.0, 6.0], &[0, 1, 2], &[0, 1, 2, 3]).unwrap();
-    let diagonal_map = ordering().permutation_for_pattern(diagonal.pattern()).unwrap();
+    let diagonal_map = ordering()
+        .permutation_for_pattern(diagonal.pattern())
+        .unwrap();
     let map = ordering().permutation_for_pattern(input.pattern()).unwrap();
     let mut output = diagonal_map.apply(&diagonal);
     map.apply_into(&input, &mut output);
@@ -127,7 +137,9 @@ fn matching_pattern_numeric_updates_preserve_reuse() {
     let map = ordering().permutation_for_pattern(input.pattern()).unwrap();
     let mut output = Sparse::zero_with_pattern(map.pattern());
     for scale in [1.0, 2.0, -3.0] {
-        input.set_values(&[10.0 * scale, scale, 20.0 * scale, 2.0 * scale, 30.0 * scale]).unwrap();
+        input
+            .set_values(&[10.0 * scale, scale, 20.0 * scale, 2.0 * scale, 30.0 * scale])
+            .unwrap();
         map.apply_into(&input, &mut output);
         let mut result = expected();
         for value in result.values_mut() {
@@ -196,20 +208,17 @@ fn full_storage_offsets_are_checked_before_destination_changes() {
 #[test]
 fn apply_into_supports_f32_and_integer_values() {
     let order = StaticCscOrdering::from_permutation(&[1, 0]).unwrap();
-    let input = StaticCscMatrix::<2, 2, 3, f32>::from_pattern(
-        &[4.0, 1.0, 3.0],
-        &[0, 1, 1],
-        &[0, 2, 3],
-    )
-    .unwrap();
+    let input =
+        StaticCscMatrix::<2, 2, 3, f32>::from_pattern(&[4.0, 1.0, 3.0], &[0, 1, 1], &[0, 2, 3])
+            .unwrap();
     let map = order.permutation_for_pattern(input.pattern()).unwrap();
     let mut output = StaticCscMatrix::new();
     map.apply_into(&input, &mut output);
     let result = StaticCscMatrix::from_pattern(&[3.0, 1.0, 4.0], &[0, 1, 1], &[0, 2, 3]).unwrap();
     assert_active(&output, &result);
 
-    let integers = StaticCscMatrix::<2, 2, 3, i32>::from_pattern(&[4, 1, 3], &[0, 1, 1], &[0, 2, 3])
-        .unwrap();
+    let integers =
+        StaticCscMatrix::<2, 2, 3, i32>::from_pattern(&[4, 1, 3], &[0, 1, 1], &[0, 2, 3]).unwrap();
     let mut integer_output = StaticCscMatrix::new();
     map.apply_into(&integers, &mut integer_output);
     let result = StaticCscMatrix::from_pattern(&[3, 1, 4], &[0, 1, 1], &[0, 2, 3]).unwrap();
@@ -243,7 +252,9 @@ fn exhaustive_2x2_destinations_match_coordinate_reference() {
                     if let Some(&value) = input.get(row, column) {
                         let first = order.inverse()[row];
                         let second = order.inverse()[column];
-                        result.insert(first.max(second), first.min(second), value).unwrap();
+                        result
+                            .insert(first.max(second), first.min(second), value)
+                            .unwrap();
                     }
                 }
             }

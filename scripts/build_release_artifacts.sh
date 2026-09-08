@@ -114,6 +114,7 @@ cp tests/scalar_hook_contracts.rs "$consumer_dir/tests/scalar_hook_contracts.rs"
 cp tests/matrix_storage.rs "$consumer_dir/tests/matrix_storage.rs"
 cp tests/sparse_reuse_contracts.rs "$consumer_dir/tests/sparse_reuse_contracts.rs"
 cp tests/sparse_empty.rs "$consumer_dir/tests/sparse_empty.rs"
+cp tests/sparse_permutation_contracts.rs "$consumer_dir/tests/sparse_permutation_contracts.rs"
 cargo generate-lockfile --manifest-path "$consumer_dir/Cargo.toml"
 
 # Retain logs and fail immediately on any compile, link, runtime, or test error.
@@ -146,6 +147,7 @@ cp "$consumer_dir/tests/scalar_hook_contracts.rs" "$out_dir/package-consumer-sca
 cp "$consumer_dir/tests/matrix_storage.rs" "$out_dir/package-consumer-matrix-storage.rs"
 cp "$consumer_dir/tests/sparse_reuse_contracts.rs" "$out_dir/package-consumer-sparse-reuse-contracts.rs"
 cp "$consumer_dir/tests/sparse_empty.rs" "$out_dir/package-consumer-sparse-empty.rs"
+cp "$consumer_dir/tests/sparse_permutation_contracts.rs" "$out_dir/package-consumer-sparse-permutation-contracts.rs"
 cargo metadata --locked --manifest-path "$consumer_dir/Cargo.toml" --format-version 1 > "$out_dir/package-consumer-metadata.json"
 cargo tree --locked --manifest-path "$consumer_dir/Cargo.toml" --edges normal,build > "$out_dir/package-consumer-dependency-tree.txt"
 
@@ -168,6 +170,7 @@ cargo tree --locked --manifest-path "$consumer_dir/Cargo.toml" --edges normal,bu
     printf 'package_consumer_matrix_storage=passed-debug-default-debug-std-release-default\n'
     printf 'package_consumer_sparse_reuse=passed-debug-default-debug-std-release-default\n'
     printf 'package_consumer_sparse_empty=passed-debug-default-debug-std-release-default\n'
+    printf 'package_consumer_sparse_permutation=passed-debug-default-debug-std-release-default\n'
     printf 'package_consumer_lock_sha256=%s\n' "$(sha256sum "$out_dir/package-consumer-Cargo.lock" | awk '{print $1}')"
     printf 'public_api_sha256=%s\n' "$(sha256sum "$out_dir/public-api.txt" | awk '{print $1}')"
     printf 'rustdoc_json_sha256=%s\n' "$(sha256sum "$out_dir/rustdoc-public-api.json" | awk '{print $1}')"
