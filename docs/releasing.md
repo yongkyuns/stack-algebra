@@ -47,10 +47,10 @@ Tag/release-note creation remains a separate deliberate GitHub action so crate p
 The repository keeps three examples executing in normal CI:
 
 - `kalman_1d` — a two-state position/velocity filter with scalar position observations and a readable 2x2 Joseph covariance update;
-- `mapped_least_squares` — column-pivoted QR directly from a caller-owned mapped Jacobian buffer;
+- `mapped_least_squares` — fit a line to five samples with column-pivoted QR from a caller-owned mapped design buffer, then report fitted values and residuals;
 - `embedded_resource_budget` — compile-time storage budgeting for a 15-state estimator and bounded workspace.
 
-These examples teach isolated library operations, not complete applications. The Kalman model assumptions and expected output are documented in [Tutorials](tutorials.md). Its integration tests remain separate from the example. New GEMM-accumulate or broader mapped-layout kernels require measurements on representative consumer workloads; teaching examples alone are not performance justification.
+The examples teach isolated library operations, not complete applications. Model assumptions and expected output for the Kalman and line-fitting examples are documented in [Tutorials](tutorials.md). Their integration tests remain separate from the examples. New GEMM-accumulate or broader mapped-layout kernels require measurements on representative consumer workloads; teaching examples alone are not performance justification.
 
 ## Resource regression policy
 

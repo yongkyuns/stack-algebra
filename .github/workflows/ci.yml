@@ -25,10 +25,10 @@ jobs:
           cargo run --example kalman_1d --no-default-features
           cargo run --example mapped_least_squares --no-default-features
           cargo run --example embedded_resource_budget --no-default-features
-      - name: Test teaching filter with std and optimized no_std library
+      - name: Test teaching examples with std and optimized no_std library
         run: |
-          cargo test --features std --test kalman_1d
-          cargo test --release --no-default-features --test kalman_1d
+          cargo test --features std --test kalman_1d --test mapped_least_squares
+          cargo test --release --no-default-features --test kalman_1d --test mapped_least_squares
       - name: Check benchmark script syntax
         run: |
           sh -n scripts/run_release_benchmarks.sh
