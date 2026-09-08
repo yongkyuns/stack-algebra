@@ -179,7 +179,10 @@ fn empty_f32_factorizations_and_sparse_fallback_wrapper_work() {
 fn rectangular_empty_storage_and_matvec_remain_valid() {
     let pattern = StaticCscPattern::<3, 0, 4>::from_arrays(&[], &[0]).unwrap();
     let matrix = StaticCscMatrix::<3, 0, 4, f64>::with_pattern(pattern, &[]).unwrap();
-    assert_eq!(matrix.matvec(&Matrix::zeros()), Matrix::<3, 1, f64>::zeros());
+    assert_eq!(
+        matrix.matvec(&Matrix::zeros()),
+        Matrix::<3, 1, f64>::zeros()
+    );
     assert_eq!(matrix.column_end(0), None);
     assert_eq!(matrix.get(0, 0), None);
 
@@ -194,7 +197,10 @@ fn rectangular_empty_storage_and_matvec_remain_valid() {
 #[test]
 fn zero_columns_reject_hidden_entries_and_invalid_pointers() {
     type Pattern = StaticCscPattern<3, 0, 4>;
-    assert_eq!(Pattern::from_arrays(&[], &[]), Err(CscError::LengthMismatch));
+    assert_eq!(
+        Pattern::from_arrays(&[], &[]),
+        Err(CscError::LengthMismatch)
+    );
     assert_eq!(
         Pattern::from_arrays(&[], &[1]),
         Err(CscError::InvalidColumnPointers)

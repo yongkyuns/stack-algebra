@@ -65,12 +65,17 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo test --no-default-features --lib --tests
-      - name: Check scalar hooks, matrix storage, and sparse reuse in release mode
+      - name: Check scalar hooks and matrix and sparse storage in release mode
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: >-
           cargo test --release --no-default-features
           --test scalar_hook_contracts --test matrix_storage --test sparse_reuse_contracts
+          --test sparse_empty
+      - name: Check internal sparse pattern validation in release mode
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo test --release --no-default-features --lib sparse::storage::empty_pattern_tests
 
   msrv:
     name: MSRV 1.87
@@ -208,4 +213,9 @@ jobs:
           --test sparse_cholesky
           --test sparse_ldlt
           --test sparse_reuse_contracts
+          --test sparse_empty
           -- --test-threads=1
+      - name: Check internal sparse pattern validation with Miri
+        run: >-
+          cargo miri test --no-default-features --lib
+          sparse::storage::empty_pattern_tests -- --test-threads=1

@@ -51,6 +51,8 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
     }
 
     /// Creates a pattern from canonical CSC row and column-pointer arrays.
+    ///
+    /// A zero-column shape uses no row indices and a single zero column pointer.
     #[inline]
     pub fn from_arrays(row_indices: &[usize], column_pointers: &[usize]) -> Result<Self, CscError> {
         let mut output = MaybeUninit::uninit();
@@ -148,7 +150,16 @@ impl<const ROWS: usize, const COLS: usize, const MAX_NNZ: usize>
                 capacity: MAX_NNZ,
             });
         }
-        if COLS == 0 || column_starts[0] != 0 {
+        if COLS == 0 {
+            // There is no column that could own an entry. The length and
+            // capacity checks above still apply to this canonical empty case.
+            return if nnz == 0 {
+                Ok(())
+            } else {
+                Err(CscError::InvalidColumnPointers)
+            };
+        }
+        if column_starts[0] != 0 {
             return Err(CscError::InvalidColumnPointers);
         }
         let mut previous = 0;
@@ -563,5 +574,84 @@ where
             .binary_search(&row_u32)
             .ok()
             .map(|offset| start + offset))
+    }
+}
+
+#[cfg(test)]
+mod empty_pattern_tests {
+    use super::{CscError, StaticCscPattern};
+
+    #[test]
+    fn zero_column_parts_accept_empty_storage() {
+        type Empty = StaticCscPattern<0, 0, 0>;
+        type Rectangular = StaticCscPattern<3, 0, 4>;
+        assert_eq!(Empty::validate_parts(&[], &[], 0), Ok(()));
+        assert_eq!(Empty::from_parts(&[], &[], 0), Ok(Empty::new()));
+        assert_eq!(Rectangular::validate_parts(&[], &[], 0), Ok(()));
+        assert_eq!(
+            Rectangular::from_parts(&[], &[], 0),
+            Ok(Rectangular::new())
+        );
+    }
+
+    #[test]
+    fn zero_column_parts_reject_hidden_entries() {
+        type Pattern = StaticCscPattern<3, 0, 4>;
+        for rows in [&[0_u32][..], &[0_u32, 1][..]] {
+            assert_eq!(
+                Pattern::validate_parts(rows, &[], rows.len()),
+                Err(CscError::InvalidColumnPointers)
+            );
+            assert_eq!(
+                Pattern::from_parts(rows, &[], rows.len()),
+                Err(CscError::InvalidColumnPointers)
+            );
+        }
+    }
+
+    #[test]
+    fn zero_column_parts_preserve_length_and_capacity_checks() {
+        type Pattern = StaticCscPattern<3, 0, 4>;
+        assert_eq!(
+            Pattern::validate_parts(&[], &[], 1),
+            Err(CscError::LengthMismatch)
+        );
+        assert_eq!(
+            Pattern::from_parts(&[0], &[], 0),
+            Err(CscError::LengthMismatch)
+        );
+        assert_eq!(
+            StaticCscPattern::<3, 0, 0>::validate_parts(&[0], &[], 1),
+            Err(CscError::CapacityExceeded {
+                required: 1,
+                capacity: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn nonempty_column_validation_is_preserved() {
+        type Pattern = StaticCscPattern<2, 2, 3>;
+        assert_eq!(Pattern::validate_parts(&[0, 1], &[0, 1], 2), Ok(()));
+        assert_eq!(
+            StaticCscPattern::<0, 3, 0>::validate_parts(&[], &[0; 3], 0),
+            Ok(())
+        );
+        for starts in [[1, 1], [0, 3]] {
+            assert_eq!(
+                Pattern::validate_parts(&[0, 1], &starts, 2),
+                Err(CscError::InvalidColumnPointers)
+            );
+        }
+        assert_eq!(
+            StaticCscPattern::<2, 3, 3>::validate_parts(&[0, 1], &[0, 2, 1], 2),
+            Err(CscError::InvalidColumnPointers)
+        );
+        for rows in [[1, 0], [0, 0], [0, 2]] {
+            assert_eq!(
+                Pattern::validate_parts(&rows, &[0, 2], 2),
+                Err(CscError::InvalidRowIndices)
+            );
+        }
     }
 }
