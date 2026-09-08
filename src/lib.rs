@@ -191,18 +191,31 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Returns a reference to the `i`-th row of this matrix.
     ///
     /// Rows are strided in column-major storage; use [`Self::as_slice`] when a
-    /// contiguous buffer is required.
+    /// contiguous buffer is required. When there are zero columns, every
+    /// in-bounds row is an empty view.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `i >= M`, including when there are zero columns.
     #[inline]
     pub fn row(&self, i: usize) -> &Row<M, N, T> {
         assert!(i < M, "row index out of bounds");
-        Row::new(&self.as_slice()[i..])
+        let offset = if N == 0 { 0 } else { i };
+        Row::new(&self.as_slice()[offset..])
     }
 
     /// Returns a mutable reference to the `i`-th row of this matrix.
+    ///
+    /// When there are zero columns, every in-bounds row is an empty view.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `i >= M`, including when there are zero columns.
     #[inline]
     pub fn row_mut(&mut self, i: usize) -> &mut Row<M, N, T> {
         assert!(i < M, "row index out of bounds");
-        Row::new_mut(&mut self.as_mut_slice()[i..])
+        let offset = if N == 0 { 0 } else { i };
+        Row::new_mut(&mut self.as_mut_slice()[offset..])
     }
 
     /// Returns a reference to the `i`-th column of this matrix.

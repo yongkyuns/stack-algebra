@@ -180,3 +180,118 @@ fn collecting_zero_sized_values_consumes_exactly_the_matrix_length() {
     assert!(iter.next().is_some());
     assert!(iter.next().is_none());
 }
+
+fn check_empty_row_views<T>() {
+    let mut matrix = Matrix::<3, 0, T>::from_columns([]);
+    for index in 0..3 {
+        let row = matrix.row(index);
+        assert_eq!(row.len(), 0);
+        assert!(row.is_empty());
+        assert!(row.get(0).is_none());
+        assert_eq!(row.iter().count(), 0);
+
+        let row = matrix.row_mut(index);
+        assert_eq!(row.len(), 0);
+        assert!(row.is_empty());
+        assert!(row.get_mut(0).is_none());
+        assert_eq!(row.iter_mut().count(), 0);
+    }
+}
+
+#[test]
+fn empty_row_views_accept_every_in_bounds_row() {
+    enum Never {}
+    check_empty_row_views::<i32>();
+    check_empty_row_views::<String>();
+    check_empty_row_views::<AlignedZst>();
+    check_empty_row_views::<Never>();
+}
+
+#[test]
+#[should_panic(expected = "row index out of bounds")]
+fn empty_row_views_reject_out_of_bounds_shared_indices() {
+    let matrix = Matrix::<3, 0, i32>::from_columns([]);
+    let _ = matrix.row(3);
+}
+
+#[test]
+#[should_panic(expected = "row index out of bounds")]
+fn empty_row_views_reject_out_of_bounds_mutable_indices() {
+    let mut matrix = Matrix::<3, 0, i32>::from_columns([]);
+    let _ = matrix.row_mut(3);
+}
+
+fn check_no_rows<const N: usize>() {
+    let mut matrix = Matrix::<0, N, i32>::from_columns([[]; N]);
+    for index in [0, usize::MAX] {
+        assert!(catch_unwind(|| {
+            let _ = matrix.row(index);
+        })
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            let _ = matrix.row_mut(index);
+        }))
+        .is_err());
+    }
+}
+
+#[test]
+fn zero_row_shapes_never_expose_a_row() {
+    check_no_rows::<0>();
+    check_no_rows::<3>();
+}
+
+#[test]
+fn nonempty_row_views_preserve_stride_and_only_mutate_selected_rows() {
+    let mut matrix = Matrix::<3, 2, i32>::from_columns([[1, 2, 3], [4, 5, 6]]);
+    for index in 0..3 {
+        assert_eq!(matrix.row(index).len(), 2);
+        assert!(matrix.row(index).get(2).is_none());
+    }
+    assert!(matrix.row(1).iter().copied().eq([2, 5]));
+    for value in matrix.row_mut(1).iter_mut() {
+        *value += 10;
+    }
+    assert_eq!(matrix.as_slice(), &[1, 12, 3, 4, 15, 6]);
+}
+
+#[test]
+fn empty_row_dot_products_return_the_additive_identity() {
+    let rows = Matrix::<3, 0, i32>::from_columns([]);
+    let columns = Matrix::<0, 1, i32>::from_columns([[]]);
+    for index in 0..3 {
+        assert_eq!(rows.row(index).dot(columns.column(0)), 0);
+        assert_eq!(rows.row(index).dot_partial(columns.column(0), 0..2), 0);
+    }
+}
+
+#[test]
+fn empty_column_views_accept_every_in_bounds_column() {
+    let mut matrix = Matrix::<0, 3, String>::from_columns([[], [], []]);
+    for index in 0..3 {
+        let column = matrix.column(index);
+        assert_eq!(column.len(), 0);
+        assert!(column.is_empty());
+        assert!(column.get(0).is_none());
+        assert_eq!(column.iter().count(), 0);
+
+        let column = matrix.column_mut(index);
+        assert!(column.get_mut(0).is_none());
+        assert_eq!(column.iter_mut().count(), 0);
+    }
+}
+
+#[test]
+fn empty_row_views_accept_large_in_bounds_indices_without_offsetting_storage() {
+    let mut matrix = Matrix::<{ usize::MAX }, 0, ()>::from_columns([]);
+    assert!(matrix.row(usize::MAX - 1).is_empty());
+    assert!(matrix.row_mut(usize::MAX - 1).is_empty());
+    assert!(catch_unwind(|| {
+        let _ = matrix.row(usize::MAX);
+    })
+    .is_err());
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        let _ = matrix.row_mut(usize::MAX);
+    }))
+    .is_err());
+}

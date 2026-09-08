@@ -111,6 +111,7 @@ fn main() {
 EOF
 cp tests/matrix_swap_contracts.rs "$consumer_dir/tests/matrix_swap_contracts.rs"
 cp tests/scalar_hook_contracts.rs "$consumer_dir/tests/scalar_hook_contracts.rs"
+cp tests/matrix_storage.rs "$consumer_dir/tests/matrix_storage.rs"
 cargo generate-lockfile --manifest-path "$consumer_dir/Cargo.toml"
 
 # Retain logs and fail immediately on any compile, link, runtime, or test error.
@@ -140,6 +141,7 @@ cp "$consumer_dir/Cargo.lock" "$out_dir/package-consumer-Cargo.lock"
 cp "$consumer_dir/src/main.rs" "$out_dir/package-consumer-main.rs"
 cp "$consumer_dir/tests/matrix_swap_contracts.rs" "$out_dir/package-consumer-matrix-swap-contracts.rs"
 cp "$consumer_dir/tests/scalar_hook_contracts.rs" "$out_dir/package-consumer-scalar-hook-contracts.rs"
+cp "$consumer_dir/tests/matrix_storage.rs" "$out_dir/package-consumer-matrix-storage.rs"
 cargo metadata --locked --manifest-path "$consumer_dir/Cargo.toml" --format-version 1 > "$out_dir/package-consumer-metadata.json"
 cargo tree --locked --manifest-path "$consumer_dir/Cargo.toml" --edges normal,build > "$out_dir/package-consumer-dependency-tree.txt"
 
@@ -159,6 +161,7 @@ cargo tree --locked --manifest-path "$consumer_dir/Cargo.toml" --edges normal,bu
     printf 'package_consumer_smoke=passed\n'
     printf 'package_consumer_smoke_mode=executed-default-and-std\n'
     printf 'package_consumer_contracts=swap-and-scalar-hooks-passed-debug-default-debug-std-release-default\n'
+    printf 'package_consumer_matrix_storage=passed-debug-default-debug-std-release-default\n'
     printf 'package_consumer_lock_sha256=%s\n' "$(sha256sum "$out_dir/package-consumer-Cargo.lock" | awk '{print $1}')"
     printf 'public_api_sha256=%s\n' "$(sha256sum "$out_dir/public-api.txt" | awk '{print $1}')"
     printf 'rustdoc_json_sha256=%s\n' "$(sha256sum "$out_dir/rustdoc-public-api.json" | awk '{print $1}')"
