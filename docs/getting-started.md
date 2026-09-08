@@ -5,12 +5,18 @@ matrix representation and solver.
 
 ## Install
 
-Add the crate to your Cargo project:
+This guide describes the `0.3` API. While `0.3.0` publication is pending,
+use the development source rather than an older registry release:
 
 ```toml
 [dependencies]
-stack-algebra = "0.2"
+stack-algebra = { git = "https://github.com/yongkyuns/stack-algebra", branch = "main" }
 ```
+
+For reproducible builds, replace `branch = "main"` with an exact reviewed
+`rev = "<commit>"`. After `0.3.0` is published, the registry dependency will be
+`stack-algebra = "0.3"`. These instructions do not assert that publication
+has already occurred. See the [release process](releasing.md) for its gates.
 
 The default crate is `no_std`. The fixed-size core stores data inline and does
 not require heap allocation.

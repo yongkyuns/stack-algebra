@@ -1,6 +1,6 @@
 # 0.3 stabilization plan
 
-Status: software qualification substantially complete; release-candidate evidence remains.
+Status: `0.3.0` metadata and release notes are being prepared; exact-release qualification and publication remain pending.
 
 `0.3` is a stabilization release for the existing dense, bounded, sparse, block-sparse, geometry, SIMD, and embedded-portability surface. Major algorithm expansion remains secondary to making the current contract predictable and measurable.
 
@@ -17,7 +17,7 @@ The project is not intended to replace Eigen, nalgebra, or faer for general larg
 3. **Resource contract** — representative operations have reproducible storage, stack, code-size, and target evidence with explicit evidence levels.
 4. **Scope contract** — unsupported workloads and unmeasured hardware claims are stated directly.
 
-The development version is `0.3.0-alpha.1` while intentional contract changes are being finalized.
+The manifest version is `0.3.0` for release preparation. This is not a publication record. Development and PR artifacts do not replace qualification of the final merged release commit; follow the [release process](releasing.md).
 
 ## Completed stabilization work
 
@@ -47,7 +47,7 @@ The development version is `0.3.0-alpha.1` while intentional contract changes ar
 
 ### Views and fused operations
 
-- Contiguous column-major `Map`/compatible `StridedMap` products and matvecs reuse optimized owned kernels without copying.
+- Contiguous column-major `Map`/compatible `StridedMap` products and matvecs reuse optimized owned-matrix kernels without copying.
 - Arbitrary/padded strides remain on the generic zero-copy path.
 - `axpy_in_place`, `axpy_into`, and `linear_combination_into` cover common estimation/control forms.
 - Focused fused-operation benchmarks are part of regression triage.
@@ -69,6 +69,8 @@ Short GitHub-hosted runs are regression triage only. Release-quality host perfor
 
 A pinned-machine run is required before publishing cross-library performance claims for the exact release. It is not necessary to invent a canonical performance number when no stable benchmark host is available; in that case, release without a cross-library release-performance claim.
 
+The current preparation makes no new cross-library release-performance claim and does not require another microbenchmark tuning cycle. Existing hosted reports remain historical evidence. A new optimization needs a representative workload, demonstrated bottleneck or resource-budget shortfall, and a general improvement whose maintenance cost is justified. Prefer the simplest portable implementation that meets the requirement; neither hide substantial repeatable regressions behind averages nor specialize code to remove every small timing fluctuation.
+
 ## Remaining 0.3 release checklist
 
 - [x] API/semver changes are intentional and documented.
@@ -79,7 +81,10 @@ A pinned-machine run is required before publishing cross-library performance cla
 - [x] Representative robotics/embedded examples execute in CI.
 - [x] Cortex-M QEMU/static resource evidence is reproducible, provenance-carrying, and protected by regression budgets.
 - [x] A physical Cortex-M timing harness exists and remains buildable.
-- [ ] Capture the release artifact snapshot for the **exact** `0.3.0` release commit.
+- [ ] Review and merge the `0.3.0` manifest/release notes; set the publication date only when publication is deliberately scheduled.
+- [ ] Verify the normal post-merge checks and capture the release artifact snapshot for the **exact** final `0.3.0` release commit.
+- [ ] Run the manual Release workflow on that same commit with expected version `0.3.0` and `publish=false`.
+- [ ] Obtain explicit publication approval, then publish and tag that exact commit through the [release process](releasing.md).
 - [ ] Run pinned-host release benchmarks for the exact release commit **if** cross-library release performance claims will be published.
 - [ ] Publish/update the combined documentation site from `main` for the release.
 

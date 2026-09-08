@@ -10,7 +10,7 @@ Predictable linear algebra for embedded and robotics workloads: fixed-size and t
 
 ## Status
 
-The development branch is currently `0.3.0-alpha.1`. The published crates.io version may therefore lag the API documented on the development branch. The declared and CI-tested MSRV for the `0.3` line is **Rust 1.87**.
+This source tree prepares **`0.3.0`**; publication is pending. The manifest version is not evidence of a crates.io release, and the published crate may lag the API documented here. The declared and CI-tested MSRV for the `0.3` line is **Rust 1.87**.
 
 - `cargo add stack-algebra` installs the current crates.io release.
 - The examples below describe the current `0.3` development API unless noted otherwise.
@@ -39,7 +39,7 @@ For the latest published crates.io release:
 cargo add stack-algebra
 ```
 
-The current guide and examples track the unreleased `0.3` development API. To evaluate that API directly from `main`:
+The current guide and examples track the `0.3` API being prepared for release. Until publication, evaluate that API directly from `main`:
 
 ```toml
 [dependencies]
