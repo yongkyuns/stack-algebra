@@ -110,3 +110,26 @@ The repository currently uses several complementary checks rather than treating 
 - numerical and public-API contracts verify that optimized paths retain the same observable results as the safe reference behavior.
 
 The `Unsafe audit` workflow enforces the review policy for new pull requests. If a PR adds an `unsafe` token to `src/**/*.rs`, it must also update this file so the new boundary and its validation can be reviewed explicitly.
+
+## Exact-layout sparse reuse fast path
+
+Fill-free lower input can be checked by exact CSC array equality instead of
+repeating per-entry searches. Factor coverage is proved by equal active entry
+counts, column starts, and row indices; unused capacity is not read.
+
+For LDLT source-map reuse, equality with the factor alone is not sufficient.
+The fast path also requires that the aggregate source count equals the factor
+off-diagonal count and every cached source diagonal equals its factor column
+start. All analyzed lower entries are contained in the factor; equal counts
+therefore rule out fill. The diagonal checks establish that all diagonals exist
+and that upper entries have not shifted source offsets. Under these conditions
+the analyzed input is exactly the factor's lower CSC layout, so the direct
+current-layout comparison proves every cached source coordinate and offset.
+Missing diagonals, fill, and full-storage schedules retain the entry-wise check.
+No hashes, pointer identity, new retained metadata, or unchecked loads are used.
+
+The internal reuse-validation tests independently compare both validators with
+coordinate-lookup references for 192 canonical 2x2 source/input pairs and
+110,592 canonical 3x3 pairs, including missing diagonals and upper-only numeric
+inputs. Native debug/release checks execute both; Miri executes the complete
+2x2 enumeration alongside all existing public sparse reuse/storage suites.
