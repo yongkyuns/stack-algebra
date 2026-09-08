@@ -95,7 +95,7 @@ fn repeated_maps_can_grow_and_shrink_destination() {
     let mut output = diagonal_map.apply(&diagonal);
     map.apply_into(&input, &mut output);
     assert_active(&output, &expected());
-    diagonal_map.apply_into(&input, &mut output);
+    diagonal_map.apply_into(&diagonal, &mut output);
     let diagonal_expected =
         Sparse::from_pattern(&[6.0, 4.0, 5.0], &[0, 1, 2], &[0, 1, 2, 3]).unwrap();
     assert_active(&output, &diagonal_expected);
