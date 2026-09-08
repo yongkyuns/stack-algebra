@@ -1,0 +1,64 @@
+name: Sparse permutation performance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/sparse/ordering.rs"
+      - "tools/sparse-permutation-bench/**"
+      - ".github/workflows/sparse-permutation-performance.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: Permutation harness checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - run: python3 -m unittest discover -s tools/sparse-permutation-bench -v
+      - run: cargo fmt --manifest-path tools/sparse-permutation-bench/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path tools/sparse-permutation-bench/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path tools/sparse-permutation-bench/Cargo.toml
+      - run: cargo run --release --manifest-path tools/sparse-permutation-bench/Cargo.toml -- --check
+
+  evidence:
+    name: Permutation comparison (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    needs: harness
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Measure paired permutation and refactorization calls
+        run: python3 tools/sparse-permutation-bench/compare.py --output permutation-evidence
+      - name: Add results to job summary
+        run: cat permutation-evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain raw samples and provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparse-permutation-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: permutation-evidence
+          if-no-files-found: error
+          retention-days: 90
