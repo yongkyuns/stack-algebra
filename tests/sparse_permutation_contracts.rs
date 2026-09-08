@@ -303,6 +303,7 @@ fn initialized_workspaces_rebuild_and_clone_without_stale_bounds() {
             assert_active(&output, &reference);
         }
     }
+    map.from_ordering_into(full.pattern(), order).unwrap();
     storage.write(map);
     StaticCscPermutation::new_into(&mut storage);
     // SAFETY: the second new_into call also initializes the entire workspace.

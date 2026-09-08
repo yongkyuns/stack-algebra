@@ -317,9 +317,9 @@ impl<const N: usize> StaticCscOrdering<N> {
             if original >= N || seen[original] {
                 return Err(CscError::InvalidPermutation);
             }
+            seen[original] = true;
             output.permutation[ordered] = original;
             output.inverse[original] = ordered;
-            seen[original] = true;
         }
         Ok(output)
     }
@@ -484,15 +484,19 @@ mod permutation_extent_tests {
     #[test]
     fn exhaustive_3x3_source_extent() {
         check_patterns::<3, 9>(&[
-            [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0],
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
         ]);
     }
 
     #[test]
     fn trailing_upper_entries_and_empty_rebuilds_use_exact_extent() {
-        let input =
-            StaticCscMatrix::<3, 3, 9, i32>::from_pattern(&[7, 99], &[0, 0], &[0, 1, 2, 2])
-                .unwrap();
+        let input = StaticCscMatrix::<3, 3, 9, i32>::from_pattern(&[7, 99], &[0, 0], &[0, 1, 2, 2])
+            .unwrap();
         let mut map = StaticCscOrdering::identity()
             .permutation_for_pattern(input.pattern())
             .unwrap();
