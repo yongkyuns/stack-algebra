@@ -95,7 +95,7 @@ fn repeated_maps_can_grow_and_shrink_destination() {
     let mut output = diagonal_map.apply(&diagonal);
     map.apply_into(&input, &mut output);
     assert_active(&output, &expected());
-    diagonal_map.apply_into(&diagonal, &mut output);
+    diagonal_map.apply_into(&input, &mut output);
     let diagonal_expected =
         Sparse::from_pattern(&[6.0, 4.0, 5.0], &[0, 1, 2], &[0, 1, 2, 3]).unwrap();
     assert_active(&output, &diagonal_expected);
@@ -135,7 +135,7 @@ fn zero_dimensional_permutations_remain_valid() {
 fn matching_pattern_numeric_updates_preserve_reuse() {
     let mut input = source();
     let map = ordering().permutation_for_pattern(input.pattern()).unwrap();
-    let mut output = StaticCscMatrix::zero_with_pattern(map.pattern());
+    let mut output = Sparse::zero_with_pattern(map.pattern());
     for scale in [1.0, 2.0, -3.0] {
         input
             .set_values(&[10.0 * scale, scale, 20.0 * scale, 2.0 * scale, 30.0 * scale])
@@ -355,8 +355,7 @@ fn shrinking_and_empty_permutations_preserve_inactive_values() {
     let map = StaticCscOrdering::identity()
         .permutation_for_pattern(input.pattern())
         .unwrap();
-    let mut output =
-        Small::from_pattern(&[100, 101, 102, 103], &[0, 1, 0, 1], &[0, 2, 4]).unwrap();
+    let mut output = Small::from_pattern(&[100, 101, 102, 103], &[0, 1, 0, 1], &[0, 2, 4]).unwrap();
 
     // Build the reference using public operations, not the permutation under
     // test. clear resets the pattern; ordered insertions overwrite only the
