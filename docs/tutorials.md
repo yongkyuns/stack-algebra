@@ -1,128 +1,182 @@
 # Tutorials
 
-Learn the library through small, complete examples. Each guided walkthrough
-starts with a model, explains the Rust calls in order, checks intermediate
-numbers, and ends with the full runnable source and focused test commands.
-The examples teach library usage, not full application frameworks or
-performance benchmarks.
+Learn `stack-algebra` by running a small program and understanding one part
+at a time. You do not need a background in navigation, robotics, or advanced
+mathematics. The walkthroughs explain the matrix and statistics terms when
+they first appear, and connect the code to numbers you can check yourself.
 
-| Walkthrough | What you will practice |
+**Start with fitting a line.** It introduces matrices as tables of numbers
+and shows how to ask the library for a result. Then try the Kalman filter,
+which updates an estimate as new readings arrive. Each page stands on its
+own; expandable sections contain extra mathematical or Rust details that you
+can skip on a first reading.
+
+| Walkthrough | The question you will answer |
 | --- | --- |
-| [Two-state Kalman filter](tutorial-kalman-1d.md) | Fixed-size state and covariance, prediction, a scalar observation, and an in-place vector correction |
-| [Fit a line from a borrowed buffer](tutorial-mapped-least-squares.md) | Column-major layout, `Map`, QR, typed errors, output reuse, and residual interpretation |
+| [Fit a line to a few measurements](tutorial-mapped-least-squares.md) | What straight line best describes five input/output pairs, and how far are the measurements from that line? |
+| [Follow a moving object](tutorial-kalman-1d.md) | How can a prediction and an imperfect position reading work together to estimate position and velocity? |
 
 ## Before you start
 
-Use Git and a stable Rust toolchain on a host computer. No microcontroller,
-sensor data, Python environment, or external C++ library is needed to run
-these examples. The published crate may lag the development API shown here;
-use the repository checkout rather than assuming a registry version matches.
+You will run these programs on your computer, not on a microcontroller. All
+the input numbers are already in the examples. No sensors, special hardware,
+Python setup, or external C++ library is needed.
 
-For a new checkout:
+You need Git and a stable Rust installation, including **Cargo**, Rust's tool
+for building and running programs. Open a terminal and check:
+
+```sh
+git --version
+rustc --version
+cargo --version
+```
+
+If a command is not found, install the corresponding tool before continuing.
+A little familiarity with variables, functions, and arrays will help you
+read the Rust, but you do not need to know matrix multiplication or fitting
+algorithms in advance. We explain references and other syntax where it is
+used.
+
+Copy the repository to a new folder and enter it:
 
 ```sh
 git clone https://github.com/yongkyuns/stack-algebra.git
 cd stack-algebra
-git rev-parse HEAD
-cargo run --example kalman_1d --no-default-features
+```
+
+Run the line-fitting example:
+
+```sh
 cargo run --example mapped_least_squares --no-default-features
 ```
 
-Record the commit printed by `git rev-parse HEAD` when sharing results. In an
-existing checkout, run the Cargo commands from the directory containing the
-repository's `Cargo.toml`; there is no need to create a new application crate.
-See [Getting started](getting-started.md) for using the library in your own
-project and choosing an exact dependency revision.
+`cargo run` builds and runs a program. `--example mapped_least_squares` picks
+the file with that name in the `examples` folder. Cargo may download Rust
+dependencies during the first build. The program then prints the fitted line
+and a small table of results, explained in the walkthrough.
 
-The example executables use `std` for printing while `--no-default-features`
-keeps the library in its `no_std` configuration. This is not a bare-metal
-executable or a browser-playground exercise.
+To run the other example:
 
-The walkthroughs include code from the example files in the **same source
-checkout** during the guide build. Their complete listings are not separately
-maintained implementations. GitHub source links point to `main`, which may
-advance after a particular copy of the guide was built. Partial excerpts need
-the surrounding program; use the complete listing or the Cargo command to run.
+```sh
+cargo run --example kalman_1d --no-default-features
+```
+
+If you already have the repository, use its existing folder instead of
+cloning again. Run the commands in the folder containing `Cargo.toml`, the
+file describing this Rust package. A “could not find Cargo.toml” message
+usually means you are in the wrong folder. You do not need `cargo new` or a
+separate application project to run these examples.
+
+The guide follows the development version in this repository. The version
+available from the package registry may be older, so installing it with
+`cargo add` is not a substitute for this checkout. To identify the source
+version you are using, run `git rev-parse HEAD`; include that identifier when
+reporting a problem. See [Getting started](getting-started.md) when you are
+ready to add the library to your own application.
+
+<details>
+<summary>Optional: what do std and no_std mean?</summary>
+
+Rust's standard library, `std`, supplies facilities such as printing to the
+terminal. These example programs use it to display their results.
+`stack-algebra` can perform its core calculations without that standard
+library; this is called `no_std` support and is useful on small devices.
+
+`--no-default-features` runs these examples with the library's default
+features disabled. Their algebra uses the no_std core, but the programs still
+run normally on your computer and print through std. You do not need an
+embedded target or the browser playground.
+
+</details>
+
+Each walkthrough shows excerpts and a complete listing from the actual
+example file, not a second implementation. Run the program with Cargo and
+read along; the excerpts are not standalone programs to paste together.
+The guide includes the code from its own source version. GitHub source links
+point to `main`, which can move ahead of a particular copy of the guide.
 
 ## Fixed-size dense algebra
 
-Use `Matrix<M, N, T>` when dimensions are known at compile time. The path is:
+A matrix is a table of numbers. `Matrix<M, N, T>` specifies its number of
+rows, number of columns, and number type. **Fixed-size** means those row and
+column counts are known when the program is compiled. **Dense** means we
+store every entry, including entries whose value is zero.
 
-1. Construct a matrix with `matrix!`, `Matrix::zeros`, or `Matrix::eye`.
-2. Compose products and reductions with the operators and `mul_into` methods.
-3. Choose a decomposition from the matrix assumptions.
-
-See [Getting started](getting-started.md), [API usage](api-usage.md), and the
-[`Matrix` API](api-reference.md).
+Both walkthroughs explain the table shapes they use. Afterward,
+[Getting started](getting-started.md) and [Choosing an API](api-usage.md)
+introduce more ways to create, multiply, and solve with matrices. The
+[API reference](api-reference.md) gives exact method signatures.
 
 ## A two-state Kalman filter
 
-[Follow the guided Kalman walkthrough](tutorial-kalman-1d.md) to build the
-position/velocity model, inspect its first prediction and scalar correction,
-and interpret the ten-sample output. It explains the discrete acceleration
-noise assumption, matrix shapes, `axpy_in_place`, and the readable 2x2 Joseph
-covariance expression. Exercises change one noise parameter at a time.
+[Follow the moving-object walkthrough](tutorial-kalman-1d.md). Start with a
+cart on a track and imperfect position readings, then learn how the program
+remembers position and velocity, predicts the next step, and corrects that
+prediction. The guide explains uncertainty and works through the first
+reading before showing the whole sequence.
 
-[Runnable source](https://github.com/yongkyuns/stack-algebra/blob/main/examples/kalman_1d.rs)
-and [separate correctness tests](https://github.com/yongkyuns/stack-algebra/blob/main/tests/kalman_1d.rs)
-remain small. This is a linear filter, not an EKF, ESKF, or navigation system.
+The [example source](https://github.com/yongkyuns/stack-algebra/blob/main/examples/kalman_1d.rs)
+and [automated tests](https://github.com/yongkyuns/stack-algebra/blob/main/tests/kalman_1d.rs)
+remain small. The goal is to understand the library calls through a simple
+model, not to build a complete tracking system.
 
 ## Views and external buffers
 
-Use `Map` for contiguous column-major storage and `StridedMap` when row or
-column spacing is supplied by another system. Use `Block` for fixed-size
-submatrices without copying. The view types borrow their source for the view's
-lifetime; use `Matrix::from_view` only when an owned snapshot is intentional.
-
-See [API usage — external buffers and views](api-usage.md) and the generated
-[view APIs](api-reference.md).
+A **buffer** is storage holding some numbers, such as a Rust array. A **view**
+lets the library treat those existing numbers as a matrix without creating
+another copy of all its entries. The original array continues to own the
+data. `Map` is the view used by the line-fitting example below.
 
 ### Fit a line from a caller-owned buffer
 
-[Follow the guided line-fitting walkthrough](tutorial-mapped-least-squares.md)
-to represent `y = a*x + b` with a borrowed 5x2 design buffer, solve with
-column-pivoted QR, and calculate fitted values and residuals using the same
-map. It distinguishes borrowed input from the factor's own storage and
-explains both a successful fit and a rank-deficient failure.
+[Follow the line-fitting walkthrough](tutorial-mapped-least-squares.md) to
+find a straight line through the overall pattern of five measurements.
+It explains slope and intercept, shows how the data are arranged in memory,
+asks the library to solve the problem, and interprets the differences left
+over. An experiment with repeated inputs shows why some data cannot determine
+a unique line.
 
-[Runnable source](https://github.com/yongkyuns/stack-algebra/blob/main/examples/mapped_least_squares.rs)
-and [separate correctness tests](https://github.com/yongkyuns/stack-algebra/blob/main/tests/mapped_least_squares.rs)
-show an unweighted fit to fixed perturbed observations, not a general
-regression framework.
+Open the [example source](https://github.com/yongkyuns/stack-algebra/blob/main/examples/mapped_least_squares.rs)
+or its [automated tests](https://github.com/yongkyuns/stack-algebra/blob/main/tests/mapped_least_squares.rs).
+For other memory layouts after this walkthrough, see
+[external buffers and views](api-usage.md) and the
+[view reference](api-reference.md).
 
 ## Dense factorizations
 
-Select a factorization from the input assumptions:
+A **factorization** prepares a matrix in a form that makes a calculation,
+such as solving equations, easier. You use QR in the line-fitting walkthrough;
+you do not need to learn all the other algorithms first.
 
-- `Cholesky` for symmetric positive-definite systems.
-- `Ldlt` for symmetric systems that may be indefinite.
-- `PartialPivLu` for general square systems.
-- `HouseholderQr` or `ColPivHouseholderQr` for least-squares systems.
-- `Svd` when rank information or a robust pseudoinverse is required.
-
-The [solver guide](api-usage.md) describes failure behavior, factor reuse, and
-output-reuse methods.
+When choosing an algorithm for your own problem, start with the
+[solver guide](api-usage.md). It explains when to use methods such as Cholesky,
+LU, QR, or SVD and how to handle a failed solve or reuse earlier work.
 
 ## Geometry
 
-Use `Quaternion`, `AngleAxis`, and `RotationMatrix` for rotations; use
-`Isometry` for rigid transforms and `AffineTransform` for general affine
-transforms. Keep the scalar type explicit and convert at boundaries with
-`cast`. The [feature set](features.md) lists the available representations and
-the [use-case guide](use-cases.md) shows how they compose with dense matrices.
+Geometry types describe rotations, movements, and changes of coordinate
+systems. For example, a rotation can describe turning an object without
+changing its size. You do not need these types for either walkthrough.
+See [Common use cases](use-cases.md) and
+[Capabilities and limits](features.md) when your problem involves geometry.
 
 ## Sparse and block-sparse systems
 
-Use `StaticCscPattern` and `StaticCscMatrix` when a scalar sparsity pattern is
-known. Use block sparse storage when repeated fixed-size blocks describe the
-problem more naturally. Build or reuse the symbolic pattern before numeric
-factorization; see [API usage — sparse storage](api-usage.md) and [use cases —
-sparse systems](use-cases.md).
+A **sparse** matrix has many zero entries. Sparse storage records the needed
+entries and their locations rather than storing a full table. Block-sparse
+storage groups entries into small rectangular blocks. These are later topics,
+not prerequisites for the tutorials above.
+
+Start with [sparse storage](api-usage.md) and
+[sparse use cases](use-cases.md) when you have a problem that needs them.
 
 ## Embedded and bounded workflows
 
-The fixed-size core is `no_std` and does not require a heap allocation. Use
-bounded storage when active dimensions vary within a compile-time limit, and
-map caller-owned memory when the buffer belongs to a device or driver. The
-[feature set](features.md) and [use cases](use-cases.md) describe the supported
-boundaries; target-specific validation remains separate from the API guide.
+**Embedded** programs run inside devices, sometimes with very little memory.
+**Bounded** storage reserves room for a maximum size while allowing a smaller
+active size. These are reasons to choose explicit storage, but you can learn
+and use the library on a desktop computer too.
+
+The [platform guide](targets.md), [capability guide](features.md), and
+[use cases](use-cases.md) explain these options. The small teaching examples
+are for learning the API, not for measuring application performance.

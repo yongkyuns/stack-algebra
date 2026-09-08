@@ -1,185 +1,253 @@
-# Walkthrough: fit a line from a borrowed buffer
+# Walkthrough: fit a line to a few measurements
 
-Fit `y = a*x + b` to five observations. You will describe a matrix using
-caller-owned storage, solve for slope and intercept with column-pivoted QR,
-and evaluate predictions without constructing a separate owned design matrix.
-The goal is to learn the existing view and solver APIs, not to build a
-regression framework.
+Suppose you have five pairs of numbers. As the first number increases, the
+second seems to increase too, but the pairs do not follow an exact rule. Can
+we find a straight line that describes their overall pattern?
 
-Start with [the shared setup](tutorials.md#before-you-start). Basic Rust
-references and matrix multiplication are sufficient; you do not need to
-implement QR yourself. [Open the example source](https://github.com/yongkyuns/stack-algebra/blob/main/examples/mapped_least_squares.rs)
-or use the [complete listing](#complete-runnable-example) below. The excerpts
-and full listing are included from the actual example at documentation-build
-time. Excerpts are parts of that program, not independent programs to join.
+That is what this example does. You will ask `stack-algebra` to find the line,
+then compare its answers with the original measurements. Along the way, you
+will learn how to let the library read numbers already stored in a Rust array.
+You do not need previous experience with matrices, statistics, or QR.
 
-From the repository root:
+Start with [the setup instructions](tutorials.md#before-you-start). From the
+repository folder, run:
 
 ```sh
 cargo run --example mapped_least_squares --no-default-features
 ```
 
-This is a host executable with `std` printing and a `no_std` library
-configuration. Run it through Cargo locally, not the browser playground.
+The first result is `slope = 1.970, intercept = 1.060`. We will explain both
+numbers below. The code excerpts come from the
+[working example](https://github.com/yongkyuns/stack-algebra/blob/main/examples/mapped_least_squares.rs).
+They show parts of that program; you do not need to assemble them. The
+[complete program](#complete-runnable-example) is at the end.
 
-## 1. Turn the model into a small linear system
+## 1. Describe the line we want to find
 
-For each observation, `y_i ~= a*x_i + b`. The unknown coefficient vector is
-`c = [a, b]^T`. Put one observation in each row of a design matrix `A`:
+Here are the example's input pairs. An **observation** is simply one of the
+measured `y` values.
+
+| Input `x` | Observed `y` |
+| --- | --- |
+| 0 | 1.1 |
+| 1 | 2.9 |
+| 2 | 5.2 |
+| 3 | 6.8 |
+| 4 | 9.0 |
+
+A straight line can be written as:
 
 ```text
-A: 5x2                 c: 2x1         y: 5x1
-   [0  1]                 [a]           [1.1]
-   [1  1]                 [b]           [2.9]
-   [2  1]                               [5.2]
-   [3  1]                               [6.8]
-   [4  1]                               [9.0]
-
-Find c that minimizes ||y - A*c||^2.
+y = a * x + b
 ```
 
-There are five observations and only two coefficients. The fixed observations
-are slightly perturbed rather than exactly on a line, so an exact solution to
-all five equations is not expected. The fit treats `x` as known and gives
-every observation equal weight. It does not model uncertainty in `x`, apply
-robust outlier rejection, or generate random samples.
+The **slope**, `a`, says how much `y` changes when `x` increases by one.
+The **intercept**, `b`, is the line's value at `x = 0`. For example, the line
+`y = 2*x + 1` starts at `1` and increases by `2` for every step in `x`.
 
-## 2. Lay out and borrow the design buffer
+Our measurements are close to that line, but not exactly on it. We will find
+`a` and `b` that make the total of the **squared differences** between the
+measurements and the line as small as possible. Squaring prevents positive
+and negative differences from cancelling each other. This choice of what to
+minimize is called **least squares**.
 
-Each conceptual row is `[x_i, 1]`, but `Map` expects contiguous
-**column-major** data: all five `x` values first, then all five ones.
+Each measurement gets equal weight. We treat the `x` values as known and put
+the differences in `y`; we are not also fitting errors in `x`. These five
+pairs are fixed teaching data, not random values generated each time you run.
+
+## 2. Put the calculation into a table of numbers
+
+A **matrix** is a rectangular table of numbers. Rows go across; columns go
+down. A **vector** here is a table with a single column.
+
+We need one row for each sample and two columns for the two unknowns, `a` and
+`b`. The row `[x, 1]` describes `x*a + 1*b`. For example, the row `[2, 1]`
+means `2*a + b`.
+
+```text
+Design matrix A       Coefficients       Observations
+(5 rows, 2 columns)   (2 rows, 1 column)  (5 rows, 1 column)
+
+[0  1]               [a]                 [1.1]
+[1  1]               [b]                 [2.9]
+[2  1]                                   [5.2]
+[3  1]                                   [6.8]
+[4  1]                                   [9.0]
+```
+
+The term **design matrix** means this table of inputs to the fitting problem.
+Multiplying it by the coefficient vector calculates `a*x + b` for every row.
+You can read that multiplication as five ordinary calculations, not as a new
+kind of model.
+
+The example stores the table in a flat Rust array:
 
 ```rust,noplayground
 {{#include ../examples/mapped_least_squares.rs:12:16}}
 ```
 
-**Layout checkpoint:** `A[(row, column)]` reads
-`DESIGN_STORAGE[column * 5 + row]`. For instance, `A[(3, 0)]` is `3.0`,
-and `A[(3, 1)]` is `1.0`. Interleaving `[x_0, 1, x_1, 1, ...]` would instead
-be a row-major layout and would represent the wrong matrix through this map.
+Why are all the `x` values together? The library's `Map` reads the array
+**one column at a time**: first `[0, 1, 2, 3, 4]`, then `[1, 1, 1, 1, 1]`.
+This arrangement is called **column-major** storage. A **buffer** is the
+array holding those numbers.
 
-Create the view and observation vector:
+**Check your understanding:** the fourth row is `[3, 1]`. Rust counts from
+zero, so its entries are `design[(3, 0)]` and `design[(3, 1)]`. Writing the
+array as alternating `x, 1` pairs would give `Map` a different table. The
+buffer length alone cannot tell the library which arrangement you intended.
+
+## 3. Let the library borrow the array
 
 ```rust,noplayground
 {{#include ../examples/mapped_least_squares.rs:31:32}}
 ```
 
 [`Map::from_slice`](api/stack_algebra/struct.Map.html#method.from_slice)
-checks the buffer length and borrows its storage. `Map<5, 2, f64>` describes
-five rows and two columns without owning ten new matrix entries. In the
-helper signature, the lifetime in `Map<'_, 5, 2, f64>` ties the view to the
-borrowed input; that input must remain alive while the view is used.
+creates a **view**: a way to read the existing array as a matrix without
+making another array of its entries. The array still owns the numbers; the
+view borrows them. The `&` before `DESIGN_STORAGE` passes a reference to that
+existing array.
+
+Read `Map::<5, 2, f64>` as “view these numbers as five rows and two columns of
+`f64` values.” `f64` is Rust's 64-bit floating-point number type, used here for
+numbers with decimal parts. `from_slice` checks that the buffer length is
+appropriate. `expect(...)` asks for the successful result or stops the program
+with a message if creation fails. Our fixed array has the correct length.
 
 [`Matrix::from_columns`](api/stack_algebra/struct.Matrix.html#method.from_columns)
-constructs one column containing the five observations. The small owned
-observation vector is intentional. The example avoids an owned **design**
-copy; it is not claiming that every value in the computation is a view.
+creates a separate, small column of the five observations. The example avoids
+copying the **design table** into another matrix; it does still store the
+observations and results.
 
-For genuinely strided input, choose an appropriate
-[`StridedMap`](api/stack_algebra/struct.StridedMap.html) rather than pretending
-the same buffer is contiguous column-major.
+<details>
+<summary>Optional: what does the lifetime notation mean?</summary>
 
-## 3. Factor the borrowed design and solve
+In the helper below, `Map<'_, 5, 2, f64>` includes `'_`, a lifetime inferred
+by Rust. It keeps the borrowed array alive for as long as the view needs it.
+You do not need to choose or write a lifetime name for this example.
 
-The fitting helper is short enough to read in full:
+If a real buffer has gaps between rows or columns, use
+[`StridedMap`](api/stack_algebra/struct.StridedMap.html) to describe those gaps.
+The `Map` in this example is for consecutive column-major entries.
+
+</details>
+
+## 4. Ask the library to find the line
+
+The example's fitting helper is:
 
 ```rust,noplayground
 {{#include ../examples/mapped_least_squares.rs:18:27}}
 ```
 
-[`ColPivHouseholderQr::try_decompose_view`](api/stack_algebra/struct.ColPivHouseholderQr.html#method.try_decompose_view)
-accepts the map directly. QR reads the design into the factor object's own
-inline storage and computes its factors there. The caller's buffer is not
-modified. This avoids a separate owning input matrix, but **QR still has
-factor storage**: it is not a workspace-free or in-place factorization of the
-borrowed slice.
-
+There are two main calls. First,
+[`try_decompose_view`](api/stack_algebra/struct.ColPivHouseholderQr.html#method.try_decompose_view)
+prepares the design table for solving. Then,
 [`try_solve_least_squares`](api/stack_algebra/struct.ColPivHouseholderQr.html#method.try_solve_least_squares)
-uses those factors to solve the least-squares problem. The example does not
-form an inverse or explicitly build `A^T*A`. Column pivoting can rearrange
-columns internally; the returned coefficients are restored to the original
-column order, so entry zero is the slope and entry one is the intercept.
+uses that preparation and the observations to find `a` and `b`.
 
-The return type is `Result<Matrix<2, 1, f64>, DecompositionError>`. The `?`
-propagates a decomposition error immediately; the final expression returns the
-solve result. This helper is part of the example, not a new library API.
+The long type name, `ColPivHouseholderQr`, selects the library's QR algorithm.
+For this tutorial, its role is to find the best-fitting coefficients from
+more measurements than unknowns. You do not need to implement or derive QR.
+The returned numbers follow our original column order: slope first,
+intercept second.
 
-The executable calls it with its fixed, valid inputs:
+The design array is read, not modified. QR stores its working numbers in its
+own factor object, named `factor` here. Borrowing the input avoids a separate
+input-matrix copy; it does **not** mean the solving algorithm needs no storage.
+
+The helper returns a Rust `Result`: either the two coefficients on success
+or a `DecompositionError` explaining why solving failed. The `?` returns an
+error to the caller immediately instead of continuing with invalid factors.
+The last expression returns the solve result.
+
+The program calls the helper like this:
 
 ```rust,noplayground
 {{#include ../examples/mapped_least_squares.rs:33}}
 ```
 
-`expect` is appropriate here only because the teaching data are known. A
-caller accepting arbitrary inputs should handle the returned error instead
-of assuming a solution always exists.
+Again, `expect` is used because these fixed inputs are known to work. A
+program accepting arbitrary user data should handle the error instead. We
+will deliberately try an unsuccessful input in step 7.
 
-## 4. Check what the coefficients mean
+## 5. Read the answer and calculate the differences
 
-For these samples, the coefficients are approximately:
-
-```text
-a = 1.970
-b = 1.060
-fitted_y = 1.970*x + 1.060
-```
-
-An independent scalar calculation provides a useful checkpoint without
-repeating QR:
+For these samples, the answer is:
 
 ```text
-mean_x = 2                 mean_y = 5
-sum((x_i - mean_x)^2)                    = 10
-sum((x_i - mean_x)*(y_i - mean_y))        = 19.7
-slope     = 19.7 / 10                    = 1.97
-intercept = mean_y - slope * mean_x      = 1.06
+slope     = 1.970
+intercept = 1.060
+fitted_y  = 1.970 * x + 1.060
 ```
 
-These are reference calculations for this simple model, not another solver
-inside the executable. The separate integration tests use centered scalar
-regression to check the library result.
+So the line starts at `1.060`, and its value increases by `1.970` for each
+unit of `x`. At `x = 2`, it predicts `1.970*2 + 1.060 = 5.000`.
 
-## 5. Evaluate predictions into an output vector
-
-Use the same borrowed design to calculate `A*c`:
+This code calculates that prediction for all five inputs:
 
 ```rust,noplayground
 {{#include ../examples/mapped_least_squares.rs:35:38}}
 ```
 
-[`Map::matvec_into`](api/stack_algebra/struct.Map.html#method.matvec_into)
-reads the design and coefficient vector and writes all five predictions into
-`fitted`. The caller explicitly provides that output. There is no conversion
-of `design` into an owned matrix for this multiplication.
+`fitted` starts as five zeros. The name
+[`matvec_into`](api/stack_algebra/struct.Map.html#method.matvec_into) means
+“multiply a matrix by a vector and write into this output.” It fills `fitted`
+with the five predictions. `&coefficients` lets it read the coefficients;
+`&mut fitted` lets it change the output. The design is still the same borrowed
+view, not a newly constructed input matrix.
 
-The subtraction produces `residuals = observed - fitted`. A positive residual
-means the observation is above the fitted line; a negative residual means it
-is below. For example, at `x = 2`, the fitted value is `5.0` and the observation
-is `5.2`, giving residual `+0.2`.
-
-**Checkpoint for the full residual vector:**
+A **residual** is a remaining difference: **observed minus fitted**. At
+`x = 2`, it is `5.2 - 5.0 = 0.2`. Positive means the observation is above the
+line; negative means it is below.
 
 ```text
-fitted_y = [1.06, 3.03, 5.00, 6.97, 8.94]
-residual = [0.04, -0.13, 0.20, -0.17, 0.06]
-sum(residual_i^2) = 0.091
-||residual||     = sqrt(0.091) ~= 0.301662
+fitted values = [1.06, 3.03, 5.00, 6.97, 8.94]
+residuals     = [0.04, -0.13, 0.20, -0.17, 0.06]
 ```
 
-[`Matrix::norm`](api/stack_algebra/struct.Matrix.html#method.norm) gives the
-Euclidean norm for this column vector. It is **not** a mean absolute error or
-root-mean-square error; the latter would also divide the squared sum by the
-number of samples before taking the square root.
+The residuals are not all zero because the samples do not lie on one straight
+line. That is expected, not a solver failure.
 
-At the least-squares solution, `A^T*residual` is approximately zero. For the
-written decimal data, both `sum(residual_i)` and `sum(x_i*residual_i)` are zero
-in exact arithmetic. The tests check these relationships with tolerances.
-A nonzero residual norm is normal: the solution minimizes it, rather than
-forcing all observations onto a perfect line.
+The last printed value is a **norm**, one number summarizing the size of all
+five residuals. For this vector,
+[`norm`](api/stack_algebra/struct.Matrix.html#method.norm) squares the entries,
+adds them, and takes the square root:
+
+```text
+sum of squares = 0.04^2 + (-0.13)^2 + 0.20^2 + (-0.17)^2 + 0.06^2
+               = 0.091
+residual norm  = square root of 0.091, about 0.302
+```
+
+This is not an average error; the calculation does not divide by the number
+of samples. Least squares minimizes this norm, or equivalently its square.
+
+<details>
+<summary>Optional: check the answer without using QR</summary>
+
+For a line with an intercept, there is also a direct calculation using
+averages. Let `mean_x` be the average of the `x` values and `mean_y` the
+average of the `y` values. The sums below run over all five samples.
+
+```text
+mean_x = 2                           mean_y = 5
+sum((x - mean_x)^2)                  = 10
+sum((x - mean_x)*(y - mean_y))        = 19.7
+slope     = 19.7 / 10                = 1.97
+intercept = mean_y - slope * mean_x  = 1.06
+```
+
+Two further checks are that the residuals sum to approximately zero and that
+the sum of `x * residual` is approximately zero. In matrix notation this is
+`A^T * residual = 0`, where `A^T` swaps the rows and columns of `A`.
+It is called residual **orthogonality**. These checks hold for this
+unweighted least-squares fit; they are not general rules for every fitting
+method. The tests allow small differences caused by floating-point rounding.
+
+</details>
 
 ## 6. Compare the complete output
-
-The program prints the coefficients, then each observation and its prediction:
 
 ```text
 slope = 1.970, intercept = 1.060
@@ -192,62 +260,77 @@ x observed_y fitted_y residual
 residual norm = 0.302
 ```
 
-The values are rounded for display. Use numerical tolerances rather than
-requiring identical floating-point representations when checking a solution.
-The sample fit is a teaching example, not a performance or accuracy claim
-about a larger application.
+Read each row as “at this input, here is what was measured, what the line
+predicts, and what difference remains.” The program rounds the displayed
+values; the calculations keep more digits.
 
-## 7. Explore a success case and a failure case
+## 7. Try a change
 
-For an exact-line experiment, keep the design and change observations to
-`[1.0, 3.0, 5.0, 7.0, 9.0]`. You should recover slope `2` and intercept `1`,
-with residuals close to zero in floating-point arithmetic.
+Open `examples/mapped_least_squares.rs` and change only `OBSERVATIONS` to
+`[1.0, 3.0, 5.0, 7.0, 9.0]`. Run the same Cargo command. These values lie
+exactly on `y = 2*x + 1`, so the slope should be `2`, the intercept `1`, and
+the residuals close to zero. A tiny remaining value can be rounding error.
 
-For a rank-deficiency experiment, restore the observations and change the
-**first five design entries** to `2.0`, leaving the ones column unchanged.
-Every row then says `y_i ~= 2*a + b`. The data constrain only that combination,
-not slope and intercept separately. The helper returns
-[`DecompositionError::Singular`](api/stack_algebra/enum.DecompositionError.html#variant.Singular);
-the executable's final `expect` therefore panics instead of printing a fit.
+Next, restore the observations and set the **first five entries** of
+`DESIGN_STORAGE` to `2.0`. Leave the final five ones unchanged. Every input
+is now at the same `x`. We can no longer tell how the line changes as `x`
+changes: many slope/intercept pairs give the same value at `x = 2`.
 
-A design or observation containing NaN or either infinity returns
-[`DecompositionError::NonFinite`](api/stack_algebra/enum.DecompositionError.html#variant.NonFinite).
-Finite input alone is not a success guarantee: the design must also have
-full column rank at the solver's numerical threshold. This walkthrough does
-not promise reliable coefficients for arbitrarily ill-conditioned data.
+This lack of enough distinct information is called **rank deficiency**. The
+helper returns
+[`Singular`](api/stack_algebra/enum.DecompositionError.html#variant.Singular),
+and the example's `expect` stops the program with an error message. That
+failure is the expected result of this experiment.
 
-Restore the original input constants before checking the documented output or
-running the unchanged reference tests. The helper assumes the second column
-contains ones for a line fit; it is not an input-schema validator for a general
-regression model.
+The solver also rejects NaN (“not a number”) and infinity with
+[`NonFinite`](api/stack_algebra/enum.DecompositionError.html#variant.NonFinite).
+Inputs that are almost indistinguishable can also be numerically difficult;
+having ordinary finite numbers is not a promise of a reliable fit for every
+data set. The helper expects the second design column to contain ones for
+this model.
 
-## 8. Run the focused correctness checks
+Restore the original constants before comparing with the printed output or
+running the tests below.
+
+## 8. Run the checks
 
 ```sh
 cargo test --no-default-features --test mapped_least_squares
+```
+
+This runs six automated checks of the actual example helper. They compare
+against an independent calculation, check predictions and differences, fit
+an exact line, confirm the input array is unchanged, and try invalid inputs.
+The [test source](https://github.com/yongkyuns/stack-algebra/blob/main/tests/mapped_least_squares.rs)
+is separate so the teaching program stays short.
+
+<details>
+<summary>Optional: run the other tested build configurations</summary>
+
+`--features std` enables the library's standard-library support. `--release`
+uses compiler optimization; it does not publish anything.
+
+```sh
 cargo test --features std --test mapped_least_squares
 cargo test --release --no-default-features --test mapped_least_squares
 ```
 
-The [six integration tests](https://github.com/yongkyuns/stack-algebra/blob/main/tests/mapped_least_squares.rs)
-import the actual helper. They check independent centered regression,
-hand-calculated predictions and residuals including orthogonality, an exact
-line with reordered samples, pointer identity and input preservation for the
-borrowed map, rank deficiency, and non-finite inputs in both the design and
-observations. The checks are kept out of the small runnable example.
+</details>
 
 ## Complete runnable example
 
-This is the actual `examples/mapped_least_squares.rs` source included during
-the guide build. Run it using the Cargo command above. `pub(crate)` allows the
-integration tests to call the helper within their crate, while
-`#[cfg(not(test))]` excludes the printing entry point when they import it.
-Neither adds a public fitting API to `stack-algebra`.
+This listing comes directly from the example file. Run it with the Cargo
+command at the start rather than pasting each excerpt into a new project.
+`pub(crate)` makes the helpers available to the tests that include this file;
+`#[cfg(not(test))]` leaves out the printing entry point in those tests. They
+are example-organization details, not additional steps in fitting the line.
 
 ```rust,noplayground
 {{#include ../examples/mapped_least_squares.rs}}
 ```
 
-Continue with the [two-state Kalman walkthrough](tutorial-kalman-1d.md),
-consult [solver choices and reuse](api-usage.md), or return to the
-[tutorial overview](tutorials.md).
+You have used a borrowed matrix, asked the library to solve a small problem,
+and checked what the result means. Continue with
+[tracking position from changing readings](tutorial-kalman-1d.md), or return
+to the [tutorial overview](tutorials.md). For other solving methods, see
+[Choosing an API](api-usage.md).

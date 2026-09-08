@@ -7,8 +7,8 @@
 
 - [Choosing an API](api-usage.md)
 - [Tutorials](tutorials.md)
-  - [Two-state Kalman filter](tutorial-kalman-1d.md)
-  - [Fit a line from a borrowed buffer](tutorial-mapped-least-squares.md)
+  - [Fit a line to measurements](tutorial-mapped-least-squares.md)
+  - [Follow a moving object](tutorial-kalman-1d.md)
 - [Common use cases](use-cases.md)
 
 ## Reference
