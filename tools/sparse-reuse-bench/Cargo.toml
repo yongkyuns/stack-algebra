@@ -1,0 +1,15 @@
+[package]
+name = "sparse-reuse-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+stack-algebra = { path = "../..", default-features = false }
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = false
