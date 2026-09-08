@@ -1,0 +1,71 @@
+name: Sparse reuse performance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/sparse-reuse-bench/**"
+      - ".github/workflows/sparse-reuse-performance.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Benchmark harness checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --manifest-path tools/sparse-reuse-bench/Cargo.toml -- --check
+      - run: python3 -m py_compile tools/sparse-reuse-bench/compare.py
+      - run: cargo clippy --manifest-path tools/sparse-reuse-bench/Cargo.toml -- -D warnings
+      - run: cargo run --manifest-path tools/sparse-reuse-bench/Cargo.toml -- check
+      - run: cargo run --release --manifest-path tools/sparse-reuse-bench/Cargo.toml -- check
+
+  measure:
+    name: Paired measurements (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Compare fixed revisions on the same runner
+        run: >-
+          python3 tools/sparse-reuse-bench/compare.py
+          --candidate "$SOURCE_SHA" --rounds 12
+          --output "$RUNNER_TEMP/sparse-reuse"
+      - name: Add measurements to summary
+        run: cat "$RUNNER_TEMP/sparse-reuse/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain measurements and build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparse-reuse-${{ matrix.arch }}-${{ env.SOURCE_SHA }}
+          path: ${{ runner.temp }}/sparse-reuse
+          if-no-files-found: error
+          retention-days: 90
