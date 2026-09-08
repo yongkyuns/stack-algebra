@@ -853,17 +853,20 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         for row in 0..N {
             let start = matrix.column_starts()[row] as usize;
             let end = matrix.column_end(row).unwrap_or(matrix.nnz());
-            input_lower_nnz += rows[start..end]
-                .iter()
-                .filter(|&&candidate| candidate as usize >= row)
-                .count();
-
             let diagonal = self.input_diagonal_indices[row];
             if diagonal != u32::MAX {
                 scheduled_lower_nnz += 1;
                 if !matches_entry(row, row, diagonal as usize) {
                     return false;
                 }
+                // Canonical rows are strictly increasing. Once the diagonal's
+                // coordinate and range are checked, it starts the lower suffix.
+                input_lower_nnz += end - diagonal as usize;
+            } else {
+                input_lower_nnz += rows[start..end]
+                    .iter()
+                    .filter(|&&candidate| candidate as usize >= row)
+                    .count();
             }
 
             let update_start = self.aggregate_update_starts[row] as usize;
