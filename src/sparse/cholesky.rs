@@ -690,6 +690,10 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
     }
 
     /// Computes a fixed-capacity sparse LDLᵀ factorization using this pattern.
+    ///
+    /// Cached source offsets are checked against the current CSC layout. A
+    /// changed layout that fits the analyzed factor uses a checked fallback;
+    /// uncovered entries return [`SparseCholeskyError::PatternMismatch`].
     #[inline]
     pub fn factor_ldlt<const MAX_A_NNZ: usize, T: Real + Zero>(
         &self,
@@ -724,8 +728,8 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         self.factor_ldlt_natural_into(matrix, true, false, output)
     }
 
-    /// Refactors sparse LDLᵀ values without repeating symmetry or pattern
-    /// validation. The matrix must retain its analyzed sparsity pattern.
+    /// Refactors sparse LDLᵀ values without repeating symmetry validation.
+    /// Cached source offsets are checked; changed layouts validate factor coverage.
     #[inline]
     pub(crate) fn refactorize_ldlt<const MAX_A_NNZ: usize, T: Real + Zero>(
         &self,
@@ -742,6 +746,9 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
     }
 
     /// Factors already ordered lower-triangular coordinates with LDLᵀ.
+    ///
+    /// The input must use this pattern's coordinate ordering. Changes to its
+    /// CSC storage layout are handled as in [`Self::factor_ldlt`].
     #[inline]
     pub fn factor_ldlt_ordered<const MAX_A_NNZ: usize, T: Real + Zero>(
         &self,
@@ -788,7 +795,9 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
         output: &mut StaticCscLdlt<N, MAX_L_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
-        self.factor_ldlt_natural_into(matrix, false, false, output)?;
+        // The caller may supply a different reusable factor of the same capacity.
+        // Install this pattern before the numeric kernel borrows its value storage.
+        self.factor_ldlt_natural_into(matrix, false, true, output)?;
         output.ordering = self.ordering;
         Ok(())
     }
@@ -800,7 +809,10 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         copy_pattern: bool,
         output: &mut StaticCscLdlt<N, MAX_L_NNZ, T>,
     ) -> Result<(), SparseCholeskyError> {
-        if N != 0 && self.input_diagonal_indices[0] != u32::MAX {
+        if N != 0
+            && self.input_diagonal_indices[0] != u32::MAX
+            && self.matches_aggregate_input(matrix)
+        {
             return self.factor_ldlt_natural_into_aggregate(
                 matrix,
                 validate_pattern,
@@ -808,7 +820,60 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
                 output,
             );
         }
-        self.factor_ldlt_natural_into_left_looking(matrix, validate_pattern, copy_pattern, output)
+        // A different source layout invalidates both cached source offsets and
+        // the numeric reach schedule. Re-read the input through the checked
+        // algorithm, validating factor coverage before changing the output.
+        self.factor_ldlt_natural_into_left_looking(matrix, true, copy_pattern, output)
+    }
+
+    fn matches_aggregate_input<const MAX_A_NNZ: usize, T: Copy + Zero>(
+        &self,
+        matrix: &StaticCscMatrix<N, N, MAX_A_NNZ, T>,
+    ) -> bool {
+        let rows = matrix.row_indices();
+        let matches_entry = |row: usize, column: usize, index: usize| {
+            let start = matrix.column_starts()[column] as usize;
+            let end = matrix.column_end(column).unwrap_or(matrix.nnz());
+            index >= start && index < end && rows.get(index).copied() == Some(row as u32)
+        };
+
+        let mut input_lower_nnz = 0;
+        let mut scheduled_lower_nnz = self.aggregate_update_nnz;
+        for row in 0..N {
+            let start = matrix.column_starts()[row] as usize;
+            let end = matrix.column_end(row).unwrap_or(matrix.nnz());
+            input_lower_nnz += rows[start..end]
+                .iter()
+                .filter(|&&candidate| candidate as usize >= row)
+                .count();
+
+            let diagonal = self.input_diagonal_indices[row];
+            if diagonal != u32::MAX {
+                scheduled_lower_nnz += 1;
+                if !matches_entry(row, row, diagonal as usize) {
+                    return false;
+                }
+            }
+
+            let update_start = self.aggregate_update_starts[row] as usize;
+            let update_end = if row + 1 < N {
+                self.aggregate_update_starts[row + 1] as usize
+            } else {
+                self.aggregate_update_nnz
+            };
+            for update in update_start..update_end {
+                let column = self.aggregate_update_columns[update] as usize;
+                let index = self.aggregate_update_indices[update] as usize;
+                if !matches_entry(row, column, index) {
+                    return false;
+                }
+            }
+        }
+
+        // Canonical CSC coordinates are unique. Matching every cached lower
+        // entry plus the total count rules out missing or newly added entries,
+        // including new entries occupying fill positions in the factor.
+        input_lower_nnz == scheduled_lower_nnz
     }
 
     fn factor_ldlt_natural_into_aggregate<const MAX_A_NNZ: usize, T: Real + Zero>(
@@ -843,8 +908,10 @@ impl<const N: usize, const MAX_L_NNZ: usize> StaticCscCholeskyPattern<N, MAX_L_N
         let numeric_pattern_columns = self.numeric_pattern_columns.as_ptr();
         let aggregate_update_columns = self.aggregate_update_columns.as_ptr();
 
-        // SAFETY: symbolic analysis validates every fixed-capacity schedule,
-        // row index, and source index used below before numeric factorization.
+        // SAFETY: symbolic analysis validates the immutable factor schedules.
+        // The dispatcher also verifies every cached source index and coordinate
+        // against this numeric input before entering this kernel. The output
+        // is initialized and has the same lower pattern as these schedules.
         unsafe {
             for column in 0..N {
                 let diagonal_index = *factor_column_starts.add(column) as usize;

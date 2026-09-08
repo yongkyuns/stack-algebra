@@ -70,6 +70,35 @@ Miri and native ARM64 include it alongside the existing numerical contracts.
 
 Sparse storage occasionally uses lower-level initialization techniques to avoid heap allocation while constructing fixed-capacity buffers. Every element must be initialized before it is observed, and capacity/length bookkeeping must prevent reads beyond the initialized prefix. Sparse and mapped-view suites are included in Miri CI specifically to exercise these invariants.
 
+### Cached sparse LDLT schedules
+
+Symbolic analysis alone does not validate cached source indices for every
+subsequent numeric matrix. The safe LDLT entry points accept independently
+constructed canonical CSC matrices, potentially with different capacities,
+column starts, upper-triangle storage, and lower coordinates. Factor-pattern
+coverage is not proof that a cached numeric source offset remains valid.
+
+Before entering the unchecked aggregate kernel, `matches_aggregate_input`
+checks each cached diagonal and off-diagonal source index against the current
+column range and row coordinate. It also compares the total lower-entry count.
+Canonical coordinate uniqueness makes these exact checks sufficient to rule
+out missing, moved, or added lower entries; no hash or pointer identity is used.
+The check uses safe borrowed slices and adds no retained storage or allocation.
+
+A changed source layout takes the existing checked left-looking algorithm,
+which validates factor coverage before modifying reusable output. Ordered
+LDLT recomputation installs the supplied symbolic lower pattern before taking
+raw pointers to output values, even when the destination previously held a
+different factor. Numeric-failure rollback is not promised by these in-place
+APIs; structural mismatch is rejected before output mutation.
+
+`tests/sparse_reuse_contracts.rs` covers empty/smaller input storage, changed
+coordinates with equal nnz, full-versus-lower layouts, matching numeric updates,
+ordered and reordered calls, initialized and uninitialized destinations, f32,
+and structural-error output preservation. It runs in native tests, x86 release
+checks, Miri, and the isolated extracted-package consumer. The regression-first
+baseline demonstrated a Miri invalid read from an empty numeric slice.
+
 ## Validation
 
 The repository currently uses several complementary checks rather than treating `unsafe` review as sufficient by itself:
