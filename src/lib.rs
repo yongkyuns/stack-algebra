@@ -160,35 +160,18 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         })
     }
 
-    /// Returns a raw pointer to the underlying data.
-    #[inline]
-    fn as_ptr(&self) -> *const T {
-        self.data.as_ptr() as *const T
-    }
-
-    /// Returns an unsafe mutable pointer to the underlying data.
-    #[inline]
-    fn as_mut_ptr(&mut self) -> *mut T {
-        self.data.as_mut_ptr() as *mut T
-    }
-
     /// Views the underlying data as a contiguous column-major slice.
     ///
     /// Element `(row, column)` is at `column * M + row`.
     #[inline]
     pub fn as_slice(&self) -> &[T] {
-        // SAFETY: `Matrix` is `repr(C)` with an array-of-arrays layout, so its
-        // elements are contiguous in column-major order and initialized.
-        unsafe { slice::from_raw_parts(self.as_ptr(), M * N) }
+        self.data.as_flattened()
     }
 
     /// Views the underlying data as a mutable contiguous column-major slice.
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        // SAFETY: `Matrix` is `repr(C)` with an array-of-arrays layout, so its
-        // elements are contiguous in column-major order and initialized. The
-        // exclusive borrow guarantees unique access for the returned slice.
-        unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), M * N) }
+        self.data.as_flattened_mut()
     }
 
     /// Converts every matrix element to `U` using Rust's primitive cast semantics.

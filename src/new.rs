@@ -285,18 +285,7 @@ impl<T, const M: usize, const N: usize> Matrix<M, N, MaybeUninit<T>> {
     /// Create a new matrix with uninitialized contents.
     #[inline]
     pub(crate) fn uninit() -> Self {
-        // SAFETY: The `assume_init` is safe because the type we are claiming to
-        // have initialized here is a bunch of `MaybeUninit`s, which do not
-        // require initialization. Additionally, `Matrix` is `repr(C)` with an
-        // array-of-arrays representation.
-        //
-        // Note: this is not the most ideal way of doing this. In the future
-        // when Rust allows inline const expressions we might be able to use
-        // `Self { data: [const { MaybeUninit::<T>::uninit() }; M] ; N] }`
-        //
-        // See https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#initializing-an-array-element-by-element
-        let matrix = MaybeUninit::uninit();
-        unsafe { matrix.assume_init() }
+        Self::from_fn(|_, _| MaybeUninit::uninit())
     }
 
     /// Assumes the data is initialized and extracts each element as `T`.
