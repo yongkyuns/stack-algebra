@@ -51,7 +51,7 @@ The manifest version is `0.3.0` for release preparation. This is not a publicati
 - Arbitrary/padded strides remain on the generic zero-copy path.
 - `axpy_in_place`, `axpy_into`, and `linear_combination_into` cover common estimation/control forms.
 - Focused fused-operation benchmarks are part of regression triage.
-- Representative EKF, mapped least-squares, and embedded storage-budget examples execute in normal CI and serve as workload probes for later performance/API work.
+- Small Kalman, mapped least-squares, and embedded storage-budget examples execute in normal CI to teach library usage. Application-scale performance probes remain separate.
 
 ### Embedded/resource qualification
 
@@ -92,7 +92,7 @@ A named physical embedded target measurement is **not a `0.3` release blocker**.
 
 ## Follow-up work
 
-- Use the representative workload examples to decide whether GEMM-like accumulation materially reduces temporaries/runtime.
+- Use representative consumer workloads, not small teaching examples alone, to decide whether GEMM-like accumulation materially reduces temporaries/runtime.
 - Add broader leading-dimension/layout kernels only with measured benefit.
 - Add sparse symbolic/workspace preflight sizing where it materially improves fixed-capacity planning.
 - Add another ISA family only with maintainable validation.

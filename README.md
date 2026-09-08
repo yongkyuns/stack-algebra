@@ -85,7 +85,7 @@ bounded.resize_zeroed(4, 4).unwrap();
 
 Dense factors support reusable solve/output paths, and mapped contiguous column-major inputs can reuse the optimized owned-matrix kernels without copying. Padded or arbitrary-stride views remain zero-copy and use the generic view path rather than silently materializing temporary matrices.
 
-The repository also keeps executable examples for a Joseph-form EKF measurement update, mapped QR least squares, and compile-time embedded storage budgeting; normal CI executes all three. For broader guidance, see [Getting started](docs/getting-started.md), [Tutorials](docs/tutorials.md), [API usage](docs/api-usage.md), and [Use cases](docs/use-cases.md).
+The repository keeps three executable teaching examples: a [two-state position/velocity Kalman filter](examples/kalman_1d.rs) with scalar position observations, mapped QR least squares, and compile-time embedded storage budgeting. Normal CI executes all three. They demonstrate library usage, not full navigation systems or representative performance baselines. For model assumptions, expected output, and other guidance, see [Tutorials](docs/tutorials.md), [Getting started](docs/getting-started.md), [API usage](docs/api-usage.md), and [Use cases](docs/use-cases.md).
 
 ## Validation and performance evidence
 

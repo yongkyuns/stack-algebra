@@ -47,7 +47,7 @@ This roadmap reflects the `0.3.0` source being prepared for release; publication
 
 - CI covers formatting, Clippy, host tests, docs, API/semver checks, Miri, cross-target builds, native AArch64 tests, and representative QEMU execution.
 - Rust 1.87 is the declared MSRV and is built in CI for both `no_std` and `std` library configurations.
-- Three executable robotics/embedded examples are compiled on every PR and serve as workload probes for future API decisions.
+- Three executable teaching examples run on every PR and demonstrate isolated library operations rather than complete navigation/control applications or performance baselines.
 - Cortex-M qualification records isolated code/static size and painted-stack high-water marks with source/tool provenance and per-workload regression budgets on a pinned toolchain.
 - A physical Cortex-M DWT timing harness exists and is kept buildable, but no named-board timing result is currently claimed.
 - Release artifact qualification captures the crate package, generated dependency lock, public API listing, rustdoc JSON, dependency metadata, and provenance.
@@ -72,7 +72,7 @@ A physical board measurement is desirable follow-up evidence, but it is **not a 
 Work should be workload-driven rather than assigned to old phase/version buckets.
 
 - Validate optimized kernels on additional maintained architectures before adding new ISA-specific code.
-- Use the runnable estimation examples to decide whether a GEMM-like accumulate API materially reduces temporaries or runtime.
+- Use representative consumer workloads, separately from small teaching examples, to decide whether a GEMM-like accumulate API materially reduces temporaries or runtime.
 - Add broader leading-dimension/layout kernels only when mapped-workload benchmarks show material benefit.
 - Add sparse symbolic/workspace preflight sizing where it improves fixed-capacity planning without hiding allocation.
 - Improve sparse/block ordering or cross-block pivot behavior only where bounded storage semantics remain explicit.
