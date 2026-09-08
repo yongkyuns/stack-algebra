@@ -160,18 +160,6 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
         })
     }
 
-    /// Returns a raw pointer to the underlying data.
-    #[inline]
-    fn as_ptr(&self) -> *const T {
-        self.data.as_ptr() as *const T
-    }
-
-    /// Returns an unsafe mutable pointer to the underlying data.
-    #[inline]
-    fn as_mut_ptr(&mut self) -> *mut T {
-        self.data.as_mut_ptr() as *mut T
-    }
-
     /// Views the underlying data as a contiguous column-major slice.
     ///
     /// Element `(row, column)` is at `column * M + row`.
