@@ -10,10 +10,10 @@ The core types store their data inline and do not require a heap. When the data
 already lives elsewhere, borrowed views let you operate on caller-owned,
 strided, or submatrix storage without first repacking it into a new matrix.
 
-New to matrices or the library? Start with the [guided tutorials](tutorials.md).
-Fit a line to five measurements, then follow a moving object from imperfect
-position readings. The walkthroughs explain the terms and code as you go; no
-navigation or advanced mathematics background is required.
+Start with the [guided tutorials](tutorials.md). Learn a calibration curve
+one observation at a time with fixed-memory RLS, compare the batch QR workflow,
+then follow a moving object from imperfect position readings. Figures and
+terminal output come from executing the examples.
 
 ## When it is a good fit
 
@@ -55,8 +55,8 @@ a deliberate precision boundary.
 
 ## Where to go next
 
-- [Guided tutorials](tutorials.md) introduce matrices, line fitting, and a
-  small Kalman filter through explained code, worked numbers, and experiments.
+- [Guided tutorials](tutorials.md) introduce streaming RLS, batch quadratic
+  fitting, and a Kalman filter through executed results and experiments.
 - [Getting started](getting-started.md) introduces the matrix model, storage,
   precision, and solver choices with small examples.
 - [Choosing an API](api-usage.md) is the practical decision guide for storage,

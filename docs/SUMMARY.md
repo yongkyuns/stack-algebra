@@ -7,8 +7,10 @@
 
 - [Choosing an API](api-usage.md)
 - [Tutorials](tutorials.md)
-  - [Fit a line to measurements](tutorial-mapped-least-squares.md)
+  - [Fit a curve online with RLS](tutorial-recursive-least-squares.md)
+  - [Batch fitting from a borrowed buffer](tutorial-mapped-least-squares.md)
   - [Follow a moving object](tutorial-kalman-1d.md)
+  - [Reproducing tutorial figures](tutorial-assets.md)
 - [Common use cases](use-cases.md)
 
 ## Reference

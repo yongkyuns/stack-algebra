@@ -2,6 +2,8 @@
 /build
 /Cargo.lock
 /tools/eigen-harness/Cargo.lock
+/tools/rls-no-std-check/Cargo.lock
+/tools/rls-no-std-check/target
 /benchmark-report
 /release-artifacts
 docs/assets/accepted-performance-dense-solves.svg
@@ -10,3 +12,5 @@ docs/assets/benchmark-reference/*.svg
 docs/generated/benchmark-*.md
 docs/generated/benchmark-snapshot.csv
 __pycache__/
+docs/generated/tutorials/
+docs/generated/rls/

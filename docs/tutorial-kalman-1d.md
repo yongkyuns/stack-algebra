@@ -66,7 +66,7 @@ position reading help us adjust velocity too.
 The example initializes these tables here:
 
 ```rust,noplayground
-{{#include ../examples/kalman_1d.rs:63:65}}
+{{#include ../examples/kalman_1d.rs:initial}}
 ```
 
 `zeros()` fills the state with zeros. `eye()` creates an **identity matrix**:
@@ -88,7 +88,7 @@ operations, but you do not need to read it before continuing.
 The example also chooses fixed readings and uncertainty settings:
 
 ```rust,noplayground
-{{#include ../examples/kalman_1d.rs:15:18}}
+{{#include ../examples/kalman_1d.rs:inputs}}
 ```
 
 `DT` is the time between readings: one second. `MEASUREMENT_VARIANCE` describes
@@ -139,7 +139,7 @@ and add them. The first row gives `1*position + dt*velocity`. The second gives
 Here is the prediction helper:
 
 ```rust,noplayground
-{{#include ../examples/kalman_1d.rs:22:35}}
+{{#include ../examples/kalman_1d.rs:predict}}
 ```
 
 [`from_rows`](api/stack_algebra/struct.Matrix.html#method.from_rows) lets us
@@ -218,7 +218,7 @@ should not blindly replace our prediction with it. The **gain** tells us how
 much to adjust each state entry, based on the uncertainties we have tracked.
 
 ```rust,noplayground
-{{#include ../examples/kalman_1d.rs:43:51}}
+{{#include ../examples/kalman_1d.rs:gain}}
 ```
 
 `state[(0, 0)]` is the first state entry because indexing starts at zero. The
@@ -261,7 +261,7 @@ table that no longer describes the calculation we just performed.
 The example uses this formula, called the **Joseph form**:
 
 ```rust,noplayground
-{{#include ../examples/kalman_1d.rs:53:58}}
+{{#include ../examples/kalman_1d.rs:covariance}}
 ```
 
 You do not need to derive it to follow the example. There are two
@@ -280,6 +280,14 @@ contribution; it is not the measured position difference.
 Position variance is now about `0.222`, down from the predicted `2.01`.
 Velocity variance has also decreased. The reading added information, but
 neither estimate has become perfectly certain.
+
+![Prediction, reading, and correction at the same instant, on a shared position scale with one-standard-deviation uncertainty bands.](generated/tutorials/kalman-first-update.svg)
+
+This diagram uses intermediate values exported by the actual Rust execution.
+The three rows describe the same instant, not three successive positions.
+Band widths are the square roots of exported marginal variances; they express
+assumed uncertainty, not the cart's size or a measured error. Only position
+is measured. Velocity is inferred through the model and covariance.
 
 <details>
 <summary>Optional: read the Joseph formula</summary>
@@ -304,34 +312,41 @@ small numerical tolerances. The values shown in this walkthrough are rounded;
 
 The loop repeats the same two actions for each reading: predict first, then
 correct. The first reading belongs to time `1` second, not time zero.
+The loop body captures copies of the predicted state and covariance for
+reporting before the correction changes them:
 
 ```rust,noplayground
-{{#include ../examples/kalman_1d.rs:67:78}}
+{{#include ../examples/kalman_1d.rs:cycle}}
 ```
 
+`update_position` returns the innovation, its variance, and the gain it already
+used. Reporting does not compute a second update. In the complete program,
 `enumerate()` supplies the step number, starting at zero, so `step + 1`
 counts the elapsed one-second intervals. `println!` displays the results;
 `{:.3}` means three digits after the decimal point.
 
 ```text
-time_s measured_m position_m velocity_m_s
-1 1.200 1.067 0.542
-2 1.800 1.763 0.647
-3 3.100 2.921 0.922
-4 3.900 3.881 0.940
-5 5.200 5.057 1.042
-6 5.900 5.980 0.990
-7 7.100 7.047 1.024
-8 8.000 8.029 1.006
-9 8.800 8.897 0.945
-10 10.100 9.994 1.012
+{{#include generated/tutorials/kalman_1d.txt}}
 ```
+
+The output block above is captured from the running example during the
+documentation build, rather than maintained as a separate table. The worked
+arithmetic earlier on this page describes the checked-in teaching inputs.
 
 Read the first row as: “after one second, the reading was `1.200` metres;
 our position estimate is `1.067` metres and our velocity estimate is `0.542`
 m/s.” The position estimate need not equal the reading. By the last step,
 the estimated velocity is near the roughly one metre per second suggested
 by this particular sequence.
+
+![The ten position readings and post-correction position estimates from the running example.](generated/tutorials/kalman-position.svg)
+
+![Post-correction velocity estimates inferred from position readings, with no velocity measurements or ground-truth velocity added.](generated/tutorials/kalman-velocity.svg)
+
+The lines join discrete estimates; they do not represent extra measurements.
+Both figures use the [full-precision CSV export](generated/tutorials/kalman_1d.csv).
+The [provenance file](generated/tutorials/provenance.json) records the executed
+revision, toolchain, commands, source hashes, and output hashes.
 
 These are estimates from chosen assumptions, not proof of the cart's true
 motion. A more complicated application needs its own model and checks.
@@ -387,18 +402,31 @@ cargo test --release --no-default-features --test kalman_1d
 
 </details>
 
+## Reproduce the figures
+
+```sh
+cargo run --quiet --example kalman_1d --no-default-features -- --csv
+python3 scripts/generate_tutorial_assets.py
+```
+
+The CSV includes the input settings, initial state and covariance, predicted
+and corrected state and covariance, innovation, and gain. See
+[how tutorial assets are built](tutorial-assets.md) for the schema and
+re-execution checks. No plotting library or second Kalman implementation is
+required.
+
 ## Complete runnable example
 
 This listing is taken directly from the example file. The `use` line brings
-`Matrix` into scope. `pub(crate)` lets tests that include this file call the
-helpers, and `#[cfg(not(test))]` leaves the printing entry point out of those
-tests. Those details organize the example; they do not add steps to the filter.
+`Matrix` into scope. `pub(crate)` lets the separate tests call the helpers;
+`#[cfg(not(test))]` excludes the printing entry point from those tests. The
+small [reporting module](https://github.com/yongkyuns/stack-algebra/blob/main/examples/support/tutorial_output.rs)
+handles command-line arguments and CSV formatting, not filtering mathematics.
+Run the program from the repository using the Cargo command above.
 
 ```rust,noplayground
 {{#include ../examples/kalman_1d.rs}}
 ```
 
-You have stored a pair of estimates, predicted a next value, used a reading
-to correct it, and repeated the process. Return to the
-[tutorial overview](tutorials.md), or practice a different use of matrices
-with [the line-fitting example](tutorial-mapped-least-squares.md).
+Return to the [tutorial overview](tutorials.md), or see
+[Choosing an API](api-usage.md) for larger solves, views, and reusable storage.
