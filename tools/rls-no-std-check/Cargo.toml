@@ -1,0 +1,8 @@
+[package]
+name = "rls-no-std-check"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+stack-algebra = { path = "../..", default-features = false }

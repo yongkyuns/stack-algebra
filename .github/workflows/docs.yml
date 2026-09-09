@@ -23,6 +23,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt
+          targets: thumbv7em-none-eabihf
 
       - uses: actions/setup-python@v5
         with:
@@ -33,13 +34,23 @@ jobs:
           mdbook-version: '0.4.52'
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: |
+          cargo fmt --all -- --check
+          cargo fmt --manifest-path tools/rls-no-std-check/Cargo.toml -- --check
 
       - name: Test tutorial export validation and rendering
-        run: python3 -m unittest discover -s scripts -p 'test_tutorial_assets.py' -v
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_tutorial_assets.py' -v
+          python3 -m unittest discover -s scripts -p 'test_rls_assets.py' -v
 
       - name: Test numerical tutorial helpers
-        run: cargo test --no-default-features --test kalman_1d --test mapped_least_squares
+        run: |
+          cargo test --no-default-features --test kalman_1d --test mapped_least_squares --test recursive_least_squares
+          cargo test --features std --test recursive_least_squares
+          cargo test --release --no-default-features --test recursive_least_squares
+
+      - name: Compile the same RLS helper without std or alloc for Cortex-M
+        run: cargo check --manifest-path tools/rls-no-std-check/Cargo.toml --target thumbv7em-none-eabihf
 
       - name: Test documentation examples with all features
         run: cargo test --doc --all-features
@@ -51,7 +62,9 @@ jobs:
         run: ./scripts/build_docs.sh
 
       - name: Re-execute tutorials and verify reproducible assets
-        run: python3 scripts/generate_tutorial_assets.py --check
+        run: |
+          python3 scripts/generate_tutorial_assets.py --check
+          python3 scripts/generate_rls_assets.py --check
 
       - name: Check guide links and API coverage
         run: python3 scripts/check_docs.py --site build/site
@@ -61,6 +74,8 @@ jobs:
           cat docs/generated/tutorials/mapped_least_squares.csv
           cat docs/generated/tutorials/kalman_1d.csv
           cat docs/generated/tutorials/provenance.json
+          cat docs/generated/rls/trace.csv
+          cat docs/generated/rls/provenance.json
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
