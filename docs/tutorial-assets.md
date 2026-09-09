@@ -19,7 +19,7 @@ python3 scripts/generate_tutorial_assets.py --check
 ```
 
 The first command executes both examples with the library's default features
-disabled and writes `docs/generated/tutorials/`. The second executes both
+disabled and writes `docs/generated/tutorials/`. The second executes them
 again and requires identical files, including the provenance manifest. The
 combined documentation build also runs generation before mdBook; running
 `mdbook build docs` alone on a clean checkout is not sufficient.
@@ -27,23 +27,36 @@ combined documentation build also runs generation before mdBook; running
 The renderer uses only Python's standard library and writes SVG directly.
 There are no numerical or plotting dependencies to install. The documentation
 workflow pins its Rust and Python versions and runner image family. The SVGs
-have text alternatives and distinguish observations from estimates using
-marker shapes, not color alone. The white canvas keeps them readable in the
-book's light and dark themes.
+have text alternatives and distinguish observations, fits, and references by
+marker shapes and line styles, not color alone. The white canvas keeps them
+readable in the book's light and dark themes.
 
 ## Export contract
 
-Normal example commands retain their human-readable output. Add `-- --csv`
-to request a CSV header followed by numeric rows:
+Normal example commands print human-readable output. Add `-- --csv` to
+request a CSV header followed by numeric rows. The quadratic example also
+accepts `-- --curve-csv` for its separate dense plotting grid:
 
 ```sh
 cargo run --quiet --no-default-features --example mapped_least_squares -- --csv
+cargo run --quiet --no-default-features --example mapped_least_squares -- --curve-csv
 cargo run --quiet --no-default-features --example kalman_1d -- --csv
 ```
 
-Both formats use the same calculation path. The line-fit exporter reports
-inputs, fitted values, residuals, coefficients, and the residual norm. The
-Kalman exporter reports time and noise settings, initial conditions,
+The quadratic example uses one calculation path for all three reporting modes.
+Its observation export contains `x`, `observed_y`, `reference_y`, injected
+`noise`, `fitted_y`, `residual`, fitted coefficients `a,b,c`, synthetic reference
+coefficients `reference_a,reference_b,reference_c`, `residual_norm`, and
+`sample_count`. Coefficient order is `[x², x, 1]`. Inputs and outputs have no
+assigned physical units in this synthetic regression example.
+
+The curve export contains `x,fitted_y,reference_y,sample_count`. Rust evaluates
+both curves at 201 inputs across the observation interval; those are plotting
+points, not additional measurements used in fitting. The generator captures
+this stream as `mapped_least_squares_curve.csv`. The provenance schema is now
+version 2; the older straight-line schema is deliberately not accepted.
+
+The Kalman exporter reports time and noise settings, initial conditions,
 predicted and corrected state and covariance, innovation, innovation variance,
 and the two gain entries. `update_position` returns the intermediate values
 it used; the reporter does not calculate another correction.
@@ -51,40 +64,42 @@ it used; the reporter does not calculate another correction.
 CSV values use 17 digits after the decimal point in scientific notation.
 `f32` values are promoted exactly to `f64` for printing; this does not add
 precision to the filter. Initial conditions and fixed settings are repeated
-on each row so each record is self-describing. `sample_count` detects
-truncated exports. The parser requires the exact header, column order, finite
-values, and a complete set of rows; changes to the schema require an explicit
-renderer/test update.
+on each observation row. `sample_count` detects truncated exports and refers
+to the number of rows in that particular stream (40 observations or 201 curve
+points for the quadratic). The parser requires the exact header, column order,
+finite values, and a complete set of rows; schema changes require explicit
+renderer and test updates.
 
-`p00` and `p11` are the position and velocity variances, in m² and (m/s)²;
-`p01` and `p10` are the shared covariance in m²/s. The prefixes `initial_`
-and `predicted_` distinguish snapshots; unprefixed covariance entries and
-`position_m`/`velocity_m_s` are post-correction. The position gain is
-dimensionless; `velocity_gain` has units s⁻¹. `innovation_variance` and
-`measurement_variance` are in m²; `acceleration_variance` is in (m/s²)².
+For the Kalman data, `p00` and `p11` are position and velocity variances, in m²
+and (m/s)²; `p01` and `p10` are shared covariance in m²/s. Prefixes `initial_`
+and `predicted_` distinguish snapshots; unprefixed covariance and
+`position_m`/`velocity_m_s` are post-correction. Position gain is dimensionless;
+`velocity_gain` has units s⁻¹. Innovation and measurement variances are in m²;
+acceleration variance is in (m/s²)².
 
 ## What the renderer may do
 
-The renderer may map exported values to axes, connect samples, format labels,
-and take the square root of a variance to show a standard-deviation interval.
-It does not fit a line, solve a linear system, or propagate a Kalman filter.
-The first-update diagram uses a shared position scale and labels its bands as
-marginal uncertainty, not ground truth. No true trajectory or measured velocity
-is invented for the current fixed-input example.
+The renderer maps exported values to axes, joins exported points, formats
+labels, and takes square roots of variances to show standard-deviation bands.
+It does not fit coefficients, solve a system, evaluate a new polynomial grid,
+or propagate a Kalman filter. Its consistency validator checks polynomial
+identities against the exports but never uses those checks as plotting data.
 
-The main line-fit chart and the separate residual chart have distinct, labelled
-axes. This makes small differences visible without exaggerating the main plot.
-The worked arithmetic in the prose remains an explanation of the checked-in
-teaching inputs; modifying a tutorial scenario also requires reviewing that
-prose and its numerical tests.
+The quadratic reference is explicitly synthetic and generated in Rust. It is
+not a measured trajectory or a fitted result. The residuals are observed minus
+fitted, not the injected noise. The main and residual plots have distinct,
+labelled axes. The Kalman example supplies no true trajectory or velocity
+measurement, so none is invented. Its first-update diagram uses one shared
+position scale and labels the bands as marginal uncertainty, not actual error.
 
 ## Validation and provenance
 
-Generation checks schemas, finite values, sample counts, residual consistency,
-correction diagnostics, and covariance validity. It compares the actual
-human-readable stdout to the formatted CSV values. These consistency checks
-are not a replacement for the existing independent Rust numerical tests, which
-the documentation workflow also runs.
+Generation checks schemas, finite values, counts, residual consistency,
+polynomial coefficients and reference metadata, the dense curve's interval and
+grid, correction diagnostics, and covariance validity. It compares actual
+human-readable stdout with formatted CSV values. These consistency checks are
+not a replacement for the independent Rust numerical tests, which the
+documentation workflow also runs.
 
 Each build records the executed Git revision and tree, dirty-worktree status,
 source hashes (including the library implementation), compiler details, Cargo
@@ -95,7 +110,8 @@ revision, which may be GitHub's test merge commit rather than the branch head.
 
 The [provenance manifest](generated/tutorials/provenance.json),
 [resolved Cargo.lock](generated/tutorials/Cargo.lock),
-[line-fit data](generated/tutorials/mapped_least_squares.csv), and
+[quadratic observation data](generated/tutorials/mapped_least_squares.csv),
+[quadratic curve data](generated/tutorials/mapped_least_squares_curve.csv), and
 [Kalman data](generated/tutorials/kalman_1d.csv) are published with the site.
 The lockfile is generated only when absent; execution then uses `--locked`.
 To replay an older build, use its source revision, toolchain, and saved
@@ -116,4 +132,6 @@ python3 -m unittest discover -s scripts -p 'test_tutorial_assets.py' -v
 ```
 
 Those tests use synthetic fixtures only. The production documentation command
-has no fixture mode and always executes Rust.
+has no fixture mode and always executes Rust. Tests also verify that changing
+an exported interior grid point changes the drawing: the renderer cannot
+silently substitute a curve calculated from its own coefficients.
