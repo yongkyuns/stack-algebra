@@ -56,7 +56,8 @@ pub(crate) fn update_position(
         [covariance[(0, 0)] / innovation_variance],
         [covariance[(1, 0)] / innovation_variance],
     ]);
-    state.axpy_in_place(innovation, &gain); // state += gain * innovation
+    // state += gain * innovation
+    state.axpy_in_place(innovation, &gain);
     // ANCHOR_END: gain
 
     // ANCHOR: covariance

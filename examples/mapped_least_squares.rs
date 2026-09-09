@@ -46,7 +46,8 @@ fn main() -> std::io::Result<()> {
     // Evaluate A * [a, b]^T directly from the same map into caller-owned output.
     let mut fitted = Matrix::<5, 1, f64>::zeros();
     design.matvec_into(&coefficients, &mut fitted);
-    let residuals = observations - fitted; // observed minus fitted
+    // observed minus fitted
+    let residuals = observations - fitted;
     // ANCHOR_END: evaluate
     let residual_norm = residuals.norm();
 
