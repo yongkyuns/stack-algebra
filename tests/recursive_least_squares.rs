@@ -1,17 +1,20 @@
 //! Same estimator as the tutorial, compared to a different batch QR algorithm.
+#[allow(dead_code)]
+#[path = "../examples/support/quadratic_data.rs"]
+mod data;
 #[path = "../examples/support/quadratic_rls.rs"]
 mod rls;
-#[allow(dead_code)]
-#[path = "../examples/mapped_least_squares.rs"]
-mod batch;
 
 use rls::{QuadraticRls, RlsError};
 use stack_algebra::{ColPivHouseholderQr, Matrix, MatrixScalar, Real};
 
 fn sample(index: usize) -> (f64, f64) {
-    let row = (17 * index) % batch::SAMPLE_COUNT;
-    let x = batch::sample_x(row);
-    (x, batch::reference_y(x) + batch::NOISE_SCALE * batch::NOISE[row])
+    let row = (17 * index) % data::SAMPLE_COUNT;
+    let x = data::sample_x(row);
+    (
+        x,
+        data::reference_y(x) + data::NOISE_SCALE * data::NOISE[row],
+    )
 }
 
 fn prefix_parity<T: Real + MatrixScalar>(forgetting: f64, tolerance: f64) {
@@ -21,7 +24,7 @@ fn prefix_parity<T: Real + MatrixScalar>(forgetting: f64, tolerance: f64) {
     let scale = convert(3.0);
     let lambda = convert(forgetting);
     let mut online = QuadraticRls::<T>::new(scale, delta, lambda, initial).unwrap();
-    for count in 1..=batch::SAMPLE_COUNT {
+    for count in 1..=data::SAMPLE_COUNT {
         let (x, y) = sample(count - 1);
         online.update(convert(x), convert(y)).unwrap();
         // Three prior rows + observed prefix; remaining rows are zero-weight padding.
@@ -48,7 +51,10 @@ fn prefix_parity<T: Real + MatrixScalar>(forgetting: f64, tolerance: f64) {
         let actual = online.normalized_coefficients();
         for j in 0..3 {
             let error = (actual[(j, 0)].to_f64().unwrap() - expected[(j, 0)]).abs();
-            assert!(error < tolerance, "prefix {count}, coefficient {j}: error {error}");
+            assert!(
+                error < tolerance,
+                "prefix {count}, coefficient {j}: error {error}"
+            );
         }
         assert_eq!(online.samples(), count);
     }
@@ -99,6 +105,27 @@ fn invalid_inputs_and_overflow_reject_atomically_then_recover() {
     }
 }
 
+fn staged_overflow<T: Real + MatrixScalar>() {
+    let large = T::max_value() * T::from(0.9).unwrap();
+    let initial = Matrix::from_columns([[T::zero(), T::zero(), large]]);
+    let mut estimator = QuadraticRls::new(T::one(), T::one(), T::one(), initial).unwrap();
+    let before = estimator;
+    // Finite inputs and zero innovation, but the candidate's transformed RHS overflows.
+    let error = estimator.update(T::zero(), large).err();
+    assert_eq!(error, Some(RlsError::NumericalBreakdown));
+    assert!(estimator == before);
+    let mut control = before;
+    assert!(estimator.update(T::zero(), T::zero()).is_ok());
+    assert!(control.update(T::zero(), T::zero()).is_ok());
+    assert!(estimator == control);
+}
+
+#[test]
+fn late_numerical_failure_preserves_state_in_both_precisions() {
+    staged_overflow::<f32>();
+    staged_overflow::<f64>();
+}
+
 #[test]
 fn invalid_configuration_is_rejected() {
     for bad in [0.0_f64, -1.0, f64::NAN, f64::INFINITY] {
@@ -127,10 +154,10 @@ fn repeated_inputs_do_not_magically_identify_all_coefficients() {
 fn no_forgetting_is_order_independent_with_the_same_prior() {
     let mut left = QuadraticRls::new(3.0_f64, 0.01, 1.0, Matrix::zeros()).unwrap();
     let mut right = left;
-    for i in 0..batch::SAMPLE_COUNT {
+    for i in 0..data::SAMPLE_COUNT {
         let (x, y) = sample(i);
         left.update(x, y).unwrap();
-        let (x, y) = sample(batch::SAMPLE_COUNT - 1 - i);
+        let (x, y) = sample(data::SAMPLE_COUNT - 1 - i);
         right.update(x, y).unwrap();
     }
     assert!((left.coefficients() - right.coefficients()).norm() < 1e-10);

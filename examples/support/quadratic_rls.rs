@@ -58,7 +58,13 @@ impl<T: Real + MatrixScalar> QuadraticRls<T> {
             sqrt_forgetting: forgetting.sqrt(),
             samples: 0,
         };
-        if !estimator.finite_factor() || !estimator.coefficients().as_slice().iter().all(|v| v.is_finite()) {
+        if !estimator.finite_factor()
+            || !estimator
+                .coefficients()
+                .as_slice()
+                .iter()
+                .all(|v| v.is_finite())
+        {
             return Err(RlsError::InvalidConfiguration);
         }
         Ok(estimator)
@@ -94,7 +100,11 @@ impl<T: Real + MatrixScalar> QuadraticRls<T> {
 
     fn finite_factor(&self) -> bool {
         self.r.as_slice().iter().all(|v| v.is_finite())
-            && self.transformed_rhs.as_slice().iter().all(|v| v.is_finite())
+            && self
+                .transformed_rhs
+                .as_slice()
+                .iter()
+                .all(|v| v.is_finite())
             && (0..3).all(|j| self.r[(j, j)] > T::zero())
     }
 
@@ -112,7 +122,10 @@ impl<T: Real + MatrixScalar> QuadraticRls<T> {
         }
         // Stage the complete update. Rejection never partially changes self.
         let mut next = *self;
-        next.samples = self.samples.checked_add(1).ok_or(RlsError::SampleCountOverflow)?;
+        next.samples = self
+            .samples
+            .checked_add(1)
+            .ok_or(RlsError::SampleCountOverflow)?;
         for value in next.r.as_mut_slice() {
             *value = *value * self.sqrt_forgetting;
         }
@@ -128,11 +141,11 @@ impl<T: Real + MatrixScalar> QuadraticRls<T> {
             }
             let cosine = next.r[(j, j)] / radius;
             let sine = row[j] / radius;
-            for col in j..3 {
+            for (col, incoming) in row.iter_mut().enumerate().skip(j) {
                 let old = next.r[(j, col)];
-                let incoming = row[col];
-                next.r[(j, col)] = cosine * old + sine * incoming;
-                row[col] = cosine * incoming - sine * old;
+                let value = *incoming;
+                next.r[(j, col)] = cosine * old + sine * value;
+                *incoming = cosine * value - sine * old;
             }
             next.r[(j, j)] = radius;
             row[j] = T::zero();
@@ -148,7 +161,11 @@ impl<T: Real + MatrixScalar> QuadraticRls<T> {
             return Err(RlsError::NumericalBreakdown);
         }
         *self = next;
-        Ok(Update { prediction_before, innovation, coefficients })
+        Ok(Update {
+            prediction_before,
+            innovation,
+            coefficients,
+        })
     }
     // ANCHOR_END: update
 }
