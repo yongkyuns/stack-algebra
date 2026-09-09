@@ -77,11 +77,18 @@ fn predictions_and_residuals_match_scalar_evaluation_and_normality_conditions() 
     let mut fitted = Matrix::<SAMPLE_COUNT, 1, f64>::zeros();
     design.matvec_into(&coefficients, &mut fitted);
     let residuals = observations - fitted;
-    let [a, b, c] = [coefficients[(0, 0)], coefficients[(1, 0)], coefficients[(2, 0)]];
+    let [a, b, c] = [
+        coefficients[(0, 0)],
+        coefficients[(1, 0)],
+        coefficients[(2, 0)],
+    ];
     for row in 0..SAMPLE_COUNT {
         let x = sample_x(row);
         assert_close(fitted[(row, 0)], (a * x + b) * x + c);
-        assert_close(residuals[(row, 0)], observations[(row, 0)] - fitted[(row, 0)]);
+        assert_close(
+            residuals[(row, 0)],
+            observations[(row, 0)] - fitted[(row, 0)],
+        );
     }
     assert!(residuals.norm() > 3.0);
     for column in 0..3 {
