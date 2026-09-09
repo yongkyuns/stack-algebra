@@ -15,11 +15,18 @@ permissions:
 jobs:
   build:
     name: Build documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Match the repository's pinned embedded reference toolchain.
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
 
       - uses: peaceiris/actions-mdbook@v2
         with:
@@ -27,6 +34,12 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      - name: Test tutorial export validation and rendering
+        run: python3 -m unittest discover -s scripts -p 'test_tutorial_assets.py' -v
+
+      - name: Test numerical tutorial helpers
+        run: cargo test --no-default-features --test kalman_1d --test mapped_least_squares
 
       - name: Test documentation examples with all features
         run: cargo test --doc --all-features
@@ -37,14 +50,24 @@ jobs:
       - name: Build combined guide and API site
         run: ./scripts/build_docs.sh
 
+      - name: Re-execute tutorials and verify reproducible assets
+        run: python3 scripts/generate_tutorial_assets.py --check
+
       - name: Check guide links and API coverage
         run: python3 scripts/check_docs.py --site build/site
+
+      - name: Record executed tutorial data
+        run: |
+          cat docs/generated/tutorials/mapped_least_squares.csv
+          cat docs/generated/tutorials/kalman_1d.csv
+          cat docs/generated/tutorials/provenance.json
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
         with:
           name: stack-algebra-docs
           path: build/site
+          if-no-files-found: error
 
   publish:
     name: Publish documentation site

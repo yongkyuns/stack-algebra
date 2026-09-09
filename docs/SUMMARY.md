@@ -9,6 +9,7 @@
 - [Tutorials](tutorials.md)
   - [Fit a line to measurements](tutorial-mapped-least-squares.md)
   - [Follow a moving object](tutorial-kalman-1d.md)
+  - [Reproducing tutorial figures](tutorial-assets.md)
 - [Common use cases](use-cases.md)
 
 ## Reference
