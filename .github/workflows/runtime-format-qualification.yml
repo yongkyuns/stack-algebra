@@ -1,0 +1,54 @@
+name: Isolated runtime preparation
+
+on:
+  push:
+    branches: [qualification/runtime-format-20260921]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f2e9832c910e7cf4349a0da07ceb35ed678f4e7a
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Restore unchanged root and format candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, urllib.request
+          source = 'f2e9832c910e7cf4349a0da07ceb35ed678f4e7a'
+          baseline = 'fe0226123bf6cfc7f3344ebe26bb4a11fffc9b0f'
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == source
+          original = subprocess.check_output(['git', 'show', baseline + ':src/lib.rs'], text=True)
+          anchor = 'mod ops;\nmod sparse;'
+          assert original.count(anchor) == 1
+          pathlib.Path('src/lib.rs').write_text(original.replace(anchor, 'mod ops;\npub mod runtime;\nmod sparse;'))
+          subprocess.run(['cargo', 'fmt', '--all'], check=True)
+          subprocess.run(['cargo', 'fmt', '--manifest-path', 'tests/runtime-consumer/Cargo.toml'], check=True)
+          assert pathlib.Path('src/lib.rs').read_text().replace('pub mod runtime;\n', '') == original
+          paths = ['src/lib.rs', 'src/runtime.rs', 'tests/runtime_views.rs', 'tests/runtime-consumer/src/lib.rs']
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
+          assert changed <= set(paths), changed
+          tree = subprocess.check_output(['git', 'rev-parse', source + '^{tree}'], text=True).strip()
+          payload = {'base_tree': tree, 'tree': [{'path': path, 'mode': '100644', 'type': 'blob', 'content': pathlib.Path(path).read_text()} for path in paths]}
+          request = urllib.request.Request('https://api.github.com/repos/yongkyuns/stack-algebra/git/trees', data=json.dumps(payload).encode(), method='POST', headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json'})
+          with urllib.request.urlopen(request) as response:
+              result = json.load(response)
+          print('FORMATTED_TREE=' + result['sha'], flush=True)
+          print('QUALIFIED_SOURCE=' + source, flush=True)
+          subprocess.run(['git', 'diff', '--stat'], check=True)
+          PY
+      - run: cargo fmt --all -- --check
+      - run: cargo test --no-default-features --test runtime_views
+      - run: cargo test --no-default-features --lib
+      - run: cargo test --no-default-features --doc runtime
+      - run: cargo clippy --all-targets -- -D warnings
