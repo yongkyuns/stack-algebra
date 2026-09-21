@@ -266,14 +266,13 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
             }
         }
 
-        let max_singular_value = singular_values.iter().copied().fold(T::zero(), T::max);
-        if !max_singular_value.is_finite() {
-            return Err(DecompositionError::NonFinite);
-        }
-        let cutoff = tolerance * max_singular_value;
+        // Rank truncation belongs to rank/solve/pseudoinverse, not factorization.
+        // Otherwise lowering the caller's cutoff cannot recover a small but
+        // representable singular direction. Wide matrices still expose exactly
+        // N - M padded zero columns, as required by this factor's shape contract.
         for column in 0..N {
             let singular_value = singular_values[column];
-            if singular_value > cutoff && singular_value.is_finite() {
+            if column < M && singular_value > T::zero() {
                 for row in 0..M {
                     u[(row, column)] = u[(row, column)] / singular_value;
                 }
@@ -389,7 +388,33 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
     #[inline]
     pub fn pseudo_inverse_with_threshold(&self, threshold: T) -> Matrix<N, M, T> {
         let maximum = self.singular_values.iter().copied().fold(T::zero(), T::max);
-        let cutoff = threshold * maximum;
+        self.pseudo_inverse_at_cutoff(threshold * maximum)
+    }
+
+    /// Computes the Moore-Penrose pseudoinverse using an absolute cutoff.
+    ///
+    /// A singular value is inverted exactly when it is greater than `cutoff`.
+    /// Unlike [`Self::pseudo_inverse_with_threshold`], the cutoff is not scaled
+    /// by the largest singular value. This is useful when a tolerance is given
+    /// in the units of the input matrix. Factorization retains small nonzero
+    /// singular values so this choice is independent of the default rank cutoff.
+    /// Positive infinity discards every direction; zero retains every nonzero
+    /// direction (whose reciprocal may overflow for extremely small values).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `cutoff` is negative or NaN.
+    #[inline]
+    pub fn pseudo_inverse_with_absolute_threshold(&self, cutoff: T) -> Matrix<N, M, T> {
+        assert!(
+            cutoff >= T::zero(),
+            "SVD cutoff must be nonnegative and not NaN"
+        );
+        self.pseudo_inverse_at_cutoff(cutoff)
+    }
+
+    #[inline]
+    fn pseudo_inverse_at_cutoff(&self, cutoff: T) -> Matrix<N, M, T> {
         let mut inverse = Matrix::<N, M, T>::zeros();
         for singular in 0..N {
             let value = self.singular_values[singular];
