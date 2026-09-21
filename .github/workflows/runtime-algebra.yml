@@ -1,0 +1,59 @@
+name: Runtime algebra
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Runtime numerical and borrow contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --no-default-features --test runtime_views
+      - run: cargo test --release --no-default-features --test runtime_views
+      - run: cargo test --no-default-features --doc runtime
+
+  consumer:
+    name: Runtime no_std consumer (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.87.0", stable]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          targets: thumbv7em-none-eabihf,wasm32-unknown-unknown
+      - run: cargo test --manifest-path tests/runtime-consumer/Cargo.toml --lib
+      - run: cargo build --manifest-path tests/runtime-consumer/Cargo.toml --release --target thumbv7em-none-eabihf
+      - run: cargo build --manifest-path tests/runtime-consumer/Cargo.toml --release --target wasm32-unknown-unknown
+
+  miri:
+    name: Runtime view safety (Miri)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - run: cargo miri setup
+      - run: cargo miri test --no-default-features --test runtime_views -- --test-threads=1
