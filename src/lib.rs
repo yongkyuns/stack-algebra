@@ -72,6 +72,7 @@ mod kernels;
 mod new;
 mod num;
 mod ops;
+pub mod runtime;
 mod sparse;
 mod util;
 mod view;
@@ -336,7 +337,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Swaps two rows of this matrix.
     ///
     /// Swapping a valid row with itself leaves the matrix unchanged. Valid row
-    /// indices are also accepted when the matrix has zero columns.
+    /// indices are also accepted when there are zero columns.
     ///
     /// # Panics
     ///
@@ -358,7 +359,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Swaps two columns of this matrix.
     ///
     /// Swapping a valid column with itself leaves the matrix unchanged. Valid
-    /// column indices are also accepted when the matrix has zero rows.
+    /// column indices are also accepted when there are zero rows.
     ///
     /// # Panics
     ///
@@ -383,7 +384,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     where
         T: Clone,
     {
-        Matrix::from_fn(|row, column| self[(column, row)].clone())
+        Matrix::from_fn(|row, column| self[(row, column)].clone())
     }
 
     /// Writes the transpose of this matrix into `output`.

@@ -48,3 +48,5 @@ StaticBlockCscCholeskyPattern|src/block_sparse/symbolic.rs|docs/features.md
 StaticBlockCscCholesky|src/block_sparse/cholesky.rs|docs/features.md
 StaticBlockCscLdltPattern|src/block_sparse/symbolic.rs|docs/features.md
 StaticBlockCscLdlt|src/block_sparse/ldlt.rs|docs/api-usage.md
+MatrixRef|src/runtime.rs|docs/runtime-algebra.md
+MatrixMut|src/runtime.rs|docs/runtime-algebra.md
