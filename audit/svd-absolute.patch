@@ -1,0 +1,124 @@
+diff --git a/src/algebra/svd.rs b/src/algebra/svd.rs
+index bd30d77..2abaec4 100644
+--- a/src/algebra/svd.rs
++++ b/src/algebra/svd.rs
+@@ -266,14 +266,13 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
+             }
+         }
+ 
+-        let max_singular_value = singular_values.iter().copied().fold(T::zero(), T::max);
+-        if !max_singular_value.is_finite() {
+-            return Err(DecompositionError::NonFinite);
+-        }
+-        let cutoff = tolerance * max_singular_value;
++        // Rank truncation belongs to rank/solve/pseudoinverse, not factorization.
++        // Otherwise lowering the caller's cutoff cannot recover a small but
++        // representable singular direction. Wide matrices still expose exactly
++        // N - M padded zero columns, as required by this factor's shape contract.
+         for column in 0..N {
+             let singular_value = singular_values[column];
+-            if singular_value > cutoff && singular_value.is_finite() {
++            if column < M && singular_value > T::zero() {
+                 for row in 0..M {
+                     u[(row, column)] = u[(row, column)] / singular_value;
+                 }
+@@ -389,7 +388,30 @@ impl<const M: usize, const N: usize, T: Real + MatrixScalar> Svd<M, N, T> {
+     #[inline]
+     pub fn pseudo_inverse_with_threshold(&self, threshold: T) -> Matrix<N, M, T> {
+         let maximum = self.singular_values.iter().copied().fold(T::zero(), T::max);
+-        let cutoff = threshold * maximum;
++        self.pseudo_inverse_at_cutoff(threshold * maximum)
++    }
++
++    /// Computes the Moore-Penrose pseudoinverse using an absolute cutoff.
++    ///
++    /// A singular value is inverted exactly when it is greater than `cutoff`.
++    /// Unlike [`Self::pseudo_inverse_with_threshold`], the cutoff is not scaled
++    /// by the largest singular value. This is useful when a tolerance is given
++    /// in the units of the input matrix. Factorization retains small nonzero
++    /// singular values so this choice is independent of the default rank cutoff.
++    /// Positive infinity discards every direction; zero retains every nonzero
++    /// direction (whose reciprocal may overflow for extremely small values).
++    ///
++    /// # Panics
++    ///
++    /// Panics if `cutoff` is negative or NaN.
++    #[inline]
++    pub fn pseudo_inverse_with_absolute_threshold(&self, cutoff: T) -> Matrix<N, M, T> {
++        assert!(cutoff >= T::zero(), "SVD cutoff must be nonnegative and not NaN");
++        self.pseudo_inverse_at_cutoff(cutoff)
++    }
++
++    #[inline]
++    fn pseudo_inverse_at_cutoff(&self, cutoff: T) -> Matrix<N, M, T> {
+         let mut inverse = Matrix::<N, M, T>::zeros();
+         for singular in 0..N {
+             let value = self.singular_values[singular];
+diff --git a/tests/svd_absolute_cutoff.rs b/tests/svd_absolute_cutoff.rs
+new file mode 100644
+index 0000000..5a02581
+--- /dev/null
++++ b/tests/svd_absolute_cutoff.rs
+@@ -0,0 +1,62 @@
++//! Absolute rank-cutoff regressions needed by robotics controller migration.
++use stack_algebra::{matrix, Matrix};
++
++#[test]
++fn f32_factorization_retains_small_nonzero_directions() {
++    let a = matrix![1.0e6_f32, 0.0; 0.0, 1.0e-3];
++    let factor = a.try_svd().unwrap();
++    assert_eq!(factor.rank(), 1); // Default relative rank still excludes it.
++    assert_eq!(factor.singular_values()[1], 1.0e-3);
++    assert_eq!(factor.with_threshold(0.0).rank(), 2);
++    let inverse = factor.pseudo_inverse_with_absolute_threshold(1.0e-6);
++    assert!((a * inverse - Matrix::eye()).norm() < 2.0e-6);
++    assert!(factor.pseudo_inverse()[(1, 1)] == 0.0);
++}
++
++#[test]
++fn tall_qr_reduction_preserves_absolute_cutoff_choice() {
++    let a = matrix![1.0e6_f32, 0.0; 0.0, 1.0e-3; 0.0, 0.0];
++    let factor = a.try_svd().unwrap();
++    let inverse = factor.pseudo_inverse_with_absolute_threshold(1.0e-6);
++    assert!((inverse * a - Matrix::eye()).norm() < 2.0e-6);
++}
++
++#[test]
++fn cutoff_is_absolute_and_strict_and_handles_zero() {
++    let a = matrix![10.0_f64, 0.0; 0.0, 0.25];
++    let factor = a.try_svd().unwrap();
++    assert_eq!(factor.pseudo_inverse_with_absolute_threshold(0.25)[(1, 1)], 0.0);
++    assert_eq!(factor.pseudo_inverse_with_absolute_threshold(0.125)[(1, 1)], 4.0);
++    assert_eq!(factor.pseudo_inverse_with_absolute_threshold(f64::INFINITY), Matrix::zeros());
++    assert_eq!(Matrix::<2, 2, f64>::zeros().try_svd().unwrap()
++        .pseudo_inverse_with_absolute_threshold(0.0), Matrix::zeros());
++}
++
++#[test]
++fn agrees_with_nalgebra_absolute_cutoff_on_scaled_correlated_systems() {
++    for scale in [1.0e-4_f64, 1.0, 1.0e4] {
++        let a = matrix![4.0, 1.0; 1.0, 3.0] * scale;
++        let reference = nalgebra::SMatrix::<f64, 2, 2>::from_column_slice(a.as_slice());
++        for cutoff in [0.0, 1.0e-6, 3.0 * scale, 10.0 * scale] {
++            let expected = reference.pseudo_inverse(cutoff).unwrap();
++            let actual = a.try_svd().unwrap().pseudo_inverse_with_absolute_threshold(cutoff);
++            let error = actual.iter().zip(expected.iter())
++                .map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
++            assert!(error <= 1.0e-10 * (1.0 + expected.norm()));
++        }
++    }
++}
++
++#[test]
++#[should_panic(expected = "SVD cutoff")]
++fn negative_absolute_cutoff_is_rejected() {
++    Matrix::<2, 2, f32>::eye().try_svd().unwrap()
++        .pseudo_inverse_with_absolute_threshold(-1.0);
++}
++
++#[test]
++#[should_panic(expected = "SVD cutoff")]
++fn nan_absolute_cutoff_is_rejected() {
++    Matrix::<2, 2, f32>::eye().try_svd().unwrap()
++        .pseudo_inverse_with_absolute_threshold(f32::NAN);
++}
