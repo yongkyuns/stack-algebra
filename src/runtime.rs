@@ -81,7 +81,9 @@ impl Layout {
     }
 
     fn span(self) -> Result<usize, Error> {
-        self.rows.checked_mul(self.columns).ok_or(Error::SizeOverflow)?;
+        self.rows
+            .checked_mul(self.columns)
+            .ok_or(Error::SizeOverflow)?;
         if self.is_empty() {
             return Ok(0);
         }
@@ -99,7 +101,10 @@ impl Layout {
     fn validate(self, available: usize) -> Result<usize, Error> {
         let required = self.span()?;
         if required > available {
-            return Err(Error::BufferTooShort { required, available });
+            return Err(Error::BufferTooShort {
+                required,
+                available,
+            });
         }
         Ok(required)
     }
@@ -108,8 +113,7 @@ impl Layout {
         if self.is_empty() {
             return Ok(());
         }
-        if (self.rows > 1 && self.row_stride == 0)
-            || (self.columns > 1 && self.column_stride == 0)
+        if (self.rows > 1 && self.row_stride == 0) || (self.columns > 1 && self.column_stride == 0)
         {
             return Err(Error::OverlappingElements);
         }
@@ -158,7 +162,11 @@ impl Layout {
         if row_end > self.rows || column_end > self.columns {
             return Err(Error::BlockOutOfBounds);
         }
-        let layout = Self { rows, columns, ..self };
+        let layout = Self {
+            rows,
+            columns,
+            ..self
+        };
         // Empty edge blocks have no address. Do not calculate a potentially
         // overflowing or beyond-buffer origin for them.
         let offset = if layout.is_empty() {
@@ -210,9 +218,17 @@ impl<'a, T> MatrixRef<'a, T> {
         row_stride: usize,
         column_stride: usize,
     ) -> Result<Self, Error> {
-        let layout = Layout { rows, columns, row_stride, column_stride };
+        let layout = Layout {
+            rows,
+            columns,
+            row_stride,
+            column_stride,
+        };
         let span = layout.validate(data.len())?;
-        Ok(Self { data: &data[..span], layout })
+        Ok(Self {
+            data: &data[..span],
+            layout,
+        })
     }
 
     /// Returns the active `(rows, columns)`.
@@ -227,12 +243,17 @@ impl<'a, T> MatrixRef<'a, T> {
 
     /// Returns a scalar reference, or `None` outside the active rectangle.
     pub fn get(self, row: usize, column: usize) -> Option<&'a T> {
-        self.layout.index(row, column).map(|index| &self.data[index])
+        self.layout
+            .index(row, column)
+            .map(|index| &self.data[index])
     }
 
     /// Transposes the view without moving data.
     pub fn transpose(self) -> Self {
-        Self { data: self.data, layout: self.layout.transpose() }
+        Self {
+            data: self.data,
+            layout: self.layout.transpose(),
+        }
     }
 
     /// Borrows an active submatrix without copying, with block-local indexing.
@@ -245,7 +266,10 @@ impl<'a, T> MatrixRef<'a, T> {
     ) -> Result<Self, Error> {
         let (layout, offset) = self.layout.submatrix(row, column, rows, columns)?;
         let span = layout.span()?;
-        Ok(Self { data: &self.data[offset..offset + span], layout })
+        Ok(Self {
+            data: &self.data[offset..offset + span],
+            layout,
+        })
     }
 }
 
@@ -253,7 +277,8 @@ impl<T> Index<(usize, usize)> for MatrixRef<'_, T> {
     type Output = T;
 
     fn index(&self, (row, column): (usize, usize)) -> &T {
-        self.get(row, column).expect("runtime matrix index out of bounds")
+        self.get(row, column)
+            .expect("runtime matrix index out of bounds")
     }
 }
 
@@ -290,7 +315,11 @@ pub struct MatrixMut<'a, T> {
 
 impl<'a, T> MatrixMut<'a, T> {
     /// Borrows packed column-major storage. Extra trailing elements are untouched.
-    pub fn from_column_major(data: &'a mut [T], rows: usize, columns: usize) -> Result<Self, Error> {
+    pub fn from_column_major(
+        data: &'a mut [T],
+        rows: usize,
+        columns: usize,
+    ) -> Result<Self, Error> {
         Self::from_strides(data, rows, columns, 1, rows)
     }
 
@@ -310,10 +339,18 @@ impl<'a, T> MatrixMut<'a, T> {
         row_stride: usize,
         column_stride: usize,
     ) -> Result<Self, Error> {
-        let layout = Layout { rows, columns, row_stride, column_stride };
+        let layout = Layout {
+            rows,
+            columns,
+            row_stride,
+            column_stride,
+        };
         let span = layout.validate(data.len())?;
         layout.validate_mutable()?;
-        Ok(Self { data: &mut data[..span], layout })
+        Ok(Self {
+            data: &mut data[..span],
+            layout,
+        })
     }
 
     /// Returns the active `(rows, columns)`.
@@ -328,27 +365,40 @@ impl<'a, T> MatrixMut<'a, T> {
 
     /// Creates a shared view limited to this borrow of `self`.
     pub fn as_ref(&self) -> MatrixRef<'_, T> {
-        MatrixRef { data: self.data, layout: self.layout }
+        MatrixRef {
+            data: self.data,
+            layout: self.layout,
+        }
     }
 
     /// Creates an exclusive view limited to this borrow of `self`.
     pub fn reborrow(&mut self) -> MatrixMut<'_, T> {
-        MatrixMut { data: self.data, layout: self.layout }
+        MatrixMut {
+            data: self.data,
+            layout: self.layout,
+        }
     }
 
     /// Returns a scalar reference, or `None` outside the active rectangle.
     pub fn get(&self, row: usize, column: usize) -> Option<&T> {
-        self.layout.index(row, column).map(|index| &self.data[index])
+        self.layout
+            .index(row, column)
+            .map(|index| &self.data[index])
     }
 
     /// Returns an exclusive scalar reference, or `None` outside the active rectangle.
     pub fn get_mut(&mut self, row: usize, column: usize) -> Option<&mut T> {
-        self.layout.index(row, column).map(|index| &mut self.data[index])
+        self.layout
+            .index(row, column)
+            .map(|index| &mut self.data[index])
     }
 
     /// Transposes this exclusive view without moving data or extending its borrow.
     pub fn transpose(self) -> Self {
-        Self { data: self.data, layout: self.layout.transpose() }
+        Self {
+            data: self.data,
+            layout: self.layout.transpose(),
+        }
     }
 
     /// Restricts this exclusive view to a submatrix with block-local indexing.
@@ -361,7 +411,10 @@ impl<'a, T> MatrixMut<'a, T> {
     ) -> Result<Self, Error> {
         let (layout, offset) = self.layout.submatrix(row, column, rows, columns)?;
         let span = layout.span()?;
-        Ok(Self { data: &mut self.data[offset..offset + span], layout })
+        Ok(Self {
+            data: &mut self.data[offset..offset + span],
+            layout,
+        })
     }
 }
 
@@ -369,13 +422,15 @@ impl<T> Index<(usize, usize)> for MatrixMut<'_, T> {
     type Output = T;
 
     fn index(&self, (row, column): (usize, usize)) -> &T {
-        self.get(row, column).expect("runtime matrix index out of bounds")
+        self.get(row, column)
+            .expect("runtime matrix index out of bounds")
     }
 }
 
 impl<T> IndexMut<(usize, usize)> for MatrixMut<'_, T> {
     fn index_mut(&mut self, (row, column): (usize, usize)) -> &mut T {
-        self.get_mut(row, column).expect("runtime matrix index out of bounds")
+        self.get_mut(row, column)
+            .expect("runtime matrix index out of bounds")
     }
 }
 
@@ -391,7 +446,10 @@ fn require_shape(expected: (usize, usize), actual: (usize, usize)) -> Result<(),
 ///
 /// Shape rejection leaves the entire destination unchanged. No scratch buffer
 /// or allocation is needed; the input and destination must be disjoint borrows.
-pub fn copy_into<T: Copy>(input: MatrixRef<'_, T>, output: &mut MatrixMut<'_, T>) -> Result<(), Error> {
+pub fn copy_into<T: Copy>(
+    input: MatrixRef<'_, T>,
+    output: &mut MatrixMut<'_, T>,
+) -> Result<(), Error> {
     require_shape(input.shape(), output.shape())?;
     if output.layout.is_empty() {
         return Ok(());

@@ -337,7 +337,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Swaps two rows of this matrix.
     ///
     /// Swapping a valid row with itself leaves the matrix unchanged. Valid row
-    /// indices are also accepted when there are zero columns.
+    /// indices are also accepted when the matrix has zero columns.
     ///
     /// # Panics
     ///
@@ -359,7 +359,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     /// Swaps two columns of this matrix.
     ///
     /// Swapping a valid column with itself leaves the matrix unchanged. Valid
-    /// column indices are also accepted when there are zero rows.
+    /// column indices are also accepted when the matrix has zero rows.
     ///
     /// # Panics
     ///
@@ -384,7 +384,7 @@ impl<const M: usize, const N: usize, T> Matrix<M, N, T> {
     where
         T: Clone,
     {
-        Matrix::from_fn(|row, column| self[(row, column)].clone())
+        Matrix::from_fn(|row, column| self[(column, row)].clone())
     }
 
     /// Writes the transpose of this matrix into `output`.

@@ -38,7 +38,15 @@ mod tests {
     #[test]
     fn runtime_consumer_executes_both_scalar_paths() {
         let mut result = [0.0_f32; 2];
-        super::multiply(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], &[2.0, -1.0, 0.5], &mut result, 2, 3, 1).unwrap();
+        super::multiply(
+            &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0],
+            &[2.0, -1.0, 0.5],
+            &mut result,
+            2,
+            3,
+            1,
+        )
+        .unwrap();
         assert_eq!(result, [1.5, 6.0]);
         let mut transposed = [0.0_f64; 6];
         super::transpose(&[1.0, 4.0, 2.0, 5.0, 3.0, 6.0], &mut transposed, 2, 3).unwrap();
