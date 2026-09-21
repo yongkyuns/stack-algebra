@@ -1,0 +1,55 @@
+name: Robotics SVD cutoff qualification
+on:
+  push:
+    branches: ["audit/robotics-svd-cutoff"]
+permissions:
+  contents: write
+concurrency:
+  group: robotics-svd-cutoff-audit
+  cancel-in-progress: true
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply authored patch to pinned source
+        run: |
+          cp audit/svd-absolute.patch "$RUNNER_TEMP/svd-absolute.patch"
+          git checkout --detach 625d38d6f47c87f58ff0f428b323a69cef60922c
+          git apply --check "$RUNNER_TEMP/svd-absolute.patch"
+          git apply "$RUNNER_TEMP/svd-absolute.patch"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all
+      - run: cargo test --lib --tests
+      - run: cargo test --doc
+      - run: cargo check --target wasm32-unknown-unknown --lib
+      - run: cargo clippy --lib --tests -- -D warnings
+      - name: Publish implementation-only branch
+        run: |
+          git config user.name 'Yongkyun Shin'
+          git config user.email 'yongkyuns@gmail.com'
+          git add src/algebra/svd.rs tests/svd_absolute_cutoff.rs
+          git diff --cached --check
+          git commit -m 'fix: retain SVD directions and support absolute pseudoinverse cutoffs'
+          git push origin HEAD:refs/heads/fix/svd-absolute-cutoff
+          git rev-parse HEAD | tee "$RUNNER_TEMP/implementation-head.txt"
+      - name: Retain exact patch and result
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/svd-evidence"
+          git diff 625d38d6f47c87f58ff0f428b323a69cef60922c > "$RUNNER_TEMP/svd-evidence/implementation.patch"
+          cp -f "$RUNNER_TEMP/implementation-head.txt" "$RUNNER_TEMP/svd-evidence/" 2>/dev/null || true
+          cp src/algebra/svd.rs tests/svd_absolute_cutoff.rs "$RUNNER_TEMP/svd-evidence/"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: svd-cutoff-evidence
+          path: ${{ runner.temp }}/svd-evidence
+          retention-days: 14
