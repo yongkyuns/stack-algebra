@@ -6,6 +6,7 @@
 ## Guides
 
 - [Choosing an API](api-usage.md)
+- [Runtime-shaped borrowed algebra](runtime-algebra.md)
 - [Tutorials](tutorials.md)
   - [Fit a curve online with RLS](tutorial-recursive-least-squares.md)
   - [Batch fitting from a borrowed buffer](tutorial-mapped-least-squares.md)

@@ -72,6 +72,7 @@ mod kernels;
 mod new;
 mod num;
 mod ops;
+pub mod runtime;
 mod sparse;
 mod util;
 mod view;
